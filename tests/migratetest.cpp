@@ -80,11 +80,36 @@ int main(int argc, char** argv)
     if (!tmp.isValid()) return 1;
 
     QString err;
+
+    const QString mkpdf =
+#ifdef Q_OS_WIN
+        QFileInfo(QCoreApplication::applicationDirPath() + QStringLiteral("/mkpdf.exe"))
+            .absoluteFilePath();
+#else
+        QFileInfo(QCoreApplication::applicationDirPath() + QStringLiteral("/mkpdf"))
+            .absoluteFilePath();
+#endif
+
+    auto generate = [&](const QString& out, bool blankFirst) {
+        QStringList args{out};
+        args << QStringLiteral("--latin");
+        if (blankFirst) args << QStringLiteral("--blank-first");
+        QProcess p;
+        p.start(mkpdf, args);
+        p.waitForFinished(120000);
+        return QFileInfo::exists(out);
+    };
+
+    const QString oldPdf = tmp.path() + "/old.pdf";
+    const QString newPdf = tmp.path() + "/new.pdf";
+    check(generate(oldPdf, false), QStringLiteral("generated the original pdf (%1)").arg(mkpdf));
+    check(generate(newPdf, true), QStringLiteral("generated the revised pdf"));
+
     MuPdfEngine eng;
-    check(eng.open(pdf, &err), QStringLiteral("open %1: %2").arg(pdf, err));
+    check(eng.open(oldPdf, &err), QStringLiteral("open %1: %2").arg(oldPdf, err));
     if (!eng.isOpen()) return 1;
 
-    // ---- notes on pages 1 and 3 of the original (page 1 = index 0) ----
+    // ---- notes on pages 1 and 3 of the original ----
     QVector<Markup> notes;
     for (const Selection& sel : asciiLineSelections(eng, 0, 2)) {
         Markup m;
@@ -95,19 +120,18 @@ int main(int argc, char** argv)
         m.quads = sel.quads;
         notes.append(m);
     }
-    const QVector<Selection> lastPage = asciiLineSelections(eng, 2, 1);
-    if (!lastPage.isEmpty()) {
+    for (const Selection& sel : asciiLineSelections(eng, 2, 1)) {
         Markup m;
         m.id = newId();
         m.page = 2;
         m.type = MarkupType::Highlight;
-        m.text = lastPage.first().text;
-        m.quads = lastPage.first().quads;
+        m.text = sel.text;
+        m.quads = sel.quads;
         notes.append(m);
     }
-    check(notes.size() == 3, QStringLiteral("prepared %1 notes (ascii lines)").arg(notes.size()));
+    check(notes.size() == 3, QStringLiteral("prepared %1 notes").arg(notes.size()));
     for (const Markup& m : notes)
-        std::printf("      note p%d: \"%s\"\n", m.page + 1, qPrintable(m.text.left(50)));
+        std::printf("      note p%d: \"%s\"\n", m.page + 1, qPrintable(m.text.left(48)));
 
     // ---- baseline: migrating against the unchanged file must keep everything ----
     {
@@ -118,26 +142,9 @@ int main(int argc, char** argv)
               QStringLiteral("all notes matched in place (%1)").arg(same.inPlace.size()));
     }
 
-    // ---- build a re-paginated revision: same text, one extra leading page ----
-    const QString revision = tmp.path() + "/revised.pdf";
-    {
-#ifdef Q_OS_WIN
-        const QString mkpdfName = QStringLiteral("mkpdf.exe");
-#else
-        const QString mkpdfName = QStringLiteral("mkpdf");
-#endif
-        const QString mkpdf =
-            QFileInfo(QCoreApplication::applicationDirPath() + QLatin1Char('/') + mkpdfName)
-                .absoluteFilePath();
-        QProcess gen;
-        gen.start(mkpdf, {revision, QStringLiteral("--blank-first")});
-        gen.waitForFinished(60000);
-        check(gen.exitStatus() == QProcess::NormalExit && QFileInfo::exists(revision),
-              QStringLiteral("generated the revised pdf (%1)").arg(mkpdf));
-    }
-
+    // ---- the revision already exists (newPdf); it has one extra leading page ----
     MuPdfEngine revised;
-    check(revised.open(revision, &err), QStringLiteral("open revision: %1").arg(err));
+    check(revised.open(newPdf, &err), QStringLiteral("open revision: %1").arg(err));
     if (!revised.isOpen()) {
         std::printf("\nMIGRATION CHECKS FAILED (revision unreadable)\n");
         return 1;
