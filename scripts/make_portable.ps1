@@ -1,6 +1,6 @@
 # Portable Windows bundle for AdaptNote.
 #
-#   pwsh -File scripts\make_portable.ps1 [-QtDir "C:\Qt\6.4.2\msvc2019_64"]
+#   pwsh -File scripts\make_portable.ps1 [-QtDir "C:\Qt\6.8.3\msvc2022_64"]
 #
 # Produces dist\AdaptNote-<version>-windows-x64.zip containing:
 #   AdaptNote.bat        launcher (data stays inside the folder)
@@ -9,9 +9,10 @@
 #   data\                created on first run (library.db / mirror / images)
 #   samples\             test.pdf + test.epub
 #
-# Requirements on the build machine: CMake, Ninja (or MSVC), Qt 6.4+ MSVC kit,
-# MuPDF built with nmake HAVE_X11=no (pass -DMUPDF_ROOT to cmake) and Python 3 only
-# for the sample EPUB.
+# Requirements on the build machine: CMake, Ninja (or MSVC), Qt 6.8+ MSVC kit
+# (msvc2022_64; 6.5.x does not compile with VS18), MuPDF 1.21.1 built from
+# platform\win32\mupdf.sln with /MD (pass -DMUPDF_ROOT to cmake) and Python 3 only
+# for the sample EPUB. This is exactly what .github/workflows/windows-portable.yml does.
 
 param(
     [string]$QtDir   = $env:QTDIR,

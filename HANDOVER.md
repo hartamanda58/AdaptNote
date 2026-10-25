@@ -59,8 +59,9 @@ QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./p5test test.pdf
 | 完善轮 4 | **脑图可编辑**：笔记带 `mindGroup` / `mindOrder`，拖动改分组（可撤销），未分组的仍按页自动分组 | ✅ |
 | 完善轮 5 | **书库文档管理**：改名、多选、从书库移除（笔记转墓碑以便同步传播、不动文件）、选中文档批量导出五种格式 | ✅ |
 | 完善轮 6 | **笔迹颜色独立**（含预览与持久化）、**橡皮切点插值**（缺口 ≈ 2×半径） | ✅ |
-| 完善轮 25 | **Windows 构建通道**：Actions workflow（MuPDF + 本项目 + 11 测试 + 打包上传）、`windows-vm.sh`（QEMU/KVM 小 VM）、`make_test_epub.py`（无 bash 也能造 fixture）、2c4g 实测内存预算 | ✅ 脚本就绪，实际产物需在 Windows 上跑出 |
-| 完善轮 24 | **Windows 支持**：`M_PI`→`kPi`、MuPDF 路径改 UTF-8、测试解释器按平台切换、CMake 加 `WIN32/MSVC` 分支（MuPDF 查找 / `NOMINMAX` / `/utf-8` / `windeployqt` 目标）、`scripts/make_portable.ps1`；**未在真机编译验证** | ⚠️ 代码就绪，待 Windows 实机验证 |
+| 完善轮 26 | **Windows 便携 zip 在真 Windows 上构建成功**：GitHub Actions 上 10 轮迭代收敛（run 40225724484）——MuPDF 走 `platform\win32\mupdf.sln`+msbuild、CRT 统一 `/MD`、Qt 6.8.3/msvc2022_64、无头测试、11 套测试全绿、产出 `AdaptNote-0.22-windows-x64.zip`（65 MB） | ✅ 已验证 |
+| 完善轮 25 | **Windows 构建通道**：Actions workflow（MuPDF + 本项目 + 11 测试 + 打包上传）、`windows-vm.sh`（QEMU/KVM 小 VM）、`make_test_epub.py`（无 bash 也能造 fixture）、2c4g 实测内存预算 | ✅ 产物已跑出（见完善轮 26） |
+| 完善轮 24 | **Windows 支持**：`M_PI`→`kPi`、MuPDF 路径改 UTF-8、测试解释器按平台切换、CMake 加 `WIN32/MSVC` 分支（MuPDF 查找 / `NOMINMAX` / `/utf-8` / `windeployqt` 目标）、`scripts/make_portable.ps1` | ✅ 已在 CI 上编译通过 |
 | 完善轮 23 | **便携版打包**：`scripts/make_portable.sh` 收集二进制/Qt/插件/依赖闭包，`RPATH=$ORIGIN/lib` 重定位，`AdaptNote.sh` 把 `XDG_DATA_HOME` 指向包内 `data/`；`env -i` + 移目录 + xvfb 三重验证（0 个系统 Qt 依赖） | ✅ |
 | 完善轮 22 | **数位板倾斜/旋转笔刷**：`InkPoint::tilt/angle` + `ink::tiltFromDegrees()` + 椭圆形且带方向的盖章渲染（倾斜越平越宽），倾斜/角度随笔画存档与同步 | ✅ |
 | 完善轮 21 | **按脑图分组导出**：`ExportContext::byGroups` + Markdown/HTML 复用 `mindRoots()` 递归渲染（分组→子分组→笔记，未分组落页桶），导出菜单加勾选项 | ✅ |
@@ -194,6 +195,10 @@ ai_roles.json         AI 角色（首次用内置 4 个播种，可编辑）
 26. **OPML 叶子变自闭合标签后丢了元数据**：树形重写时笔记叶子不再带 `type/tags/_note`，独立校验脚本立刻抓到。修复：导出时按 markupId 回查笔记补属性（`mind::Node` 保持精简）。
 32. **写入 TEXT 标注时不能设 QuadPoints**：MuPDF 会让整条标注的写入抛异常，`/Contents` 因此丢失——读回来只有颜色没有批注。修法：Note 类型只设 Rect。
 34. **`$ORIGIN` 在 `set -u` 的 bash 里会被展开**：`echo "rpath ($ORIGIN/lib)"` 直接报 `ORIGIN: unbound variable`。用单引号或转义。
+40. **CI 上 offscreen 平台下弹窗会永久阻塞**：`QMessageBox::question` 没人点 → 测试进程挂死，第一次 Windows CI 在 `Run tests` 上挂了 13 分钟才被我手动取消。修法：`ADAPT_HEADLESS=1` 时所有确认/输入走包装函数返回默认值；并且给每个测试进程加 `WaitForExit(7min)` 超时。教训：无头环境里**任何模态调用都是死锁**。
+39. **Qt 6.5.x 在 VS18（MSVC 14.51）上编不过**：`qvarlengtharray.h` 用了被移除的 `stdext::checked_array_iterator`（C3861）。升到 **Qt 6.8.3 / msvc2022_64** 即好。→ 版本搭配比代码更常见是“编译不过”的原因。
+38. **MuPDF 1.21.1 根本没有 `Makefile.nmake`**（那是老版本）：Windows 上要走 `platform\win32\mupdf.sln` + `msbuild /t:libmupdf`；而且它默认 `/MT`，与 Qt 的 `/MD` 在链接期直接 `LNK2038`，必须先批量改写 vcxproj 里的 `RuntimeLibrary`。另外链接时要带齐 `libmupdf/libthirdparty/libmuthreads/libresources` 四个 `.lib`。
+37. **Windows 上 `QPdfWriter` 生成出来的 PDF 没有文本层**：`mkpdf` 用它造测试文档，Linux 上一切正常，Windows runner 上 11 套测试里只有 migratetest 挂——抽出来的页面要么没文本页，要么字符全丢。换字体（DejaVu → Arial、按 `QFontDatabase` 挑已装字体）都没用。根因是 Qt 在 Windows 上找不到可嵌入字体时会把文字**画成路径**。→ 结论：**测试 fixture 不能依赖 Qt 的 PDF 输出**；`migratetest` 现在自己手写 PDF（标准 Helvetica、不嵌入字体、手写 xref），跨平台字节级一致。教训：CI 上的失败先辨「被测代码」还是「测试自身」，否则会在错误的方向上改两轮。
 36. **MuPDF 的路径必须是 UTF-8**：`QFile::encodeName()` 在 Windows 返回 ANSI 代码页，中文书名直接打不开（Linux 上测不出来）。改成 `path.toUtf8()`，并用带空格的中文路径在 Linux 上做了回归。→ selftest / 手工验证
 35. **打包 GTK 平台主题会拖进整套桌面栈**：`libqgtk3.so` → gtk3/gio/gdk ≈15 MB；便携版只保留 Qt 原生主题即可（另外记得 strip 库）。68 MB → 61 MB zip。
 34. **`mutool insert` 在 Debian 的 mupdf-tools 里不存在**：想用它造「多一页」的修订版做回归，结果子进程失败、拿到的 PDF 打不开，测试直接段错误（`revised.textPage()` 返回空）。改用自家 `mkpdf --blank-first` 生成两版，稳定可控。教训：外部工具依赖要**先探测能力**，并且测试里对「生成失败」要有明确的短路，而不是继续往下解引用。→ migratetest
