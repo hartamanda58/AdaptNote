@@ -68,6 +68,83 @@ QVector<Selection> asciiLineSelections(MuPdfEngine& eng, int page, int count)
     return out;
 }
 
+// Writes a minimal, fully deterministic PDF: standard Helvetica (no embedded font, no
+// ToUnicode needed), plain ASCII lines. Qt's QPdfWriter produced no text layer at all on
+// Windows runners, which made the *fixture* fail rather than the migration.
+// `shift` cover pages are prepended, so page i equals page i-shift of the shift-free
+// file - exactly the "new revision with extra front matter" case.
+void writeSimplePdf(const QString& path, int pages, int shift)
+{
+    QByteArray out;
+    QVector<QByteArray> objects;
+    auto addObj = [&](const QByteArray& body) { objects.append(body); return objects.size(); };
+
+    const int catalogNum = addObj(QByteArray());
+    const int pagesNum = addObj(QByteArray());
+    const int fontNum = addObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                              "/Encoding /WinAnsiEncoding >>");
+
+    QVector<int> pageObjs;
+    for (int i = 0; i < pages; ++i) {
+        QByteArray content = "BT\n/F1 13 Tf\n";
+        if (i < shift) {
+            content += "1 0 0 1 60 760 Tm (Cover page of the revised edition) Tj\n";
+        } else {
+            const int logical = i - shift;
+            for (int l = 0; l < 6; ++l) {
+                const QByteArray line =
+                    QStringLiteral("Page %1 line %2: the quick brown fox jumps over the lazy dog %3")
+                        .arg(logical + 1)
+                        .arg(l + 1)
+                        .arg((logical + 1) * 100 + l)
+                        .toLatin1();
+                content += QStringLiteral("1 0 0 1 60 %1 Tm (%2) Tj\n")
+                               .arg(760 - l * 22)
+                               .arg(QString::fromLatin1(line))
+                               .toLatin1();
+            }
+        }
+        content += "ET\n";
+
+        const int contentNum = addObj("<< /Length " + QByteArray::number(content.size()) +
+                                      " >>\nstream\n" + content + "endstream");
+        const int pageNum = addObj(QStringLiteral(
+            "<< /Type /Page /Parent %1 0 R /MediaBox [0 0 595 842] "
+            "/Resources << /Font << /F1 %2 0 R >> >> /Contents %3 0 R >>")
+            .arg(pagesNum)
+            .arg(fontNum)
+            .arg(contentNum)
+            .toLatin1());
+        pageObjs.append(pageNum);
+    }
+
+    QByteArray kids;
+    for (int n : pageObjs) kids += QByteArray::number(n) + " 0 R ";
+    objects[pagesNum - 1] = QByteArray("<< /Type /Pages /Count ") +
+                            QByteArray::number(pageObjs.size()) + " /Kids [ " + kids + "] >>";
+    objects[catalogNum - 1] =
+        "<< /Type /Catalog /Pages " + QByteArray::number(pagesNum) + " 0 R >>";
+
+    out += "%PDF-1.4\n";
+    QVector<int> offsets(objects.size() + 1, 0);
+    for (int i = 0; i < objects.size(); ++i) {
+        offsets[i + 1] = out.size();
+        out += QByteArray::number(i + 1) + " 0 obj\n" + objects.at(i) + "\nendobj\n";
+    }
+    const int xrefPos = out.size();
+    out += "xref\n0 " + QByteArray::number(objects.size() + 1) + "\n";
+    out += "0000000000 65535 f \n";
+    for (int i = 1; i <= objects.size(); ++i)
+        out += QByteArray::number(offsets.value(i)).rightJustified(10, '0') + " 00000 n \n";
+    out += "trailer\n<< /Size " + QByteArray::number(objects.size() + 1) + " /Root " +
+           QByteArray::number(catalogNum) + " 0 R >>\nstartxref\n" +
+           QByteArray::number(xrefPos) + "\n%%EOF\n";
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return;
+    f.write(out);
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -81,29 +158,12 @@ int main(int argc, char** argv)
 
     QString err;
 
-    const QString mkpdf =
-#ifdef Q_OS_WIN
-        QFileInfo(QCoreApplication::applicationDirPath() + QStringLiteral("/mkpdf.exe"))
-            .absoluteFilePath();
-#else
-        QFileInfo(QCoreApplication::applicationDirPath() + QStringLiteral("/mkpdf"))
-            .absoluteFilePath();
-#endif
-
-    auto generate = [&](const QString& out, bool blankFirst) {
-        QStringList args{out};
-        args << QStringLiteral("--latin");
-        if (blankFirst) args << QStringLiteral("--blank-first");
-        QProcess p;
-        p.start(mkpdf, args);
-        p.waitForFinished(120000);
-        return QFileInfo::exists(out);
-    };
-
     const QString oldPdf = tmp.path() + "/old.pdf";
     const QString newPdf = tmp.path() + "/new.pdf";
-    check(generate(oldPdf, false), QStringLiteral("generated the original pdf (%1)").arg(mkpdf));
-    check(generate(newPdf, true), QStringLiteral("generated the revised pdf"));
+    writeSimplePdf(oldPdf, 3, 0);
+    writeSimplePdf(newPdf, 4, 1);   // one cover page in front, identical text after it
+    check(QFileInfo::exists(oldPdf) && QFileInfo::exists(newPdf),
+          QStringLiteral("generated the two fixture pdfs"));
 
     MuPdfEngine eng;
     check(eng.open(oldPdf, &err), QStringLiteral("open %1: %2").arg(oldPdf, err));
