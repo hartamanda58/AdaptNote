@@ -26,8 +26,10 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.5.3'
-          arch: win64_msvc2019_64
+          # 6.5.x trips over MSVC 14.51 (VS18) because qvarlengtharray.h still uses the
+          # removed stdext::checked_array_iterator; 6.8+ is fixed.
+          version: '6.8.3'
+          arch: win64_msvc2022_64
           cache: true
           # TextToSpeech (read-aloud) is an optional addon; drop it and the app simply
           # falls back to timed sentence highlighting.
