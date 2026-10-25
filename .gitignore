@@ -2,6 +2,8 @@
 build/
 build*/
 dist/
+# generated sample exports (reproducible via scripts/demo.sh)
+shots/exports/
 # VM material
 vm/
 vm-share/
