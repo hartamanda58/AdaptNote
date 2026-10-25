@@ -1,0 +1,10 @@
+# build outputs
+build/
+build*/
+dist/
+# VM material
+vm/
+vm-share/
+# editor/os noise
+*.user
+.DS_Store

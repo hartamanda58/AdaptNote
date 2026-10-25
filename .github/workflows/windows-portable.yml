@@ -1,0 +1,111 @@
+name: windows-portable
+
+# Builds the Windows portable zip on a real Windows runner and uploads it.
+# Trigger: manual (Actions → Run workflow) or on pushing a tag like v0.22.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja + Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: choco install ninja -y --no-progress
+
+      # Qt is NOT preinstalled on the GitHub Windows runners: install a matching kit.
+      # (v142 toolset of VS2022 can build msvc2019 kits, so either arch works.)
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.3'
+          arch: win64_msvc2019_64
+          cache: true
+          # TextToSpeech (read-aloud) is an optional addon; drop it and the app simply
+          # falls back to timed sentence highlighting.
+          # modules: 'qtspeech'
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          echo "Qt: $env:QT_ROOT_DIR"
+
+      # MuPDF 1.21.1 built as a static library with the same CRT as Qt.
+      - name: MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build MuPDF
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch 1.21.1 --recursive https://github.com/ArtifexSoftware/mupdf.git C:\mupdf
+          cd C:\mupdf
+          # nmake comes with the MSVC toolchain the runner already has
+          cmd /c "nmake -f Makefile.nmake HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no build=release"
+          if ($LASTEXITCODE -ne 0) { throw "mupdf build failed" }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release `
+                -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+                -DMUPDF_ROOT=C:\mupdf
+
+      - name: Build app
+        run: cmake --build build-win --config Release --parallel
+
+      - name: Make test documents
+        shell: pwsh
+        run: |
+          .\build-win\mkpdf.exe .\build-win\test.pdf
+          .\build-win\mkpdf.exe .\build-win\test2.pdf --blank-first
+          python scripts/make_test_epub.py .\build-win\test.epub
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cd build-win
+          $failed = @()
+          foreach ($t in @("selftest","visualtest","featuretest","exporttest","synctest",
+                           "aitest","p5test","librarytest","migratetest","importtest","conflicttest")) {
+            $args = switch ($t) {
+              "selftest"     { @("test.pdf","test.epub") }
+              "visualtest"   { @("test.pdf") }
+              "featuretest"  { @("test.pdf","test.epub") }
+              "exporttest"   { @("test.pdf") }
+              "synctest"     { @("test.pdf","..\scripts\dav_server.py") }
+              "aitest"       { @("..\scripts\fake_openai_server.py") }
+              "p5test"       { @("test.pdf") }
+              "migratetest"  { @("test.pdf") }
+              "importtest"   { @("test.pdf") }
+              default        { @() }
+            }
+            Write-Host "== $t"
+            & ".\$t.exe" @args
+            if ($LASTEXITCODE -ne 0) { $failed += $t }
+          }
+          if ($failed.Count -gt 0) { throw "failed: $($failed -join ', ')" }
+
+      - name: Package portable zip
+        shell: pwsh
+        run: pwsh -File scripts\make_portable.ps1 -QtDir "$env:QT_ROOT_DIR" -MuPdfRoot C:\mupdf
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdaptNote-windows-x64
+          path: dist/*.zip
+          if-no-files-found: error
