@@ -36,6 +36,30 @@ if(WIN32)
       "MuPDF not found. Build it (nmake HAVE_X11=no) and pass -DMUPDF_ROOT=<dir>, "
       "or drop it into third_party/mupdf/.")
   endif()
+  # src/export/zip.cpp needs zlib.h; MuPDF vendors zlib and libthirdparty already
+  # provides crc32/deflate/inflate, so reuse its headers instead of another dependency.
+  file(GLOB ZLIB_INCLUDE_CANDIDATES
+       "${MUPDF_ROOT}/thirdparty/zlib"
+       "${MUPDF_ROOT}/thirdparty/zlib/include")
+  foreach(cand ${ZLIB_INCLUDE_CANDIDATES})
+    if(EXISTS "${cand}/zlib.h")
+      set(ZLIB_INCLUDE_DIR "${cand}")
+      break()
+    endif()
+  endforeach()
+  if(NOT ZLIB_INCLUDE_DIR)
+    file(GLOB_RECURSE _zlib_h "${MUPDF_ROOT}/thirdparty/*/zlib.h")
+    if(_zlib_h)
+      get_filename_component(ZLIB_INCLUDE_DIR "${_zlib_h}" DIRECTORY)
+    endif()
+  endif()
+  if(ZLIB_INCLUDE_DIR)
+    message(STATUS "zlib headers: ${ZLIB_INCLUDE_DIR} (from MuPDF)")
+    set(MUPDF_ZLIB_INCLUDE ${ZLIB_INCLUDE_DIR})
+  else()
+    message(WARNING "zlib.h not found under ${MUPDF_ROOT}: ZIP export will not build")
+  endif()
+
   set(MUPDF_LIBS ${MUPDF_LIB} ${MUPDF_WIN_EXTRA}
       user32 gdi32 advapi32 ole32 shell32 ws2_32 comdlg32)
   message(STATUS "MuPDF: ${MUPDF_LIB} (+ ${MUPDF_WIN_EXTRA})")
@@ -72,6 +96,9 @@ add_library(adapt_core STATIC
   src/export/exporter.cpp
 )
 target_include_directories(adapt_core PUBLIC src ${MUPDF_INCLUDE_DIR})
+if(MUPDF_ZLIB_INCLUDE)
+  target_include_directories(adapt_core PRIVATE ${MUPDF_ZLIB_INCLUDE})
+endif()
 target_link_libraries(adapt_core PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Network)
 target_link_libraries(adapt_core PUBLIC ${MUPDF_LIBS})
 

@@ -19,12 +19,6 @@ bool isTerminator(QChar c)
     return kMarks.contains(c);
 }
 
-bool isSoftBreak(QChar c)
-{
-    return c == QLatin1Char('.') || c == QLatin1Char(',') || c == QLatin1Char('，') ||
-           c == QLatin1Char('、');
-}
-
 }  // namespace
 
 QVector<Sentence> splitSentences(const TextPage& page, int pageIndex, int fromChar, int toChar)
@@ -66,8 +60,8 @@ QVector<Sentence> splitSentences(const TextPage& page, int pageIndex, int fromCh
             int end = i;
             while (end + 1 <= toChar) {
                 const QChar n(static_cast<ushort>(page.chars.at(end + 1).code));
-                if (n == QLatin1Char('”') || n == QLatin1Char('"') || n == QLatin1Char('）') ||
-                    n == QLatin1Char(')') || n == QLatin1Char('』') || n == QLatin1Char('】')) {
+                if (n == QChar(0x201D) || n == QLatin1Char('"') || n == QChar(0xFF09) ||
+                    n == QLatin1Char(')') || n == QChar(0x300F) || n == QChar(0x3011)) {
                     ++end;
                 } else {
                     break;
@@ -77,7 +71,6 @@ QVector<Sentence> splitSentences(const TextPage& page, int pageIndex, int fromCh
             i = end;
             continue;
         }
-        Q_UNUSED(isSoftBreak);
         // Guard against a runaway "sentence" on text without punctuation.
         if (i - start > 220) flush(i);
     }
