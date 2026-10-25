@@ -94,6 +94,7 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          ADAPT_HEADLESS: '1'          # never open modal dialogs
         run: |
           cd build-win
           $failed = @()
@@ -112,13 +113,25 @@ jobs:
               default        { @() }
             }
             Write-Host "== $t"
-            & ".\$t.exe" @args
-            if ($LASTEXITCODE -ne 0) { $failed += $t }
+            $log = "$t.out.txt"
+            $proc = Start-Process -FilePath ".\$t.exe" -ArgumentList $args -NoNewWindow -PassThru `
+                                  -RedirectStandardOutput $log -RedirectStandardError "$t.err.txt"
+            if (-not $proc.WaitForExit(420000)) {          # 7 min per test
+                Write-Host "!! $t timed out - killing"
+                $proc.Kill()
+                $failed += "$t(timeout)"
+            } elseif ($proc.ExitCode -ne 0) {
+                $failed += $t
+            }
+            Get-Content $log -Tail 12 | ForEach-Object { Write-Host "   $_" }
+            if (Test-Path "$t.err.txt") { Get-Content "$t.err.txt" -Tail 5 | ForEach-Object { Write-Host "   E $_" } }
           }
           if ($failed.Count -gt 0) { throw "failed: $($failed -join ', ')" }
 
       - name: Package portable zip
         shell: pwsh
+        env:
+          ADAPT_HEADLESS: '1'
         run: pwsh -File scripts\make_portable.ps1 -QtDir "$env:QT_ROOT_DIR" -MuPdfRoot C:\mupdf
 
       - name: Upload artifact

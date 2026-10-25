@@ -60,6 +60,46 @@
 namespace an {
 namespace {
 
+// Unattended runs (CI, scripts) set ADAPT_HEADLESS=1: modal dialogs would block the
+// event loop forever under QT_QPA_PLATFORM=offscreen.
+const bool kHeadless = qEnvironmentVariableIsSet("ADAPT_HEADLESS");
+
+bool confirm(QWidget* parent, const QString& title, const QString& text)
+{
+    if (kHeadless) return false;   // "No" by default: nothing destructive happens
+    return QMessageBox::question(parent, title, text, QMessageBox::Yes | QMessageBox::No,
+                                 QMessageBox::No) == QMessageBox::Yes;
+}
+
+void inform(QWidget* parent, const QString& title, const QString& text)
+{
+    if (!kHeadless) QMessageBox::information(parent, title, text);
+}
+
+void warnUser(QWidget* parent, const QString& title, const QString& text)
+{
+    if (!kHeadless) QMessageBox::warning(parent, title, text);
+}
+
+QString askText(QWidget* parent, const QString& title, const QString& label,
+                const QString& initial = {})
+{
+    if (kHeadless) return initial;
+    bool ok = false;
+    const QString s = QInputDialog::getText(parent, title, label, QLineEdit::Normal, initial, &ok);
+    return ok ? s : QString();
+}
+
+QString askMultiline(QWidget* parent, const QString& title, const QString& label,
+                     const QString& initial = {})
+{
+    if (kHeadless) return initial;
+    bool ok = false;
+    const QString s = QInputDialog::getMultiLineText(parent, title, label, initial, &ok);
+    return ok ? s : QString();
+}
+
+
 const char* kColors[] = {"#FFD500", "#34A853", "#D93025", "#3D8BFD", "#FF9800"};
 
 // File identity used to remember "we already asked about this revision".
@@ -808,7 +848,7 @@ bool MainWindow::openDocument(const QString& path)
     if (path.isEmpty()) return false;
     QString err;
     if (!engine_.open(path, &err)) {
-        QMessageBox::warning(this, QStringLiteral("打开失败"), err);
+        warnUser(this, QStringLiteral("打开失败"), err);
         return false;
     }
     docPath_ = QFileInfo(path).absoluteFilePath();
@@ -836,13 +876,11 @@ bool MainWindow::openDocument(const QString& path)
     const int pending = embeddedPrompt_ ? pendingEmbeddedAnnotations() : 0;
     if (pending > 0) {
         store_.setSetting(identityKey(docPath_), QStringLiteral("asked"));
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("发现内嵌标注"),
-            QStringLiteral("这个 PDF 里已经有 %1 条标注（可能来自其他阅读器）。\n"
-                           "要把它们读进来变成笔记吗？")
-                .arg(pending),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-        if (answer == QMessageBox::Yes) importEmbeddedAnnotations();
+        if (confirm(this, QStringLiteral("发现内嵌标注"),
+                    QStringLiteral("这个 PDF 里已经有 %1 条标注（可能来自其他阅读器）。\n"
+                                   "要把它们读进来变成笔记吗？")
+                        .arg(pending)))
+            importEmbeddedAnnotations();
     }
     updateStatus();
     return true;
@@ -1095,10 +1133,8 @@ void MainWindow::addMarkupFromSelection(MarkupType type)
     }
 
     if (type == MarkupType::Note) {
-        bool ok = false;
-        m.comment = QInputDialog::getText(this, QStringLiteral("批注"), QStringLiteral("批注内容："),
-                                          QLineEdit::Normal, QString(), &ok);
-        if (!ok) return;
+        m.comment = askText(this, QStringLiteral("批注"), QStringLiteral("批注内容："));
+        if (m.comment.isNull()) return;
     }
 
     undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), m, QStringLiteral("添加%1").arg(markupTypeLabel(type))));
@@ -1132,10 +1168,9 @@ void MainWindow::editMarkupComment(const QString& id)
         return;
     }
     if (!m) return;
-    bool ok = false;
-    const QString text = QInputDialog::getMultiLineText(
-        this, QStringLiteral("批注"), QStringLiteral("批注内容："), m->comment, &ok);
-    if (!ok) return;
+    const QString text = askMultiline(this, QStringLiteral("批注"), QStringLiteral("批注内容："),
+                                      m->comment);
+    if (text.isNull()) return;
     Markup after = *m;
     after.comment = text;
     after.updated = QDateTime::currentMSecsSinceEpoch();
@@ -1150,11 +1185,10 @@ void MainWindow::editMarkupTags(const QString& id)
             statusBar()->showMessage(QStringLiteral("请先打开该文档再编辑"), 2500);
         return;
     }
-    bool ok = false;
-    const QString text = QInputDialog::getText(
-        this, QStringLiteral("标签"), QStringLiteral("标签（用逗号分隔，例如：方法论,待复习）："),
-        QLineEdit::Normal, m->tags.join(QStringLiteral(", ")), &ok);
-    if (!ok) return;
+    const QString text = askText(this, QStringLiteral("标签"),
+                                 QStringLiteral("标签（用逗号分隔，例如：方法论,待复习）："),
+                                 m->tags.join(QStringLiteral(", ")));
+    if (text.isNull()) return;
     QStringList tags;
     for (const QString& t : text.split(QRegularExpression(QStringLiteral("[,，;；\\s]+")),
                                       Qt::SkipEmptyParts)) {
@@ -1289,7 +1323,7 @@ void MainWindow::saveAnnotationsToPdf()
     }
     QString err;
     if (!engine_.writeAnnotations(pending, &err)) {
-        QMessageBox::warning(this, QStringLiteral("写入 PDF 失败"), err);
+        warnUser(this, QStringLiteral("写入 PDF 失败"), err);
         return;
     }
     for (Markup& m : markups_) {
@@ -1378,7 +1412,7 @@ int MainWindow::migrateAfterRevision()
                                       "移动是可撤销的（Ctrl+Z）。")
                            .arg(report.moved.size())
                            .arg(report.lost.size());
-        QMessageBox::information(this, QStringLiteral("已按文字迁移笔记"), text);
+        inform(this, QStringLiteral("已按文字迁移笔记"), text);
     }
     return report.moved.size();
 }
