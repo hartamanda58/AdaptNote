@@ -1,5 +1,7 @@
 // Generates a multi-page test PDF used by the headless self-test and screenshots.
 // Page size is A4 in points (72 dpi), so PDF coordinates == painter coordinates.
+#include <cstdio>
+
 #include <QGuiApplication>
 #include <QFont>
 #include <QFontDatabase>
