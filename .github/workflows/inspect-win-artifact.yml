@@ -1,9 +1,9 @@
 name: Inspect Windows artifact
 
-# Downloads an existing windows-portable artifact, checks the zip layout and the
-# executable's PE imports, then commits the report to the `ci-report` branch.
-# Reason for the branch trick: the build machine cannot stream 68 MB artifacts or the
-# redirected job logs, but it can read a few KB from raw.githubusercontent.com.
+# Downloads an existing windows-portable artifact, verifies the zip layout and the
+# executable's real PE import table, then commits the report to the `ci-report` branch
+# (and uploads it as an artifact). Running this inside CI is deliberate: the machine
+# that drives these builds cannot read multi-MB responses, let alone a 68 MB zip.
 on:
   workflow_dispatch:
     inputs:
@@ -30,6 +30,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
 
+      - uses: ilammy/msvc-dev-cmd@v1
+
       - name: Inspect package
         shell: pwsh
         run: |
@@ -54,7 +56,7 @@ jobs:
             ForEach-Object { Say ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
 
           Say "--- plugins ---"
-          foreach ($d in @("platforms","imageformats","tls","styles","iconengines","fonts","resources")) {
+          foreach ($d in @("platforms","imageformats","tls","styles","iconengines","fonts","resources","sqldrivers")) {
             $p = Join-Path $root.FullName $d
             if (Test-Path $p) {
               Get-ChildItem $p -File | Sort-Object Name |
@@ -78,51 +80,60 @@ jobs:
             Get-ChildItem (Join-Path $root.FullName "samples") -File |
               ForEach-Object { Say ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
           } else { Say "  (no samples dir)" }
-
           Say ("TOTAL FILES: " + (Get-ChildItem $root.FullName -Recurse -File).Count)
 
-          # ---------- PE imports ----------
-          Say "--- PE imports ---"
-          $exes = Get-ChildItem (Join-Path $root.FullName "bin") -Filter *.exe
-          if ($exes.Count -eq 0) { Say "  ERROR: no exe in bin/"; $failed = $true }
+          # ---------- real PE imports (dumpbin, not a string scan) ----------
+          Say "--- PE imports (dumpbin /dependents) ---"
           $bundled = @{}
           Get-ChildItem (Join-Path $root.FullName "bin") -File |
             ForEach-Object { $bundled[$_.Name.ToLower()] = $true }
+          $exes = Get-ChildItem (Join-Path $root.FullName "bin") -Filter *.exe
+          if ($exes.Count -eq 0) { Say "  ERROR: no exe in bin/"; $failed = $true }
           foreach ($exe in $exes) {
-            Say "  $($exe.Name) imports:"
-            $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe.FullName))
-            $dlls = [regex]::Matches($text, '(?i)[A-Za-z0-9_\-\.]+\.dll') |
-                    ForEach-Object { $_.Value.ToLower() } | Sort-Object -Unique
-            foreach ($d in $dlls) {
+            Say "  $($exe.Name):"
+            $deps = & dumpbin /nologo /dependents $exe.FullName
+            $dlls = $deps | Select-String -Pattern '^\s+([A-Za-z0-9_\-.]+\.dll)\s*$' -AllMatches |
+                    ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value.ToLower() }
+            foreach ($d in ($dlls | Sort-Object -Unique)) {
               if ($bundled.ContainsKey($d)) { Say "    [bundled] $d" }
-              elseif ($d -match '^(kernel32|kernelbase|user32|gdi32|gdiplus|advapi32|shell32|ole32|oleaut32|ws2_32|comdlg32|comctl32|dwmapi|uxtheme|shlwapi|version|imm32|winmm|netapi32|userenv|mpr|bcrypt|ntdll|crypt32|secur32|dnsapi|iphlpapi|wintrust|dbghelp|powrprof|setupapi|cfgmgr32|msvcrt|ucrtbase|opengl32|api-ms-win[a-z0-9\-]*)\.dll$') {
+              elseif ($d -match '^(kernel32|kernelbase|user32|gdi32|gdiplus|advapi32|shell32|ole32|oleaut32|ws2_32|comdlg32|comctl32|dwmapi|uxtheme|shlwapi|version|imm32|winmm|netapi32|userenv|mpr|bcrypt|ntdll|crypt32|secur32|dnsapi|iphlpapi|wintrust|dbghelp|powrprof|setupapi|cfgmgr32|msvcrt|ucrtbase|opengl32|d3d11|dxgi|api-ms-win[a-z0-9\-]*)\.dll$') {
                 Say "    [system]  $d"
               } else { Say "    [MISSING] $d"; $failed = $true }
             }
           }
 
-          # ---------- required Qt pieces ----------
+          # ---------- required runtime pieces ----------
           Say "--- required files ---"
-          $need = @("bin\Qt6Core.dll","bin\Qt6Gui.dll","bin\Qt6Widgets.dll","bin\Qt6Pdf.dll",
-                    "bin\Qt6Network.dll","bin\Qt6Sql.dll","bin\Qt6Svg.dll","platforms\qwindows.dll")
-          foreach ($n in $need) {
+          foreach ($n in @("bin\Qt6Core.dll","bin\Qt6Gui.dll","bin\Qt6Widgets.dll","bin\Qt6Pdf.dll",
+                           "bin\Qt6Network.dll","bin\Qt6Sql.dll","bin\Qt6Svg.dll",
+                           "platforms\qwindows.dll")) {
             $p = Join-Path $root.FullName $n
             if (Test-Path $p) { Say "  present $n" } else { Say "  MISSING $n"; $failed = $true }
           }
 
           Say ("RESULT: " + $(if ($failed) { "FAILED" } else { "PACKAGE CHECKS PASSED" }))
-
           New-Item -ItemType Directory -Force ci | Out-Null
           $report -join "`n" | Out-File ci/windows-report.txt -Encoding utf8
           if ($failed) { throw "package checks failed - see ci/windows-report.txt" }
 
-      - name: Publish report to ci-report branch
+      - name: Publish report
         if: always()
         shell: pwsh
         run: |
+          if (!(Test-Path ci/windows-report.txt)) {
+            "inspection did not produce a report" | Out-File ci/windows-report.txt -Encoding utf8
+          }
           git config user.name "ci"
           git config user.email "ci@example.invalid"
           git checkout -B ci-report
-          git add ci/windows-report.txt
-          git commit -m "ci: windows package report for run ${{ inputs.run_id }}" | Out-Null
+          git add -f ci/windows-report.txt
+          git commit --allow-empty -m "ci: windows package report for run ${{ inputs.run_id }}"
           git push -f origin ci-report
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-report
+          path: ci/windows-report.txt
+          if-no-files-found: warn
