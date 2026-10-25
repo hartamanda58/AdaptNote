@@ -282,6 +282,18 @@ AdaptNote-<ver>-linux-x64/
 > （run `40225724484`）：编译 MuPDF → 编译本项目 → **11 套测试全绿** → 产出
 > `AdaptNote-<ver>-windows-x64.zip`。下面的步骤就是 CI 里实际验证过的那一套。
 
+### 0. 直接下载已构建好的 zip
+
+1. 打开 <https://github.com/hartamanda58/AdaptNote/actions/workflows/windows-portable.yml>
+2. 点最新的绿色 ✔ 那次 run，拉到页面底部 **Artifacts** → 下载 `AdaptNote-windows-x64`（约 65 MB）
+3. 解压后双击 `AdaptNote.bat`（不要直接双击 exe：`bat` 会把数据目录指向包内的 `data\`）
+
+想重新跑一遍：同一页面 **Run workflow** → `main` → 约 45–55 分钟。
+想看产物内部的完整清单（`bin\` 里的 dll、`platforms\qwindows.dll`、启动器内容、exe 的
+`dumpbin` 导入表、缺失依赖检查）：
+**Actions → Inspect Windows artifact → Run workflow**，`run_id` 填构建 run 的编号，
+它会把报告提交到 `ci-report` 分支的 `ci/windows-report.txt`（同时作为 artifact 上传）。
+
 ### 1. 装构建环境（一次性）
 
 | 组件 | 说明 |
