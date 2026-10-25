@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QMap>
 #include <QProcess>
 #include <QTemporaryDir>
 
@@ -39,6 +40,34 @@ Selection lineSelection(MuPdfEngine& eng, int page, int line)
     return selectRange(*tp, page, tp->chars.at(first).origin, tp->chars.at(last).origin);
 }
 
+
+// Picks up to `count` lines whose text is mostly ASCII. The CI runner may lack the
+// CJK font used by the fixture generator, in which case Qt substitutes a font and the
+// two PDFs can map glyphs differently - that would test the font stack, not migration.
+QVector<Selection> asciiLineSelections(MuPdfEngine& eng, int page, int count)
+{
+    QVector<Selection> out;
+    const TextPage* tp = eng.textPage(page);
+    if (!tp) return out;
+
+    QMap<int, QString> byLine;
+    for (const CharBox& c : tp->chars)
+        byLine[c.line].append(c.code <= 0xFFFF ? QChar(static_cast<ushort>(c.code)) : QChar('?'));
+
+    for (auto it = byLine.constBegin(); it != byLine.constEnd() && out.size() < count; ++it) {
+        const QString text = it.value().trimmed();
+        if (text.size() < 12) continue;
+        int ascii = 0;
+        for (const QChar ch : text)
+            if (ch.unicode() < 0x80) ++ascii;
+        if (static_cast<double>(ascii) / text.size() < 0.85) continue;
+
+        const Selection sel = lineSelection(eng, page, it.key());
+        if (sel.isValid()) out.append(sel);
+    }
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -57,9 +86,7 @@ int main(int argc, char** argv)
 
     // ---- notes on pages 1 and 3 of the original (page 1 = index 0) ----
     QVector<Markup> notes;
-    for (int line : {3, 6}) {
-        const Selection sel = lineSelection(eng, 0, line);
-        if (!sel.isValid()) continue;
+    for (const Selection& sel : asciiLineSelections(eng, 0, 2)) {
         Markup m;
         m.id = newId();
         m.page = 0;
@@ -68,17 +95,19 @@ int main(int argc, char** argv)
         m.quads = sel.quads;
         notes.append(m);
     }
-    const Selection lastPage = lineSelection(eng, 2, 2);
-    if (lastPage.isValid()) {
+    const QVector<Selection> lastPage = asciiLineSelections(eng, 2, 1);
+    if (!lastPage.isEmpty()) {
         Markup m;
         m.id = newId();
         m.page = 2;
         m.type = MarkupType::Highlight;
-        m.text = lastPage.text;
-        m.quads = lastPage.quads;
+        m.text = lastPage.first().text;
+        m.quads = lastPage.first().quads;
         notes.append(m);
     }
-    check(notes.size() == 3, QStringLiteral("prepared %1 notes").arg(notes.size()));
+    check(notes.size() == 3, QStringLiteral("prepared %1 notes (ascii lines)").arg(notes.size()));
+    for (const Markup& m : notes)
+        std::printf("      note p%d: \"%s\"\n", m.page + 1, qPrintable(m.text.left(50)));
 
     // ---- baseline: migrating against the unchanged file must keep everything ----
     {
@@ -121,6 +150,23 @@ int main(int argc, char** argv)
     {
         const MigrationReport report = migrateByText(revised, notes);
         std::printf("      [diag] %s\n", qPrintable(report.summary()));
+        if (!report.lost.isEmpty()) {
+            for (const QString& id : report.lost) {
+                for (const Markup& m : notes) {
+                    if (m.id != id) continue;
+                    std::printf("      [diag] lost note p%d text=\"%s\"\n", m.page + 1,
+                                qPrintable(m.text.left(60)));
+                }
+            }
+            const TextPage* p1 = revised.textPage(1);
+            if (p1) {
+                std::printf("      [diag] revised page2 text=\"%s\" (%d chars)\n",
+                            qPrintable(textForRange(*p1, 0, qMin(p1->chars.size() - 1, 80))),
+                            p1->chars.size());
+            } else {
+                std::printf("      [diag] revised page2 has no text page\n");
+            }
+        }
         check(report.lost.isEmpty(), QStringLiteral("no note was lost (%1)").arg(report.lost.size()));
         check(report.moved.size() == notes.size(),
               QStringLiteral("all %1 notes moved one page down").arg(report.moved.size()));
