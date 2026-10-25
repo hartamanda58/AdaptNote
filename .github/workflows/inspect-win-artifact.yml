@@ -1,0 +1,100 @@
+name: Inspect Windows artifact
+
+# Downloads an existing windows-portable artifact and checks the zip structure and the
+# executable's PE imports. Exists because the build machine (this sandbox) cannot fetch
+# 68 MB from objects.githubusercontent.com without being killed mid-transfer.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "run id that produced AdaptNote-windows-x64"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AdaptNote-windows-x64
+          path: art
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Expand and list
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zip = Get-ChildItem art -Recurse -Filter *.zip | Select-Object -First 1
+          Write-Host "artifact zip: $($zip.Name)  $([math]::Round($zip.Length/1MB,1)) MB"
+          Expand-Archive $zip.FullName -DestinationPath pkg
+          $root = Get-ChildItem pkg -Directory | Select-Object -First 1
+          Write-Host "root: $($root.Name)"
+          Write-Host "--- top level ---"
+          Get-ChildItem $root.FullName | ForEach-Object {
+            if ($_.PSIsContainer) { Write-Host ("  {0}/" -f $_.Name) }
+            else { Write-Host ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
+          }
+          Write-Host "--- bin ---"
+          Get-ChildItem "$($root.FullName)\bin" -File | Sort-Object Name |
+            ForEach-Object { Write-Host ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
+          Write-Host "--- plugins ---"
+          foreach ($d in @("platforms","imageformats","tls","styles","iconengines")) {
+            $p = Join-Path $root.FullName $d
+            if (Test-Path $p) {
+              Get-ChildItem $p -File | ForEach-Object { Write-Host ("  {0}/{1}" -f $d, $_.Name) }
+            } else { Write-Host "  MISSING dir: $d" }
+          }
+          Write-Host "--- launcher ---"
+          Get-ChildItem $root.FullName -Filter *.bat | ForEach-Object {
+            Write-Host "  $($_.Name):"
+            Get-Content $_.FullName | ForEach-Object { Write-Host "    $_" }
+          }
+          Write-Host "--- samples ---"
+          if (Test-Path "$($root.FullName)\samples") {
+            Get-ChildItem "$($root.FullName)\samples" -File |
+              ForEach-Object { Write-Host ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
+          } else { Write-Host "  MISSING dir: samples" }
+          Write-Host ("TOTAL FILES: " + (Get-ChildItem $root.FullName -Recurse -File).Count)
+          "ROOT=$($root.FullName)" | Out-File -Append $env:GITHUB_ENV -Encoding utf8
+
+      - name: Check PE imports against shipped dlls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = $env:ROOT
+          $exe = Join-Path $root "bin\adaptnote.exe"
+          if (!(Test-Path $exe)) { throw "adaptnote.exe missing" }
+          $bin = Get-ChildItem (Join-Path $root "bin") -File | ForEach-Object { $_.Name.ToLower() }
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $dlls = [regex]::Matches($text, '(?i)[A-Za-z0-9_\-\.]+\.dll') |
+                  ForEach-Object { $_.Value.ToLower() } | Sort-Object -Unique
+          Write-Host "imports referenced in the exe:"
+          $missing = @()
+          foreach ($d in $dlls) {
+            if ($bin -contains $d) { Write-Host "  [bundled] $d" }
+            elseif ($d -match '^(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|ws2_32|comdlg32|comctl32|dwmapi|uxtheme|shlwapi|version|imm32|winmm|netapi32|userenv|mpr|bcrypt|ntdll|crypt32|secur32|dnsapi|iphlpapi|wintrust|dbghelp|powrprof|setupapi|cfgmgr32|msvcrt|ucrtbase|api-ms-win.*)\.dll$') {
+              Write-Host "  [system]  $d"
+            } else { Write-Host "  [MISSING] $d"; $missing += $d }
+          }
+          if ($missing.Count -gt 0) { throw ("missing dlls: " + ($missing -join ", ")) }
+
+          foreach ($need in @("bin\Qt6Core.dll","bin\Qt6Gui.dll","bin\Qt6Widgets.dll",
+                              "bin\Qt6Pdf.dll","bin\Qt6Network.dll","bin\Qt6Sql.dll",
+                              "bin\Qt6Svg.dll","platforms\qwindows.dll")) {
+            $p = Join-Path $root $need
+            if (Test-Path $p) { Write-Host "present: $need" } else { throw "missing: $need" }
+          }
+          $bat = Get-ChildItem $root -Filter *.bat | Select-Object -First 1
+          if ($null -eq $bat) { throw "no launcher .bat" }
+          if ((Get-Content $bat.FullName -Raw) -notmatch 'XDG_DATA_HOME') {
+            throw "launcher does not set XDG_DATA_HOME (data would not stay inside the folder)"
+          }
+          Write-Host "PACKAGE CHECKS PASSED"

@@ -275,37 +275,55 @@ AdaptNote-<ver>-linux-x64/
 
 ## Windows 便携版
 
-代码本身已经是跨平台的（Qt6 + 标准 C++，无 POSIX 依赖），Windows 版**必须在一台 Windows
-机器上编译**——交叉编译 Qt+MuPDF 不现实。步骤：
+代码本身已经是跨平台的（Qt6 + 标准 C++，无 POSIX 依赖），Windows 版需要**在一台 Windows
+机器上编译**——交叉编译 Qt+MuPDF 不现实。
+
+> **状态：已在真 Windows 上跑通。** GitHub Actions `windows-latest` 上完整流程成功
+> （run `40225724484`）：编译 MuPDF → 编译本项目 → **11 套测试全绿** → 产出
+> `AdaptNote-<ver>-windows-x64.zip`。下面的步骤就是 CI 里实际验证过的那一套。
 
 ### 1. 装构建环境（一次性）
 
 | 组件 | 说明 |
 |---|---|
-| Visual Studio 2019/2022（含 C++ 工具） | MSVC x86_64 工具链 |
-| Qt 6.4+ MSVC 套件 | 例如 `C:\Qt\6.4.2\msvc2019_64`；**必须与 MSVC 版本匹配** |
+| Visual Studio 2019/2022（含 C++ 工具） | MSVC x86_64 工具链（CI 上是 VS18 / MSVC 14.51） |
+| Qt 6.8+ MSVC 套件 | 例如 `C:\Qt\6.8.3\msvc2022_64`。**不要用 6.5.x**：它在 VS18 上会因
+`qvarlengtharray.h` 里的 `stdext::checked_array_iterator` 被移除而编译失败 |
 | CMake ≥ 3.21 + Ninja | 或直接用 VS 生成器 |
-| MuPDF（静态库） | 见下 |
+| MuPDF 1.21.1（静态库） | 见下 |
 
 ### 2. 编译 MuPDF（静态、无 GUI 依赖）
+
+MuPDF **1.21.1 没有 `Makefile.nmake`**（那是老版本的），Windows 上走 VS 解决方案：
 
 ```bat
 git clone --recursive https://github.com/ArtifexSoftware/mupdf.git
 cd mupdf && git checkout 1.21.1
-nmake -f Makefile.nmake HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_JS=yes build=release
+
+REM MuPDF 默认用静态 CRT（/MT），Qt 用动态 CRT（/MD）——必须先统一，否则链接期报
+REM LNK2038: mismatch detected for 'RuntimeLibrary'
+powershell -Command "Get-ChildItem platform\win32\*.vcxproj | ForEach-Object {
+  (Get-Content $_ -Raw) -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>',
+    '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>' | Set-Content $_ -Encoding UTF8 }"
+
+msbuild platform\win32\mupdf.sln /m /t:libmupdf /p:Configuration=Release /p:Platform=x64
 ```
 
-产物在 `platform\win32\x64\Release\libmupdf.lib`（与 Qt 一样使用动态 CRT `/MD`）。
+产物在 `platform\win32\x64\Release\`：`libmupdf.lib` + `libthirdparty.lib` +
+`libmuthreads.lib` + `libresources.lib`，四个都要链。项目 CMake 会把它们全部 glob 进来，
+另外再链接系统库 `user32 gdi32 advapi32 ole32 shell32 ws2_32 comdlg32`。
+
+> zlib 头文件用 MuPDF 自带的 `thirdparty/zlib`（`MUPDF_ZLIB_INCLUDE`），不要指望系统里有一份。
 
 ### 3. 编译与打包
 
 ```bat
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DCMAKE_PREFIX_PATH=C:\Qt\6.4.2\msvc2019_64 ^
+      -DCMAKE_PREFIX_PATH=C:\Qt\6.8.3\msvc2022_64 ^
       -DMUPDF_ROOT=C:\src\mupdf
 cmake --build build-win --config Release --parallel
 
-pwsh -File scripts\make_portable.ps1 -QtDir C:\Qt\6.4.2\msvc2019_64 -MuPdfRoot C:\src\mupdf
+pwsh -File scripts\make_portable.ps1 -QtDir C:\Qt\6.8.3\msvc2022_64 -MuPdfRoot C:\src\mupdf
 ```
 
 产出 `dist\AdaptNote-<ver>-windows-x64.zip`：
@@ -321,19 +339,28 @@ AdaptNote-<ver>-windows-x64/
 
 也可以只让 CMake 收集依赖：`cmake --build build-win --target deploy-windows`。
 
-### 4. 已经做过的 Windows 兼容处理
+### 4. 已经做过的 Windows 兼容处理（全部在 CI 上验证过）
 
 - `M_PI` 换成 `an::kPi`（MSVC 默认不定义 `M_PI`）
 - 传给 MuPDF 的路径改为 **UTF-8**（`QFile::encodeName` 在中文路径下会按 ANSI 编码，必然打不开）
+- **CJK 字面量**：`QLatin1Char('”')` 这类写法在 MSVC 下会截断成 0x?? 并报 C4309，
+  导致中文右引号/括号永远匹配不上 → 一律改成 `QChar(0x201D)`、`QChar(0xFF09)` 这种码点写法
 - 测试里的 `python3` 按平台切换成 `python`
 - CMake 增加 `WIN32` / `MSVC` 分支：MuPDF 查找顺序、`NOMINMAX`、`/utf-8`、CRT 一致、`windeployqt` 目标
 - 便携脚本改为 PowerShell：`windeployqt --compiler-runtime` + `Compress-Archive`
+- **无头测试**：CI 上设 `QT_QPA_PLATFORM=offscreen` + `ADAPT_HEADLESS=1`，所有
+  `QMessageBox` / `QInputDialog` 走包装函数直接返回默认值，否则 offscreen 下弹窗会永久阻塞
+  （第一次 CI 就是这么挂 13 分钟的）
+
+> ⚠️ 踩过的坑：**Windows 上 Qt 的 `QPdfWriter` 生成出来的 PDF 没有文本层**（同一次运行里
+> 找不到可嵌入字体，文字被画成了路径）。所以测试**不能**依赖它生成“带文字”的 fixture ——
+> `migratetest` 现在自己手写 PDF（标准 Helvetica、无嵌入字体），跨平台行为完全一致。
 
 ### 附：三种拿到 Windows 构建的途径
 
 | 途径 | 需要什么 | 适用 |
 |---|---|---|
-| **GitHub Actions**（最省事） | 一个 GitHub 账号 | `.github/workflows/windows-portable.yml` 已写好：手动触发 → 真 Windows runner 编译 MuPDF + 本项目 → 跑 11 个测试 → 上传 `AdaptNote-windows-x64` 产物 zip。免费、约 30–40 分钟 |
+| **GitHub Actions**（已跑通） | 一个 GitHub 账号 | `.github/workflows/windows-portable.yml`：手动触发 → 真 Windows runner 编译 MuPDF + 本项目 → 跑 11 个测试 → 上传 `AdaptNote-windows-x64` 产物 zip。免费、约 45–55 分钟（MuPDF 约 10 分钟，应用约 30 分钟） |
 | **本机 QEMU/KVM** | Windows ISO | `scripts/windows-vm.sh <iso>`：2 vCPU / 3 GB / 40 GB qcow2、KVM 加速、SMB 共享目录把 zip 取回。建议装 **Server Core** 或 **LTSC**（无桌面也够用，测试跑 offscreen） |
 | 云 Windows 主机 | 按小时计费 | 2c4g 可用但紧（见下），4c8g 更省心 |
 
@@ -349,10 +376,13 @@ AdaptNote-<ver>-windows-x64/
 
 ### 5. 尚未验证 / 需要你在 Windows 上确认
 
-- **没有在真机编译过**（本仓库是在 Linux 上做的，这里没有 MSVC，也无法交叉编译 Qt）：上面的 CMake/PowerShell 是按官方文档写的，第一次跑可能需要小修。
-- MuPDF 的 `nmake` 目标名与库路径随版本略有差异，请以你 checkout 的版本为准。
-- Windows 上**墨迹压感**依赖 Qt 的 `QTabletEvent`（Wacom/WinTab 驱动），已实现但未在真机试过。
-- 同步的 WebDAV 依赖 Qt Network + 打包的 TLS 插件；自签证书的服务器可能需要额外信任配置。
+编译、链接、11 套自动化测试、打包都已经在真 Windows runner 上跑通。仍然**没有**验证的是
+需要人眼/硬件的部分：
+
+- **Windows 上的实际界面手感**（字体渲染、高分屏缩放、深浅色主题）——CI 只跑 offscreen
+- Windows 上**墨迹压感**依赖 Qt 的 `QTabletEvent`（Wacom/WinTab 驱动），已实现但未在真机试过
+- 桌面快捷方式/文件关联（本项目刻意不做注册表改动，保持绿色便携）
+- 同步的 WebDAV 依赖 Qt Network + 打包的 TLS 插件；自签证书的服务器可能需要额外信任配置
 
 ## 性能（实测，`bash scripts/bench.sh` 可复现）
 
