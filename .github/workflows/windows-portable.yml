@@ -46,14 +46,19 @@ jobs:
         with:
           arch: x64
 
-      - name: Build MuPDF
+      # MuPDF 1.21.1 has no Makefile.nmake; the Windows build is the MSVC solution
+      # under platform/win32. Building the `libmupdf` target pulls in libthirdparty,
+      # libmuthreads and libresources automatically.
+      - name: Build MuPDF (MSBuild)
         shell: pwsh
         run: |
           git clone --depth 1 --branch 1.21.1 --recursive https://github.com/ArtifexSoftware/mupdf.git C:\mupdf
-          cd C:\mupdf
-          # nmake comes with the MSVC toolchain the runner already has
-          cmd /c "nmake -f Makefile.nmake HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no build=release"
+          if (-not (Test-Path C:\mupdf\platform\win32\mupdf.sln)) { throw "mupdf.sln missing" }
+          cd C:\mupdf\platform\win32
+          msbuild mupdf.sln /m /t:libmupdf /p:Configuration=Release /p:Platform=x64 /v:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw "mupdf build failed" }
+          Get-ChildItem C:\mupdf\platform\win32\x64\Release\*.lib |
+              Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
 
       - name: Configure
         shell: pwsh

@@ -25,13 +25,20 @@ if(WIN32)
                PATHS ${MUPDF_ROOT}/platform/win32/x64/Release
                      ${MUPDF_ROOT}/build/release ${MUPDF_ROOT}/lib
                      "${CMAKE_SOURCE_DIR}/third_party/mupdf/lib")
+  # The MSVC solution emits several static libs (mupdf / thirdparty / muthreads /
+  # resources); link them all, in this order, plus the Win32 system libs they need.
+  file(GLOB MUPDF_WIN_EXTRA
+       "${MUPDF_ROOT}/platform/win32/x64/Release/libthirdparty.lib"
+       "${MUPDF_ROOT}/platform/win32/x64/Release/libmuthreads.lib"
+       "${MUPDF_ROOT}/platform/win32/x64/Release/libresources.lib")
   if(NOT MUPDF_INCLUDE_DIR OR NOT MUPDF_LIB)
     message(FATAL_ERROR
       "MuPDF not found. Build it (nmake HAVE_X11=no) and pass -DMUPDF_ROOT=<dir>, "
       "or drop it into third_party/mupdf/.")
   endif()
-  set(MUPDF_LIBS ${MUPDF_LIB})
-  message(STATUS "MuPDF: ${MUPDF_LIB}")
+  set(MUPDF_LIBS ${MUPDF_LIB} ${MUPDF_WIN_EXTRA}
+      user32 gdi32 advapi32 ole32 shell32 ws2_32 comdlg32)
+  message(STATUS "MuPDF: ${MUPDF_LIB} (+ ${MUPDF_WIN_EXTRA})")
 else()
   find_path(MUPDF_INCLUDE_DIR mupdf/fitz.h PATHS /usr/include)
   find_library(MUPDF_LIB mupdf PATHS /usr/lib)
