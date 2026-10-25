@@ -56,6 +56,17 @@ jobs:
         run: |
           git clone --depth 1 --branch 1.21.1 --recursive https://github.com/ArtifexSoftware/mupdf.git C:\mupdf
           if (-not (Test-Path C:\mupdf\platform\win32\mupdf.sln)) { throw "mupdf.sln missing" }
+
+          # MuPDF's Release config uses the static CRT (/MT); Qt requires /MD, and mixing
+          # them fails at link time with LNK2038 RuntimeLibrary mismatch.
+          Get-ChildItem C:\mupdf\platform\win32\*.vcxproj | ForEach-Object {
+              $c = Get-Content $_.FullName -Raw
+              $c = $c -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>',
+                                '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
+              Set-Content -Path $_.FullName -Value $c -NoNewline
+          }
+          Write-Host "patched RuntimeLibrary -> MultiThreadedDLL (shared CRT)"
+
           cd C:\mupdf\platform\win32
           msbuild mupdf.sln /m /t:libmupdf /p:Configuration=Release /p:Platform=x64 /v:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw "mupdf build failed" }
