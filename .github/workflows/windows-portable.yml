@@ -123,8 +123,12 @@ jobs:
             } elseif ($proc.ExitCode -ne 0) {
                 $failed += $t
             }
-            Get-Content $log -Tail 12 | ForEach-Object { Write-Host "   $_" }
-            if (Test-Path "$t.err.txt") { Get-Content "$t.err.txt" -Tail 5 | ForEach-Object { Write-Host "   E $_" } }
+            if ($proc.ExitCode -ne 0) {
+                Get-Content $log | ForEach-Object { Write-Host "   $_" }
+                if (Test-Path "$t.err.txt") { Get-Content "$t.err.txt" | ForEach-Object { Write-Host "   E $_" } }
+            } else {
+                Get-Content $log -Tail 3 | ForEach-Object { Write-Host "   $_" }
+            }
           }
           if ($failed.Count -gt 0) { throw "failed: $($failed -join ', ')" }
 
@@ -133,6 +137,18 @@ jobs:
         env:
           ADAPT_HEADLESS: '1'
         run: pwsh -File scripts\make_portable.ps1 -QtDir "$env:QT_ROOT_DIR" -MuPdfRoot C:\mupdf
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: |
+            build-win/*.pdf
+            build-win/*.out.txt
+            build-win/*.err.txt
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
