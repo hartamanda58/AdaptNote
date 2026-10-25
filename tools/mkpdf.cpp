@@ -2,6 +2,7 @@
 // Page size is A4 in points (72 dpi), so PDF coordinates == painter coordinates.
 #include <QGuiApplication>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFontMetrics>
 #include <QPageSize>
 #include <QPainter>
@@ -23,6 +24,20 @@ const char* kEn =
     "The point of a reading tool is not to display pages, but to capture what you "
     "understood while you understood it. Highlights, notes and structure are the "
     "artifacts that survive after the book is closed.";
+
+// Qt can only produce a *text* layer when the font is available and embeddable.
+// Picking a family that exists on the host keeps the fixture portable: Windows has
+// Arial, Linux ships DejaVu/Liberation, and the fallback list covers both.
+QString pickFamily(const QStringList& preferred)
+{
+    const QStringList available = QFontDatabase::families();
+    for (const QString& want : preferred) {
+        for (const QString& have : available) {
+            if (have.compare(want, Qt::CaseInsensitive) == 0) return have;
+        }
+    }
+    return preferred.isEmpty() ? QStringLiteral("Sans Serif") : preferred.first();
+}
 
 QString wrap(const QString& text, const QFont& font, double width)
 {
@@ -89,8 +104,15 @@ int main(int argc, char** argv)
 
     const QRectF body(page.left() + 62, page.top() + 90, page.width() - 124, page.height());
 
-    const QString family = latinOnly ? QStringLiteral("DejaVu Sans")
-                                     : QStringLiteral("Noto Sans CJK SC");
+    QString family = latinOnly
+                         ? pickFamily({QStringLiteral("DejaVu Sans"), QStringLiteral("Arial"),
+                                       QStringLiteral("Liberation Sans"),
+                                       QStringLiteral("Noto Sans"), QStringLiteral("Helvetica")})
+                         : pickFamily({QStringLiteral("Noto Sans CJK SC"),
+                                       QStringLiteral("Microsoft YaHei"),
+                                       QStringLiteral("SimSun"), QStringLiteral("DejaVu Sans"),
+                                       QStringLiteral("Arial")});
+    std::fprintf(stderr, "mkpdf: using font family '%s'\n", qPrintable(family));
     QFont fTitle(family, 22, QFont::Bold);
     QFont fHead(family, 14, QFont::DemiBold);
     QFont fBody(family, 10.5);
