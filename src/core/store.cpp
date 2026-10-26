@@ -136,16 +136,31 @@ void Store::repairSearchIndex()
         if (q.exec(QString::fromLatin1(sql)) && q.next()) n = q.value(0).toLongLong();
         return n;
     };
-    const qint64 live = count("select count(*) from notes where deleted=0");
+    const qint64 live = count("select count(*) from markups where deleted=0");
     const qint64 indexed = count("select count(*) from notes_fts");
     if (live < 0 || indexed < 0 || live == indexed) return;
 
-    // drop rows of notes that are gone (or tombstoned), then index whatever is missing
-    q.exec("delete from notes_fts where id not in (select id from notes where deleted=0)");
-    if (!q.exec("insert into notes_fts(id,docName,text,comment,tags)"
-                " select id, docName, text, comment, tags from notes"
-                " where deleted=0 and id not in (select id from notes_fts)"))
+    // 1) rows of notes that are gone (or tombstoned) must not stay searchable
+    q.exec("delete from notes_fts where id not in (select id from markups where deleted=0)");
+
+    // 2) index whatever is missing. Done row by row because docName is derived from the
+    //    path (the markups table only stores docPath; notes_fts keeps the bare name).
+    QSqlQuery src(QSqlDatabase::database(conn_));
+    if (!src.exec("select id, docPath, text, comment, tags from markups"
+                  " where deleted=0 and id not in (select id from notes_fts)"))
         return;
+    QVector<QVariantList> rows;
+    while (src.next()) {
+        rows.append({src.value(0), QFileInfo(src.value(1).toString()).completeBaseName(),
+                     src.value(2), src.value(3), src.value(4)});
+    }
+    QSqlQuery ins(QSqlDatabase::database(conn_));
+    ins.prepare("insert into notes_fts(id,docName,text,comment,tags) values(?,?,?,?,?)");
+    for (const QVariantList& row : rows) {
+        ins.finish();
+        for (const QVariant& v : row) ins.addBindValue(v);
+        ins.exec();
+    }
 
     indexedFingerprint_.clear();
     knownIndexLoaded_ = false;
