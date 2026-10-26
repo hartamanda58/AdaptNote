@@ -90,6 +90,10 @@ jobs:
           .\build-win\mkpdf.exe .\build-win\test2.pdf --blank-first
           python scripts/make_test_epub.py .\build-win\test.epub
 
+      - name: Check headless dialog guard
+        shell: pwsh
+        run: python scripts/check_dialogs.py
+
       - name: Run tests
         shell: pwsh
         env:

@@ -308,6 +308,40 @@ int main(int argc, char** argv)
                   QStringLiteral("group key = %1").arg(first.groupKey));
         }
 
+        // a parentId cycle must not make groups (and their notes) vanish from the tree.
+        // Sync merge can produce one: device A moves X under Y, device B moves Y under X.
+        {
+            MindGroup x;
+            x.id = QStringLiteral("cyc-a");
+            x.name = QStringLiteral("循环 A");
+            x.parentId = QStringLiteral("cyc-b");
+            MindGroup y;
+            y.id = QStringLiteral("cyc-b");
+            y.name = QStringLiteral("循环 B");
+            y.parentId = QStringLiteral("cyc-a");
+
+            Markup inA = a;
+            inA.id = QStringLiteral("cyc-note");
+            inA.mindGroup = QStringLiteral("cyc-a");
+
+            const mind::Node cyc =
+                mind::buildFromNotes(QStringLiteral("书"), {inA}, {x, y});
+            check(cyc.children.size() == 1,
+                  QStringLiteral("a parentId cycle keeps one top-level group (%1)")
+                      .arg(cyc.children.size()));
+            int found = 0;
+            std::function<void(const mind::Node&)> walk = [&](const mind::Node& n) {
+                if (n.markupId == QStringLiteral("cyc-note")) ++found;
+                for (const mind::Node& c : n.children) walk(c);
+            };
+            walk(cyc);
+            check(found == 1,
+                  QStringLiteral("the note under a cycling group still appears (%1)").arg(found));
+            check(mind::nodeCount(cyc) == 4,
+                  QStringLiteral("cycle tree has %1 nodes (root + 2 groups + note = 4)")
+                      .arg(mind::nodeCount(cyc)));
+        }
+
         // with first class groups the label comes from the entity, not the note
         {
             MindGroup group;

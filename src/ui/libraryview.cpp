@@ -25,6 +25,25 @@
 namespace an {
 namespace {
 
+// ADAPT_HEADLESS=1 (CI, scripts) must never open a modal dialog: nothing would answer it.
+const bool kHeadless = qEnvironmentVariableIsSet("ADAPT_HEADLESS");
+
+QString askText(QWidget* parent, const QString& title, const QString& label,
+                const QString& initial = {})
+{
+    if (kHeadless) return QString();
+    bool ok = false;
+    const QString s = QInputDialog::getText(parent, title, label, QLineEdit::Normal, initial, &ok);
+    return ok ? s : QString();
+}
+
+bool confirm(QWidget* parent, const QString& title, const QString& text)
+{
+    if (kHeadless) return false;
+    return QMessageBox::question(parent, title, text, QMessageBox::Yes | QMessageBox::No,
+                                 QMessageBox::No) == QMessageBox::Yes;
+}
+
 QString typeLabel(MarkupType t)
 {
     switch (t) {
@@ -139,26 +158,23 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
         QString current;
         for (const DocRow& r : rows_)
             if (r.path == paths.first()) current = r.title;
-        bool ok = false;
-        const QString title = QInputDialog::getText(this, QStringLiteral("重命名"),
-                                                    QStringLiteral("书名："), QLineEdit::Normal,
-                                                    current, &ok);
-        if (!ok || title.trimmed().isEmpty()) return;
+        const QString title =
+            askText(this, QStringLiteral("重命名"), QStringLiteral("书名："), current);
+        if (title.trimmed().isEmpty()) return;
         if (renameSelected(title.trimmed())) emit libraryChanged();
     });
 
     connect(forgetBtn, &QPushButton::clicked, this, [this]() {
         const QStringList paths = selectedDocumentPaths();
         if (paths.isEmpty()) return;
-        const auto answer = QMessageBox::question(
+        const bool answer = confirm(
             this, QStringLiteral("从书库移除"),
             QStringLiteral("从书库移除选中的 %1 个文档？\n\n"
                            "· 笔记会被标记删除（同步时其他设备也会移除）\n"
                            "· 书籍文件本身不会被删除\n"
                            "· 重新打开该文件即可恢复阅读与位置记录")
-                .arg(paths.size()),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (answer != QMessageBox::Yes) return;
+                .arg(paths.size()));
+        if (!answer) return;
         if (forgetSelected()) emit libraryChanged();
     });
 

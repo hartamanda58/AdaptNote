@@ -86,6 +86,8 @@ public:
     QVector<MindGroup> mindGroups(const QString& docPath) const;   // live only
     QVector<MindGroup> mindGroupsIncludingDeleted(const QString& docPath) const;
     bool upsertMindGroup(const MindGroup& g, QString* error = nullptr, bool writeMirror = true);
+    // True when re-parenting `id` under `parentId` would create a loop.
+    bool wouldCycle(const QString& id, const QString& parentId) const;
     bool removeMindGroup(const QString& id);                      // tombstone
     MindGroup stampGroupForLocalWrite(const MindGroup& g);
     // Returns the id of the group with that name, creating it when missing.

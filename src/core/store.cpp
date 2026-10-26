@@ -992,9 +992,39 @@ QVector<MindGroup> Store::mindGroupsIncludingDeleted(const QString& docPath) con
     return out;
 }
 
-bool Store::upsertMindGroup(const MindGroup& g, QString* error, bool writeMirror)
+// True when making `parentId` the parent of `id` would close a loop.
+bool Store::wouldCycle(const QString& id, const QString& parentId) const
+{
+    if (id.isEmpty() || parentId.isEmpty()) return false;
+    if (id == parentId) return true;
+    QString cursor = parentId;
+    QSet<QString> seen;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("select parentId from mind_groups where id=?");
+    for (int guard = 0; guard < 512 && !cursor.isEmpty(); ++guard) {
+        if (cursor == id) return true;
+        if (seen.contains(cursor)) return false;   // already broken upstream; stop walking
+        seen.insert(cursor);
+        q.bindValue(0, cursor);
+        if (!q.exec() || !q.next()) return false;
+        cursor = q.value(0).toString();
+    }
+    return false;
+}
+
+bool Store::upsertMindGroup(const MindGroup& gIn, QString* error, bool writeMirror)
 {
     if (!open_) return false;
+
+    // A merge can install parentId edges that were legal on each device but form a cycle
+    // once combined (A moved under B on one side, B under A on the other). The mind map and
+    // the "export by mind map" path walk parents, so a cycle would silently drop those
+    // groups *and their notes* from the tree. Hoist the offending group to the top level
+    // instead of storing a broken edge.
+    MindGroup g = gIn;
+    if (!g.parentId.isEmpty() && !g.deleted && wouldCycle(g.id, g.parentId))
+        g.parentId.clear();
+
     QSqlQuery q(QSqlDatabase::database(conn_));
     q.prepare("insert into mind_groups(id,docPath,name,parentId,[order],updated,deleted,vv,deviceId)"
               " values(?,?,?,?,?,?,?,?,?)"

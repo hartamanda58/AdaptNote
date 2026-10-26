@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <functional>
 
+#include <QSet>
+#include <QStringList>
+
 namespace an {
 namespace mind {
 
@@ -43,10 +46,35 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         if (g.deleted) continue;
         byId.insert(g.id, g);
     }
+    // Sanitise parent edges before building: a cycle (two devices re-parenting the same
+    // pair in opposite directions, or hand-edited JSON) would leave every group of the loop
+    // unreachable from the root, so their notes would disappear from the mind map and from
+    // "export by mind map" without any error. Hoist the smallest id of each loop instead.
+    QHash<QString, QString> parentOf;
     for (auto it = byId.constBegin(); it != byId.constEnd(); ++it) {
-        const QString parent = byId.value(it.key()).parentId;
-        childrenOf[byId.contains(parent) ? parent : QString()].append(it.key());
+        QString parent = byId.value(it.key()).parentId;
+        if (!byId.contains(parent)) parent.clear();
+        parentOf.insert(it.key(), parent);
     }
+    for (auto it = byId.constBegin(); it != byId.constEnd(); ++it) {
+        QStringList seen;
+        QString cursor = it.key();
+        while (!cursor.isEmpty()) {
+            if (seen.contains(cursor)) {
+                // loop detected on this chain: break it at the lexicographically smallest
+                // member so the choice is deterministic across devices
+                QString smallest = seen.first();
+                for (const QString& id : seen)
+                    if (id < smallest) smallest = id;
+                parentOf[smallest] = QString();
+                break;
+            }
+            seen.append(cursor);
+            cursor = parentOf.value(cursor);
+        }
+    }
+    for (auto it = parentOf.constBegin(); it != parentOf.constEnd(); ++it)
+        childrenOf[it.value()].append(it.key());
     auto sortIds = [&](QVector<QString>& ids) {
         std::sort(ids.begin(), ids.end(), [&](const QString& a, const QString& b) {
             const MindGroup ga = byId.value(a);
@@ -75,18 +103,26 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
     };
     for (auto it = notesOf.begin(); it != notesOf.end(); ++it) sortNotes(it.value());
 
+    QSet<QString> emitted;   // belt and braces: never visit a group twice
     std::function<Node(const QString&)> buildGroup = [&](const QString& id) -> Node {
         const MindGroup g = byId.value(id);
         Node node;
         node.text = g.name;
         node.groupKey = QStringLiteral("group:%1").arg(id);
         node.page = -1;
-        for (const QString& childId : childrenOf.value(id)) node.children.append(buildGroup(childId));
+        emitted.insert(id);
+        for (const QString& childId : childrenOf.value(id)) {
+            if (emitted.contains(childId)) continue;
+            node.children.append(buildGroup(childId));
+        }
         for (const Markup& m : notesOf.value(id)) node.children.append(leafOf(m));
         return node;
     };
 
-    for (const QString& topId : childrenOf.value(QString())) root.children.append(buildGroup(topId));
+    for (const QString& topId : childrenOf.value(QString())) {
+        if (emitted.contains(topId)) continue;
+        root.children.append(buildGroup(topId));
+    }
 
     // ---- notes without an explicit group: page buckets, sorted by page ----
     sortNotes(orphaned);

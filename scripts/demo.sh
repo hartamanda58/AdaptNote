@@ -53,6 +53,7 @@ rm -rf shots/exports && mkdir -p shots/exports
 QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1400x950x24" \
   ./build/adaptnote --doc build/test.pdf --demo --export-dir shots/exports >/dev/null 2>&1
 python3 scripts/validate_exports.py shots/exports
+python3 scripts/check_dialogs.py
 
 echo
 echo "== screenshots"

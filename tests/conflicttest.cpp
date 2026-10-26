@@ -1,5 +1,6 @@
 // Conflict resolution: pairing, the three actions, and the dialog wiring.
 #include "core/store.h"
+#include "mind/tree.h"
 #include "sync/conflicts.h"
 #include "sync/sync_manager.h"
 #include "ui/conflictdialog.h"
@@ -10,6 +11,7 @@
 #include <QTemporaryDir>
 
 #include <cstdio>
+#include <functional>
 
 using namespace an;
 
@@ -71,6 +73,47 @@ int main(int argc, char** argv)
     check(merged.conflicts == 1 && merged.merged.size() == 2,
           QStringLiteral("merge produced %1 conflict(s) / %2 notes")
               .arg(merged.conflicts).arg(merged.merged.size()));
+
+    // ---- a merge must never persist a parentId cycle (it silently hides groups + notes) ----
+    {
+        MindGroup a;
+        a.id = QStringLiteral("cyc-a");
+        a.docPath = doc;
+        a.name = QStringLiteral("A");
+        check(store.upsertMindGroup(a), QStringLiteral("created group A"));
+        MindGroup b;
+        b.id = QStringLiteral("cyc-b");
+        b.docPath = doc;
+        b.name = QStringLiteral("B");
+        b.parentId = QStringLiteral("cyc-a");
+        check(store.upsertMindGroup(b), QStringLiteral("created group B under A"));
+        check(!store.setMindGroupParent(QStringLiteral("cyc-a"), QStringLiteral("cyc-b")),
+              QStringLiteral("setMindGroupParent still rejects a cycle"));
+
+        // sync path: upsertMindGroup with a cycling edge (what mergeGroups does)
+        MindGroup a2 = a;
+        a2.parentId = QStringLiteral("cyc-b");
+        check(store.upsertMindGroup(a2), QStringLiteral("upsert of the cycling edge succeeded"));
+        bool hoisted = false;
+        for (const MindGroup& g : store.mindGroups(doc))
+            if (g.id == QStringLiteral("cyc-a") && g.parentId.isEmpty()) hoisted = true;
+        check(hoisted, QStringLiteral("cycling edge hoisted to the top level, not stored"));
+
+        // and the tree keeps every group reachable
+        Markup note = makeNote(doc, QStringLiteral("cyc-note"), QStringLiteral("在 B 组里"),
+                               QStringLiteral("A:10,B:20"), QStringLiteral("A"), 10);
+        note.mindGroup = QStringLiteral("cyc-b");
+        store.upsertMarkup(store.stampForLocalWrite(note));
+        const mind::Node tree =
+            mind::buildFromNotes(QStringLiteral("书"), store.markups(doc), store.mindGroups(doc));
+        int groupsSeen = 0;
+        std::function<void(const mind::Node&)> walk = [&](const mind::Node& n) {
+            if (n.groupKey.startsWith(QStringLiteral("group:"))) ++groupsSeen;
+            for (const mind::Node& ch : n.children) walk(ch);
+        };
+        walk(tree);
+        check(groupsSeen == 2, QStringLiteral("both groups still on the tree (%1)").arg(groupsSeen));
+    }
 
     for (const Markup& m : merged.merged) store.upsertMarkup(store.stampForLocalWrite(m));
 

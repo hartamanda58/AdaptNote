@@ -99,6 +99,26 @@ QString askMultiline(QWidget* parent, const QString& title, const QString& label
     return ok ? s : QString();
 }
 
+// Yes/No with an explicit default: headless runs pick the default instead of blocking.
+bool askYes(QWidget* parent, const QString& title, const QString& text, bool defaultYes)
+{
+    if (kHeadless) return defaultYes;
+    return QMessageBox::question(parent, title, text, QMessageBox::Yes | QMessageBox::No,
+                                 defaultYes ? QMessageBox::Yes : QMessageBox::No)
+           == QMessageBox::Yes;
+}
+
+// Single choice from a list. Headless runs keep the current entry.
+QString askItem(QWidget* parent, const QString& title, const QString& label,
+                const QStringList& items, int current = 0)
+{
+    if (kHeadless) return items.value(current);
+    bool ok = false;
+    const QString s =
+        QInputDialog::getItem(parent, title, label, items, current, false, &ok);
+    return ok ? s : QString();
+}
+
 
 const char* kColors[] = {"#FFD500", "#34A853", "#D93025", "#3D8BFD", "#FF9800"};
 
@@ -551,10 +571,9 @@ void MainWindow::buildToolbar()
     connect(color, &QAction::triggered, this, [this]() {
         QStringList names;
         for (const char* c : kColors) names << QString::fromLatin1(c);
-        bool ok = false;
-        const QString s = QInputDialog::getItem(this, QStringLiteral("标注颜色"),
-                                                QStringLiteral("选择颜色："), names, 0, false, &ok);
-        if (ok && !s.isEmpty()) markupColor_ = QColor(s);
+        const QString s = askItem(this, QStringLiteral("标注颜色"),
+                                  QStringLiteral("选择颜色："), names, 0);
+        if (!s.isEmpty()) markupColor_ = QColor(s);
     });
 
     QAction* del = tb->addAction(glyphIcon("delete"), QString());
@@ -614,18 +633,18 @@ void MainWindow::buildToolbar()
 
         bool intoCurrent = false;
         if (!docPath_.isEmpty()) {
-            const auto answer = QMessageBox::question(
+            const bool answer = askYes(
                 this, QStringLiteral("导入到哪本书"),
                 QStringLiteral("把导入的笔记挂到当前打开的《%1》吗？\n\n"
                                "选「No」则按文件里记录的书名另建一条文档记录。")
                     .arg(QFileInfo(docPath_).completeBaseName()),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-            intoCurrent = (answer == QMessageBox::Yes);
+                    true);
+            intoCurrent = answer;
         }
 
         QString err;
         if (!importNotes(path, intoCurrent, &err))
-            QMessageBox::warning(this, QStringLiteral("导入失败"), err);
+            warnUser(this, QStringLiteral("导入失败"), err);
     });
 
     auto* conflictAction = tb->addAction(glyphIcon("note", QColor("#d93025")),
@@ -1558,7 +1577,7 @@ void MainWindow::doExportLibrary(const QString& format)
 
     QString err;
     if (!exportLibrary(format, path, &err)) {
-        QMessageBox::warning(this, QStringLiteral("导出失败"), err);
+        warnUser(this, QStringLiteral("导出失败"), err);
         return;
     }
     statusBar()->showMessage(
@@ -1591,7 +1610,7 @@ void MainWindow::doExport(const QString& format)
     QString err;
     const int count = exportFiltered_ ? notesShown().size() : markups_.size();
     if (!exportMarkups(format, path, &err, exportFiltered_)) {
-        QMessageBox::warning(this, QStringLiteral("导出失败"), err);
+        warnUser(this, QStringLiteral("导出失败"), err);
         return;
     }
     statusBar()->showMessage(QStringLiteral("已导出 %1 条笔记到 %2").arg(count).arg(path), 5000);
@@ -1658,17 +1677,16 @@ void MainWindow::runSync()
 
     if (!rep.ok) {
         statusBar()->showMessage(rep.summary(), 6000);
-        QMessageBox::warning(this, QStringLiteral("同步失败"), rep.error);
+        warnUser(this, QStringLiteral("同步失败"), rep.error);
         return;
     }
 
     statusBar()->showMessage(rep.summary(), 6000);
     if (rep.conflicts > 0) {
-        QMessageBox::information(
-            this, QStringLiteral("同步完成（有冲突）"),
-            QStringLiteral("有 %1 处冲突：两个版本都已保留，副本带 #conflict 标签。\n\n%2")
-                .arg(rep.conflicts)
-                .arg(rep.messages.join(QLatin1Char('\n'))));
+        inform(this, QStringLiteral("同步完成（有冲突）"),
+               QStringLiteral("有 %1 处冲突：两个版本都已保留，副本带 #conflict 标签。\n\n%2")
+                   .arg(rep.conflicts)
+                   .arg(rep.messages.join(QLatin1Char('\n'))));
     }
 }
 
@@ -2023,7 +2041,7 @@ void MainWindow::editAiRoles()
 
     QString err;
     if (!ai::saveRoles(store_.dataDir() + QStringLiteral("/ai_roles.json"), aiRoles_, &err)) {
-        QMessageBox::warning(this, QStringLiteral("保存失败"), err);
+        warnUser(this, QStringLiteral("保存失败"), err);
         return;
     }
     if (aiRoleCombo_) {
@@ -2448,11 +2466,9 @@ void MainWindow::showMindMap()
     auto* row = new QHBoxLayout;
     auto* newGroupBtn = new QPushButton(QStringLiteral("新建分组…"), &dlg);
     connect(newGroupBtn, &QPushButton::clicked, this, [this, rebuild]() {
-        bool ok = false;
-        const QString name = QInputDialog::getText(this, QStringLiteral("新建分组"),
-                                                    QStringLiteral("分组名："), QLineEdit::Normal,
-                                                    QStringLiteral("新分组"), &ok);
-        if (!ok || name.trimmed().isEmpty()) return;
+        const QString name = askText(this, QStringLiteral("新建分组"),
+                                     QStringLiteral("分组名："), QStringLiteral("新分组"));
+        if (name.trimmed().isEmpty()) return;
         if (!createMindGroup(name.trimmed()).isEmpty()) rebuild();
     });
     row->addWidget(newGroupBtn);
@@ -2474,7 +2490,7 @@ void MainWindow::showMindMap()
         const QString path = QFileDialog::getSaveFileName(&dlg, QStringLiteral("导出脑图 PNG"), base,
                                                           QStringLiteral("PNG (*.png)"));
         if (path.isEmpty()) return;
-        if (view->exportPng(path)) QMessageBox::information(&dlg, QStringLiteral("导出完成"), path);
+        if (view->exportPng(path)) inform(&dlg, QStringLiteral("导出完成"), path);
     });
     row->addWidget(pngBtn);
 
@@ -2511,20 +2527,16 @@ void MainWindow::showMindMap()
                 QMenu menu(view);
                 menu.addAction(QStringLiteral("重命名分组「%1」…").arg(name), [this, view, groupKey,
                                                                           name, rebuild]() {
-                    bool ok = false;
-                    const QString text = QInputDialog::getText(view, QStringLiteral("重命名分组"),
-                                                              QStringLiteral("分组名："),
-                                                              QLineEdit::Normal, name, &ok);
-                    if (!ok || text.trimmed().isEmpty()) return;
+                    const QString text =
+                        askText(view, QStringLiteral("重命名分组"), QStringLiteral("分组名："), name);
+                    if (text.trimmed().isEmpty()) return;
                     if (renameMindGroup(groupKey, text.trimmed())) rebuild();
                 });
                 menu.addAction(QStringLiteral("新建子分组…"), [this, view, groupKey, rebuild]() {
-                    bool ok = false;
-                    const QString text = QInputDialog::getText(view, QStringLiteral("新建子分组"),
-                                                               QStringLiteral("分组名："),
-                                                               QLineEdit::Normal,
-                                                               QStringLiteral("子分组"), &ok);
-                    if (!ok || text.trimmed().isEmpty()) return;
+                    const QString text = askText(view, QStringLiteral("新建子分组"),
+                                                 QStringLiteral("分组名："),
+                                                 QStringLiteral("子分组"));
+                    if (text.trimmed().isEmpty()) return;
                     if (!createMindGroup(text.trimmed(), groupIdOf(groupKey)).isEmpty()) rebuild();
                 });
                 menu.addAction(QStringLiteral("上移一级"), [this, groupKey, rebuild]() {
@@ -2655,7 +2667,7 @@ void MainWindow::showLibrary()
                 if (path.isEmpty()) return;
                 QString err;
                 if (!exportDocuments(docs, format, path, &err)) {
-                    QMessageBox::warning(this, QStringLiteral("导出失败"), err);
+                    warnUser(this, QStringLiteral("导出失败"), err);
                     return;
                 }
                 statusBar()->showMessage(
