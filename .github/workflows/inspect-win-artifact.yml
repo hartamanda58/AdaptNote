@@ -85,10 +85,14 @@ jobs:
           }
 
           Say "--- samples ---"
-          if (Test-Path (Join-Path $root.FullName "samples")) {
-            Get-ChildItem (Join-Path $root.FullName "samples") -File |
+          $sampleDir = Join-Path $root.FullName "samples"
+          $sampleCount = 0
+          if (Test-Path $sampleDir) {
+            Get-ChildItem $sampleDir -File |
               ForEach-Object { Say ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
-          } else { Say "  (no samples dir)" }
+            $sampleCount = @(Get-ChildItem $sampleDir -File).Count
+          }
+          if ($sampleCount -eq 0) { Say "  ERROR: samples/ is empty"; $failed = $true }
           Say ("TOTAL FILES: " + (Get-ChildItem $root.FullName -Recurse -File).Count)
 
           # ---------- real PE imports (dumpbin, not a string scan) ----------

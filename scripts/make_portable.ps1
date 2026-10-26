@@ -53,8 +53,15 @@ Copy-Item $exe.FullName (Join-Path $bin "adaptnote.exe")
 $windeployqt = if ($QtDir) { Join-Path $QtDir "bin\windeployqt.exe" } else { "windeployqt.exe" }
 Write-Host "== windeployqt ($windeployqt)"
 & $windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
-               --compiler-runtime (Join-Path $bin "adaptnote.exe")
+               (Join-Path $bin "adaptnote.exe")
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+# windeployqt only ships the redist *installer* with --compiler-runtime; we copy the DLLs
+# ourselves below, so prune the installer and the D3D shader compiler payload (~34 MB).
+foreach ($junk in @("vc_redist.x64.exe", "dxcompiler.dll", "dxil.dll")) {
+    $p = Join-Path $bin $junk
+    if (Test-Path $p) { Remove-Item $p -Force; Write-Host "   pruned $junk" }
+}
 
 # MSVC C runtime: windeployqt --compiler-runtime usually copies them; make sure.
 foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
@@ -65,8 +72,28 @@ foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
 }
 
 Write-Host "== samples"
-Copy-Item "build\test.pdf"  (Join-Path $stage "samples") -ErrorAction SilentlyContinue
-Copy-Item "build\test.epub" (Join-Path $stage "samples") -ErrorAction SilentlyContinue
+$samples = Join-Path $stage "samples"
+$copied = 0
+foreach ($name in @("test.pdf", "test.epub")) {
+    $src = Join-Path $BuildDir $name
+    if (-not (Test-Path $src)) { $src = Join-Path "build" $name }   # fallback for old layouts
+    if (Test-Path $src) { Copy-Item $src $samples; $copied++ }
+    else { Write-Host "   (missing $name in $BuildDir)" }
+}
+if ($copied -eq 0) { Write-Host "   WARNING: no sample documents staged" }
+
+Write-Host "== verify the staged tree"
+# Fail here rather than shipping a zip that cannot start: a missing platform plugin makes
+# Qt abort with "could not find or load the Qt platform plugin windows".
+foreach ($need in @("bin\adaptnote.exe", "bin\Qt6Core.dll", "bin\Qt6Gui.dll",
+                    "bin\Qt6Widgets.dll", "bin\platforms\qwindows.dll")) {
+    if (-not (Test-Path (Join-Path $stage $need))) { throw "staged package is missing $need" }
+}
+$kept = @("adaptnote.exe","Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","Qt6Network.dll",
+          "Qt6Sql.dll","Qt6Svg.dll","msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll")
+foreach ($f in (Get-ChildItem $bin -File | Where-Object { $_.Extension -eq ".dll" -or $_.Extension -eq ".exe" })) {
+    if ($kept -notcontains $f.Name) { Write-Host "   note: extra file in bin\$($f.Name)" }
+}
 
 Write-Host "== launcher"
 $launcher = @"
