@@ -78,6 +78,7 @@ endif()
 # ---- core library: model + store + engine (no GUI) ----
 add_library(adapt_core STATIC
   src/core/model.cpp
+  src/core/paths.cpp
   src/core/store.cpp
   src/core/textselect.cpp
   src/sync/vv.cpp

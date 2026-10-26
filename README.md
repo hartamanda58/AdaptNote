@@ -286,7 +286,9 @@ AdaptNote-<ver>-linux-x64/
 
 1. 打开 <https://github.com/hartamanda58/AdaptNote/actions/workflows/windows-portable.yml>
 2. 点最新的绿色 ✔ 那次 run，拉到页面底部 **Artifacts** → 下载 `AdaptNote-windows-x64`（约 65 MB）
-3. 解压后双击 `AdaptNote.bat`（不要直接双击 exe：`bat` 会把数据目录指向包内的 `data\`）
+3. 解压后双击 `AdaptNote.bat`（不要直接双击 exe：`bat` 会设 `ADAPT_DATA_DIR`，把数据目录指向包内的 `data\`）
+
+> Windows 上 Qt **不读 `XDG_DATA_HOME`**，所以启动器必须设 `ADAPT_DATA_DIR`；另外程序自己也会发现 exe 旁边的 `data\` 目录并优先使用它（见 `src/core/paths.h`）。
 
 想重新跑一遍：同一页面 **Run workflow** → `main` → 约 45–55 分钟。
 想看产物内部的完整清单（`bin\` 里的 dll、`platforms\qwindows.dll`、启动器内容、exe 的
@@ -342,7 +344,7 @@ pwsh -File scripts\make_portable.ps1 -QtDir C:\Qt\6.8.3\msvc2022_64 -MuPdfRoot C
 
 ```
 AdaptNote-<ver>-windows-x64/
-  AdaptNote.bat        启动器（把 XDG_DATA_HOME 指到 .\data，数据全在包内）
+  AdaptNote.bat        启动器（设 ADAPT_DATA_DIR / XDG_DATA_HOME 指向 .\data，数据全在包内）
   bin\adaptnote.exe
   bin\*.dll           windeployqt 收集的 Qt 运行库 + 插件 + MSVC 运行库
   data\               首次运行后生成（library.db / mirror / images / ai_roles.json）

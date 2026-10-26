@@ -67,6 +67,7 @@ cat > "$STAGE/AdaptNote.sh" <<'LAUNCHER'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export QT_PLUGIN_PATH="$HERE/plugins"
 export LD_LIBRARY_PATH="$HERE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ADAPT_DATA_DIR="$HERE/data"   # Qt reads XDG_* here, but be explicit
 export XDG_DATA_HOME="$HERE/data"
 export XDG_CONFIG_HOME="$HERE/data/config"
 export XDG_CACHE_HOME="$HERE/data/cache"

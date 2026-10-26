@@ -1,4 +1,5 @@
 // Headless self-test: engine, selection, storage, PDF write-back, EPUB.
+#include "core/paths.h"
 #include "core/store.h"
 #include "core/textselect.h"
 #include "render/mupdf_engine.h"
@@ -239,6 +240,31 @@ int main(int argc, char** argv)
               QStringLiteral("notes searchable after the index repair (%1)").arg(again.size()));
         const QVector<Markup> byTag = b.searchMarkups(QStringLiteral("方法论"), m.docPath);
         check(byTag.size() == 1, QStringLiteral("tags re-indexed too (%1)").arg(byTag.size()));
+    }
+
+    // data directory resolution: on Windows Qt ignores XDG_DATA_HOME, so a portable build
+    // must be steered explicitly or everything lands in %APPDATA%.
+    {
+        const QString exe = tmp.filePath("portable");
+        QDir().mkpath(exe + "/data");
+        const QString fallback = QStringLiteral("/fallback/appdata");
+        const QString none;
+
+        check(an::resolveDataDir(exe, none, fallback) == QDir::cleanPath(exe + "/data"),
+              QStringLiteral("a data/ folder next to the exe wins (%1)")
+                  .arg(an::resolveDataDir(exe, none, fallback)));
+
+        check(an::resolveDataDir(exe, QStringLiteral("mydata"), fallback)
+                  == QDir::cleanPath(exe + "/mydata"),
+              QStringLiteral("relative ADAPT_DATA_DIR resolves against the exe"));
+        check(an::resolveDataDir(exe, tmp.filePath("abs"), fallback)
+                  == QDir::cleanPath(tmp.filePath("abs")),
+              QStringLiteral("absolute ADAPT_DATA_DIR wins over the portable folder"));
+
+        const QString empty = tmp.filePath("no-data-here");
+        QDir().mkpath(empty);
+        check(an::resolveDataDir(empty, none, fallback) == fallback,
+              QStringLiteral("no portable folder -> per-user location"));
     }
 
     std::printf("\n=== 3c. mind groups (entities + legacy migration) ===\n");

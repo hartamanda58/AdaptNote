@@ -159,52 +159,55 @@ ai_roles.json         AI 角色（首次用内置 4 个播种，可编辑）
 
 ## 7. 踩过的坑（症状 → 根因 → 修复 → 覆盖它的测试）
 
-1. **`notes.tags` 触发 NOT NULL**：无标签时返回 `QString()`（null）→ Qt 绑成 SQL NULL。
+37. **`notes.tags` 触发 NOT NULL**：无标签时返回 `QString()`（null）→ Qt 绑成 SQL NULL。
    修复：非空使用 `QString::fromLatin1("")`。→ exporttest
-2. **`.apkg` 里笔记挂错文档**：同步/导出载荷带了本机绝对路径 → 别的设备上 docPath 对不上。
+36. **`.apkg` 里笔记挂错文档**：同步/导出载荷带了本机绝对路径 → 别的设备上 docPath 对不上。
    修复：线格式剥离 `docPath`，落库时挂回本地路径。→ synctest（"B has 3 notes"）
-3. **`syncAll()` 拉不到新书**：只遍历"有笔记的文档"→ 新设备打开一本书永远空。
+35. **`syncAll()` 拉不到新书**：只遍历"有笔记的文档"→ 新设备打开一本书永远空。
    修复：`documentPath = documents ∪ markups`。→ synctest
-4. **测试互相污染**：demo.sh 共用 `XDG_DATA_HOME`，前一个用例的笔记串进后一个 → 假失败。
+34. **测试互相污染**：demo.sh 共用 `XDG_DATA_HOME`，前一个用例的笔记串进后一个 → 假失败。
    修复：每个用例 `XDG_DATA_HOME=$(mktemp -d)`。
-5. **墨迹没落库**：`ink` 字段没加数据库列 → 重开后点数 0、画面上看不见。
+33. **墨迹没落库**：`ink` 字段没加数据库列 → 重开后点数 0、画面上看不见。
    修复：加列 + 迁移 + 读写 JSON。→ featuretest / visualtest
-6. **`QRectF::united` 吞掉零尺寸矩形**：Qt 把零尺寸当 null，`united` 返回另一个零尺寸矩形
+32. **`QRectF::united` 吞掉零尺寸矩形**：Qt 把零尺寸当 null，`united` 返回另一个零尺寸矩形
    → 笔迹包围盒退化成 4×4，命中框/可视区都错。修复：手算 min/max。→ p5test（bounds 断言）
-7. **401 错误体读不到**：`readyRead` 已把响应体读进缓冲，`finished` 里再 `readAll()` 得到空。
+31. **401 错误体读不到**：`readyRead` 已把响应体读进缓冲，`finished` 里再 `readAll()` 得到空。
    修复：优先解析缓冲。→ aitest（"api error surfaced"）
-8. **412 前先读完请求体**：假 WebDAV 服务器在条件失败分支没读完 body → keep-alive 串包，
+30. **412 前先读完请求体**：假 WebDAV 服务器在条件失败分支没读完 body → keep-alive 串包，
    导致"正确的 If-Match"反而 412。修复：先读 body 再判断。→ synctest（If-Match 两项）
-9. **旋转后阅读位置丢失**：`setRotation` 只重排不修正滚动位置。修复：记页内比例 → 重排 → 回位。
+29. **旋转后阅读位置丢失**：`setRotation` 只重排不修正滚动位置。修复：记页内比例 → 重排 → 回位。
    → visualtest（"rotated overlay stays inside the viewport"）
-10. **CJK 康熙部首**：某些 PDF 字体无 ToUnicode，提取出 `⻚`/`⼆`。修复：NFKC 归一化（
+28. **CJK 康熙部首**：某些 PDF 字体无 ToUnicode，提取出 `⻚`/`⼆`。修复：NFKC 归一化（
     Kangxi 区有效，Radicals Supplement 仍残留，见 §8）。
-11. **`const_cast` 调非 const 成员**：早期 `findMarkup` 只有非 const 版 → 改成 const/non-const 重载。
-12. **null QString 绑成 SQL NULL**：`searchMarkups(query, QString())` 里 `? = ''` 的守卫
+27. **`const_cast` 调非 const 成员**：早期 `findMarkup` 只有非 const 版 → 改成 const/non-const 重载。
+26. **null QString 绑成 SQL NULL**：`searchMarkups(query, QString())` 里 `? = ''` 的守卫
     在 NULL 下为假 → 跨库搜索与标签聚合全部返回空。修复：所有 scope 参数入口用 `nonNull()`
     归一化，并把「空 scope」显式解释为「整个书库」（`tagCounts` 改走 `allMarkups`）。→ librarytest
-13. **分组节点排序把「无分组」排到最前**：早期排序直接按 `mindGroup` 字符串比较，空串排最前，导致页面桶盖在用户分组之上。修复：显式分组优先、页面桶在后。→ p5test
-14. **分组迁移的方向性**：v0.6 把组名直接写在 `markups.mindGroup` 里，实体化后该字段必须是 id；迁移时用 `sha1(docPath|name)` 生成确定性 id，两台设备各自迁移同一份数据会得到同一个 id，避免了「同步后出现两个同名组」。→ selftest（legacy 库迁移）、synctest
-15. **重构时用「区间替换」删掉了整段实现**：把 `upsertMarkupRow` 与 `markups()` 之间的代码整体替换，连带删掉了 `removeMarkup` / `deviceId` / `documents` / 分组 CRUD 等十几��函数 —— 编译能过是因为这些函数的**头文件声明还在**，直到链接测试目标才炸。教训：改这种大文件要么小步 edit，要么改完立刻用「头文件声明 vs cpp 实现」的脚本对账（我最后就是这么补回来的）。
-16. **批量插入慢的元凶是每行一次 FTS 查询**：`indexMarkup` 每次都在 trigram 虚拟表上 SELECT 一次，3000 条新笔记 = 3000 次全表探测。改成 open 时一次性载入已索引 id 集合后，首次插入从 451 条/秒回到 1218 条/秒。→ featuretest（缓存）/ bench
-18. **分组树的两个易错点**：① 环路——把 A 挂到自己的子孙下会让建树无限递归，`setMindGroupParent` 沿 `parentId` 向上走一遍做检查；② 叶子节点的 groupKey——页面桶里的笔记原本是 null groupKey，导致 `groupKeyAt` 命中叶子后返回空串，拖拽目标判断失效；现在叶子继承所属桶/组的 key。→ selftest / p5test
+25. **分组节点排序把「无分组」排到最前**：早期排序直接按 `mindGroup` 字符串比较，空串排最前，导致页面桶盖在用户分组之上。修复：显式分组优先、页面桶在后。→ p5test
+24. **分组迁移的方向性**：v0.6 把组名直接写在 `markups.mindGroup` 里，实体化后该字段必须是 id；迁移时用 `sha1(docPath|name)` 生成确定性 id，两台设备各自迁移同一份数据会得到同一个 id，避免了「同步后出现两个同名组」。→ selftest（legacy 库迁移）、synctest
+23. **重构时用「区间替换」删掉了整段实现**：把 `upsertMarkupRow` 与 `markups()` 之间的代码整体替换，连带删掉了 `removeMarkup` / `deviceId` / `documents` / 分组 CRUD 等十几��函数 —— 编译能过是因为这些函数的**头文件声明还在**，直到链接测试目标才炸。教训：改这种大文件要么小步 edit，要么改完立刻用「头文件声明 vs cpp 实现」的脚本对账（我最后就是这么补回来的）。
+22. **批量插入慢的元凶是每行一次 FTS 查询**：`indexMarkup` 每次都在 trigram 虚拟表上 SELECT 一次，3000 条新笔记 = 3000 次全表探测。改成 open 时一次性载入已索引 id 集合后，首次插入从 451 条/秒回到 1218 条/秒。→ featuretest（缓存）/ bench
+21. **分组树的两个易错点**：① 环路——把 A 挂到自己的子孙下会让建树无限递归，`setMindGroupParent` 沿 `parentId` 向上走一遍做检查；② 叶子节点的 groupKey——页面桶里的笔记原本是 null groupKey，导致 `groupKeyAt` 命中叶子后返回空串，拖拽目标判断失效；现在叶子继承所属桶/组的 key。→ selftest / p5test
 20. **一次重排会改多条笔记**：普通 `MarkupCommand` 只能撤销一条，所以加了 `MultiMarkupCommand`（保存 before/after 列表，一步撤销）；重排算法抽成 `mind::planReorder()` 纯函数单独测试，顺带能验证「原位丢弃 = 无变化」。→ p5test / featuretest
-22. **Qt 会同时发 tablet 与 mouse 事件**：不处理就会一笔画两遍（一次压感、一次速度）。现在用 `stylusStroke_` 标记「这一笔归触控笔所有」，鼠标事件在笔画进行中被忽略。→ featuretest
-23. **测试里保存了指向临时容器的指针**：`const Markup*` 指向 `visibleMarkups()` 返回的临时 QVector，`settle()` 之后内容已失效，导致「鼠标笔迹压感 0.20」这种诡异断言失败。改成保存值拷贝 + 用 id 识别。
-25. **核心库不能依赖 Widgets**：导出器在 `adapt_core` 里，却想复用 `mind::buildFromNotes`，而 `mindmap.h` 会拉进 `QGraphicsView` → 编译失败。把纯树逻辑拆到 `mind/tree.{h,cpp}` 后，视图与导出共用同一套树构建，也顺带保证了「导出与界面看到的结构一致」。
-26. **OPML 叶子变自闭合标签后丢了元数据**：树形重写时笔记叶子不再带 `type/tags/_note`，独立校验脚本立刻抓到。修复：导出时按 markupId 回查笔记补属性（`mind::Node` 保持精简）。
-32. **写入 TEXT 标注时不能设 QuadPoints**：MuPDF 会让整条标注的写入抛异常，`/Contents` 因此丢失——读回来只有颜色没有批注。修法：Note 类型只设 Rect。
-34. **`$ORIGIN` 在 `set -u` 的 bash 里会被展开**：`echo "rpath ($ORIGIN/lib)"` 直接报 `ORIGIN: unbound variable`。用单引号或转义。
-40. **CI 上 offscreen 平台下弹窗会永久阻塞**：`QMessageBox::question` 没人点 → 测试进程挂死，第一次 Windows CI 在 `Run tests` 上挂了 13 分钟才被我手动取消。修法：`ADAPT_HEADLESS=1` 时所有确认/输入走包装函数返回默认值；并且给每个测试进程加 `WaitForExit(7min)` 超时。教训：无头环境里**任何模态调用都是死锁**。
-39. **Qt 6.5.x 在 VS18（MSVC 14.51）上编不过**：`qvarlengtharray.h` 用了被移除的 `stdext::checked_array_iterator`（C3861）。升到 **Qt 6.8.3 / msvc2022_64** 即好。→ 版本搭配比代码更常见是“编译不过”的原因。
-38. **MuPDF 1.21.1 根本没有 `Makefile.nmake`**（那是老版本）：Windows 上要走 `platform\win32\mupdf.sln` + `msbuild /t:libmupdf`；而且它默认 `/MT`，与 Qt 的 `/MD` 在链接期直接 `LNK2038`，必须先批量改写 vcxproj 里的 `RuntimeLibrary`。另外链接时要带齐 `libmupdf/libthirdparty/libmuthreads/libresources` 四个 `.lib`。
-37. **Windows 上 `QPdfWriter` 生成出来的 PDF 没有文本层**：`mkpdf` 用它造测试文档，Linux 上一切正常，Windows runner 上 11 套测试里只有 migratetest 挂——抽出来的页面要么没文本页，要么字符全丢。换字体（DejaVu → Arial、按 `QFontDatabase` 挑已装字体）都没用。根因是 Qt 在 Windows 上找不到可嵌入字体时会把文字**画成路径**。→ 结论：**测试 fixture 不能依赖 Qt 的 PDF 输出**；`migratetest` 现在自己手写 PDF（标准 Helvetica、不嵌入字体、手写 xref），跨平台字节级一致。教训：CI 上的失败先辨「被测代码」还是「测试自身」，否则会在错误的方向上改两轮。
-36. **MuPDF 的路径必须是 UTF-8**：`QFile::encodeName()` 在 Windows 返回 ANSI 代码页，中文书名直接打不开（Linux 上测不出来）。改成 `path.toUtf8()`，并用带空格的中文路径在 Linux 上做了回归。→ selftest / 手工验证
-35. **打包 GTK 平台主题会拖进整套桌面栈**：`libqgtk3.so` → gtk3/gio/gdk ≈15 MB；便携版只保留 Qt 原生主题即可（另外记得 strip 库）。68 MB → 61 MB zip。
-34. **`mutool insert` 在 Debian 的 mupdf-tools 里不存在**：想用它造「多一页」的修订版做回归，结果子进程失败、拿到的 PDF 打不开，测试直接段错误（`revised.textPage()` 返回空）。改用自家 `mkpdf --blank-first` 生成两版，稳定可控。教训：外部工具依赖要**先探测能力**，并且测试里对「生成失败」要有明确的短路，而不是继续往下解引用。→ migratetest
-31. **锚点在 CJK 文本上要按字符数而不是字节**：`anchorOffset` 用的是 `TextPage::chars` 的下标，和 `quadsForRange()` 同一套坐标，重建 quad 时用「原摘录的字符数」做跨度；若在两端用了不同口径，中文笔记会错位几个字。→ featuretest（重排后仍落在同一段文字上）
-29. **基准测量的三个陷阱**（本轮全踩了一遍）：① 重复测量写同一批 id → 测的其实是 UPDATE，跑出 14k 条/秒的假数字；② 重复插入不清库 → 表越写越大，后几轮更慢，混在一起取平均没有意义；③ 插入 A 批却在 B 批上测改写 → 行数翻倍，还把 INSERT 当成 UPDATE 计时。正确做法：每轮全新 id、改写测量复用刚插入的那批、报告单轮数字 + 中位数，并注明宿主机噪声。
-28. **无 TTS 引擎插件**：`qt6-speech-dev` 装了但 `/plugins/texttospeech` 为空 →
+19. **Qt 会同时发 tablet 与 mouse 事件**：不处理就会一笔画两遍（一次压感、一次速度）。现在用 `stylusStroke_` 标记「这一笔归触控笔所有」，鼠标事件在笔画进行中被忽略。→ featuretest
+18. **测试里保存了指向临时容器的指针**：`const Markup*` 指向 `visibleMarkups()` 返回的临时 QVector，`settle()` 之后内容已失效，导致「鼠标笔迹压感 0.20」这种诡异断言失败。改成保存值拷贝 + 用 id 识别。
+17. **核心库不能依赖 Widgets**：导出器在 `adapt_core` 里，却想复用 `mind::buildFromNotes`，而 `mindmap.h` 会拉进 `QGraphicsView` → 编译失败。把纯树逻辑拆到 `mind/tree.{h,cpp}` 后，视图与导出共用同一套树构建，也顺带保证了「导出与界面看到的结构一致」。
+16. **OPML 叶子变自闭合标签后丢了元数据**：树形重写时笔记叶子不再带 `type/tags/_note`，独立校验脚本立刻抓到。修复：导出时按 markupId 回查笔记补属性（`mind::Node` 保持精简）。
+15. **写入 TEXT 标注时不能设 QuadPoints**：MuPDF 会让整条标注的写入抛异常，`/Contents` 因此丢失——读回来只有颜色没有批注。修法：Note 类型只设 Rect。
+14. **`$ORIGIN` 在 `set -u` 的 bash 里会被展开**：`echo "rpath ($ORIGIN/lib)"` 直接报 `ORIGIN: unbound variable`。用单引号或转义。
+13. **Qt 6.5.x 在 VS18（MSVC 14.51）上编不过**：`qvarlengtharray.h` 用了被移除的 `stdext::checked_array_iterator`（C3861）。升到 **Qt 6.8.3 / msvc2022_64** 即好。→ 版本搭配比代码更常见是“编译不过”的原因。
+12. **MuPDF 1.21.1 根本没有 `Makefile.nmake`**（那是老版本）：Windows 上要走 `platform\win32\mupdf.sln` + `msbuild /t:libmupdf`；而且它默认 `/MT`，与 Qt 的 `/MD` 在链接期直接 `LNK2038`，必须先批量改写 vcxproj 里的 `RuntimeLibrary`。另外链接时要带齐 `libmupdf/libthirdparty/libmuthreads/libresources` 四个 `.lib`。
+11. **Windows 上 Qt 完全不认 `XDG_DATA_HOME`**：便携包的 `.bat` 一直在设这个变量，Linux 上有效、Windows 上是死代码——数据实际写到 `%APPDATA%\AdaptNote`，“绿色便携”是假的（拷到 U 盘就找不到自己的笔记）。修法：新增 `src/core/paths.{h,cpp}`，优先级 `ADAPT_DATA_DIR` > exe 旁边的 `data\` > 系统默认；启动器同时设 `ADAPT_DATA_DIR`。→ selftest（三种优先级都有断言）
+10. **FTS 索引没有回填路径**：`notes_fts` 只由写入路径维护。旧库（或索引被重建）里的老笔记永远不在索引里，而搜索对 3 字以上的查询**只走 FTS、不看 LIKE 回退**，于是「搜不到旧笔记」且不报错。修法：`repairSearchIndex()` 在 `ensureSchema` 里比对行数并补录（注意它运行在 `open_=true` 之前，不能拿 `open_` 当守卫）。→ selftest（drop 掉 index 后重开再搜）
+9. **同步合并会造出 `parentId` 环**：设备 A 把 X 挂到 Y 下、设备 B 把 Y 挂到 X 下，合并后两边都成立。`setMindGroupParent()` 有防环检查，但 `mergeGroups()` 直接调 `upsertMindGroup()`，绕过了它。后果不是崩溃而是**静默丢数据**：环上的组分从根不可达，脑图与「按脑图导出」里连同其笔记一起消失。修法：写入时校验并解环（提升到顶层）+ 构建树时再防御一次（确定性选环内最小 id），两边都有回归。→ conflicttest / p5test
+8. **CI 上 offscreen 平台下弹窗会永久阻塞**：`QMessageBox::question` 没人点 → 测试进程挂死，第一次 Windows CI 在 `Run tests` 上挂了 13 分钟才被手动取消。修法：`ADAPT_HEADLESS=1` 时所有确认/输入走包装函数返回默认值；每个测试进程加 `WaitForExit(7min)` 超时；再加 `scripts/check_dialogs.py` 静态守卫（裸调 `QMessageBox::` 直接让 CI 失败）。教训：无头环境里**任何模态调用都是死锁**。
+7. **Windows 上 `QPdfWriter` 生成出来的 PDF 没有文本层**：`mkpdf` 用它造测试文档，Linux 上一切正常，Windows runner 上 11 套测试里只有 migratetest 挂——抽出来的页面要么没文本页，要么字符全丢。换字体（DejaVu → Arial、按 `QFontDatabase` 挑已装字体）都没用。根因是 Qt 在 Windows 上找不到可嵌入字体时会把文字**画成路径**。→ 结论：**测试 fixture 不能依赖 Qt 的 PDF 输出**；`migratetest` 现在自己手写 PDF（标准 Helvetica、不嵌入字体、手写 xref），跨平台字节级一致。教训：CI 上的失败先辨「被测代码」还是「测试自身」，否则会在错误的方向上改两轮。
+6. **MuPDF 的路径必须是 UTF-8**：`QFile::encodeName()` 在 Windows 返回 ANSI 代码页，中文书名直接打不开（Linux 上测不出来）。改成 `path.toUtf8()`，并用带空格的中文路径在 Linux 上做了回归。→ selftest / 手工验证
+5. **打包 GTK 平台主题会拖进整套桌面栈**：`libqgtk3.so` → gtk3/gio/gdk ≈15 MB；便携版只保留 Qt 原生主题即可（另外记得 strip 库）。68 MB → 61 MB zip。
+4. **`mutool insert` 在 Debian 的 mupdf-tools 里不存在**：想用它造「多一页」的修订版做回归，结果子进程失败、拿到的 PDF 打不开，测试直接段错误（`revised.textPage()` 返回空）。改用自家 `mkpdf --blank-first` 生成两版，稳定可控。教训：外部工具依赖要**先探测能力**，并且测试里对「生成失败」要有明确的短路，而不是继续往下解引用。→ migratetest
+3. **锚点在 CJK 文本上要按字符数而不是字节**：`anchorOffset` 用的是 `TextPage::chars` 的下标，和 `quadsForRange()` 同一套坐标，重建 quad 时用「原摘录的字符数」做跨度；若在两端用了不同口径，中文笔记会错位几个字。→ featuretest（重排后仍落在同一段文字上）
+2. **基准测量的三个陷阱**（本轮全踩了一遍）：① 重复测量写同一批 id → 测的其实是 UPDATE，跑出 14k 条/秒的假数字；② 重复插入不清库 → 表越写越大，后几轮更慢，混在一起取平均没有意义；③ 插入 A 批却在 B 批上测改写 → 行数翻倍，还把 INSERT 当成 UPDATE 计时。正确做法：每轮全新 id、改写测量复用刚插入的那批、报告单轮数字 + 中位数，并注明宿主机噪声。
+1. **无 TTS 引擎插件**：`qt6-speech-dev` 装了但 `/plugins/texttospeech` 为空 →
     `availableEngines()` 空 → 走定时推进（测试显式断言该降级路径）。
 
 ## 8. 已验证 vs 未验证（诚实清单）

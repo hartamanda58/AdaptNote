@@ -1,3 +1,4 @@
+#include "core/paths.h"
 #include "core/store.h"
 #include "mind/mindmap.h"
 #include "ui/libraryview.h"
@@ -71,7 +72,7 @@ int main(int argc, char** argv)
     if (parser.isSet(optLibrary)) {
         const QString out = parser.value(optLibrary);
         an::Store store;   // same data dir as the app
-        const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QString dataDir = an::defaultDataDir(QCoreApplication::applicationDirPath());
         QString err;
         if (!store.open(dataDir + "/library.db", &err)) {
             qWarning("library: cannot open store: %s", qPrintable(err));

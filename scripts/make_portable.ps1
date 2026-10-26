@@ -74,10 +74,12 @@ $launcher = @"
 rem Portable launcher: keeps every byte of data inside this folder.
 setlocal
 set "HERE=%~dp0"
+rem Qt ignores XDG_* on Windows, so point the app at the folder explicitly.
+set "ADAPT_DATA_DIR=%HERE%data"
 set "XDG_DATA_HOME=%HERE%data"
 set "XDG_CONFIG_HOME=%HERE%data\config"
 set "XDG_CACHE_HOME=%HERE%data\cache"
-if not exist "%XDG_DATA_HOME%" mkdir "%XDG_DATA_HOME%"
+if not exist "%ADAPT_DATA_DIR%" mkdir "%ADAPT_DATA_DIR%"
 if not exist "%XDG_CONFIG_HOME%" mkdir "%XDG_CONFIG_HOME%"
 if not exist "%XDG_CACHE_HOME%" mkdir "%XDG_CACHE_HOME%"
 start "" "%HERE%bin\adaptnote.exe" %*
@@ -90,7 +92,7 @@ AdaptNote（Windows 便携版）
 ==========================
 
 运行：双击 AdaptNote.bat（或从命令行 AdaptNote.bat --doc 某本书.pdf）
-数据：全部在 data\ 目录里（笔记库 data\AdaptNote\AdaptNote\library.db）；
+数据：全部在 data\ 目录里（笔记库 data\library.db，图片 data\images\）；
       整个文件夹拷到 U 盘即可带走，删掉 data\ 恢复出厂状态。
 示例：samples\test.pdf / samples\test.epub
 

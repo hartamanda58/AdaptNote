@@ -350,7 +350,9 @@ private:
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    // ADAPT_DATA_DIR / a `data` folder next to the executable keeps the portable build
+    // self-contained on Windows, where Qt ignores XDG_DATA_HOME.
+    const QString dataDir = an::defaultDataDir(QCoreApplication::applicationDirPath());
     QString err;
     if (!store_.open(dataDir + "/library.db", &err))
         qWarning("store open failed: %s", qPrintable(err));
