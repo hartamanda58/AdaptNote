@@ -99,12 +99,15 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           ADAPT_HEADLESS: '1'          # never open modal dialogs
-          ADAPT_DATA_DIR: ${{ github.workspace }}\build-win\test-data
         run: |
           cd build-win
           $failed = @()
+          $i = 0
           foreach ($t in @("selftest","visualtest","featuretest","exporttest","synctest",
                            "aitest","p5test","librarytest","migratetest","importtest","conflicttest")) {
+            $i++
+            $env:ADAPT_DATA_DIR = Join-Path $env:GITHUB_WORKSPACE "build-win\test-data\$t$i"
+            if (Test-Path $env:ADAPT_DATA_DIR) { Remove-Item -Recurse -Force $env:ADAPT_DATA_DIR }
             $args = switch ($t) {
               "selftest"     { @("test.pdf","test.epub") }
               "visualtest"   { @("test.pdf") }
