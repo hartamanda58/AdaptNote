@@ -99,6 +99,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           ADAPT_HEADLESS: '1'          # never open modal dialogs
+          ADAPT_DATA_DIR: ${{ github.workspace }}\build-win\test-data
         run: |
           cd build-win
           $failed = @()

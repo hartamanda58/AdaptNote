@@ -12,40 +12,41 @@ bash scripts/make_testdata.sh build >/dev/null
 
 THOME="$(mktemp -d)"
 export XDG_DATA_HOME="$THOME"
+export ADAPT_DATA_DIR="$THOME/AdaptNote"
 
 echo "== self test (engine / selection / storage / write-back / epub)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./selftest test.pdf test.epub)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./selftest test.pdf test.epub)
 
 echo
 echo "== visual regression (overlay geometry vs rendered text)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./visualtest test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./visualtest test.pdf)
 
 echo "== feature test (tags / search / image excerpt / undo / reading position)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./featuretest test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./featuretest test.pdf)
 
 echo "== export test (md / html / opml / xmind / apkg read-back)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./exporttest test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./exporttest test.pdf)
 
 echo "== sync test (version vectors + two devices over a real WebDAV server)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./synctest test.pdf "$PWD/../scripts/dav_server.py")
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./synctest test.pdf "$PWD/../scripts/dav_server.py")
 
 echo "== AI test (prompt building + SSE streaming against a fake endpoint)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./aitest "$PWD/../scripts/fake_openai_server.py")
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./aitest "$PWD/../scripts/fake_openai_server.py")
 
 echo "== P5 test (handwriting geometry / mind map layout / read-aloud iterator)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./p5test test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./p5test test.pdf)
 
 echo "== library test (document table / cross-document search / filters)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./librarytest)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./librarytest)
 
 echo "== migration test (notes follow their text across a PDF revision)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./migratetest test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./migratetest test.pdf)
 
 echo "== import test (markdown / json round trip, foreign markdown)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./importtest test.pdf)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./importtest test.pdf)
 
 echo "== conflict test (pairing + keep left/right/both)"
-(cd build && XDG_DATA_HOME="$(mktemp -d)" ./conflicttest)
+(cd build && XDG_DATA_HOME="$(mktemp -d)" ADAPT_DATA_DIR="$(mktemp -d)" ./conflicttest)
 
 echo
 echo "== exports + independent validation (python stdlib)"
