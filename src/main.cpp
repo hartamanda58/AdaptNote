@@ -110,8 +110,9 @@ int main(int argc, char** argv)
         if (parser.isSet(optMindMap)) {
             const QString out = parser.value(optMindMap);
             an::mind::MindMapView view;
+            // pass the groups too: the CLI image must match what the in-app export shows
             view.setTree(an::mind::buildFromNotes(QFileInfo(parser.value(optDoc)).completeBaseName(),
-                                                 w.visibleMarkups()));
+                                                 w.visibleMarkups(), w.mindGroups()));
             const QImage img = view.renderToImage(QSize(1200, 760));
             qInfo("mindmap %s: %s", img.isNull() ? "FAILED" : "saved", qPrintable(out));
             if (!img.isNull()) img.save(out);

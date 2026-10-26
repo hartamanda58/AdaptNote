@@ -74,4 +74,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows runners default to a legacy code page; the messages quote source lines.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
     sys.exit(main())
