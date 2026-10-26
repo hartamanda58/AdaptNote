@@ -55,12 +55,21 @@ jobs:
           Get-ChildItem (Join-Path $root.FullName "bin") -File | Sort-Object Name |
             ForEach-Object { Say ("  {0}  {1} KB" -f $_.Name, [math]::Round($_.Length/1KB)) }
 
+          Say "--- directories anywhere in the package ---"
+          Get-ChildItem $root.FullName -Recurse -Directory | ForEach-Object {
+            $rel = $_.FullName.Substring($root.FullName.Length + 1)
+            Say ("  {0}/  ({1} file(s))" -f $rel, (Get-ChildItem $_.FullName -File).Count)
+          }
+
           Say "--- plugins ---"
           foreach ($d in @("platforms","imageformats","tls","styles","iconengines","fonts","resources","sqldrivers")) {
-            $p = Join-Path $root.FullName $d
-            if (Test-Path $p) {
-              Get-ChildItem $p -File | Sort-Object Name |
-                ForEach-Object { Say ("  {0}/{1}" -f $d, $_.Name) }
+            $found = @()
+            foreach ($base in @($root.FullName, (Join-Path $root.FullName "bin"))) {
+              $p = Join-Path $base $d
+              if (Test-Path $p) { $found += (Get-ChildItem $p -File) }
+            }
+            if ($found.Count -gt 0) {
+              $found | Sort-Object Name | ForEach-Object { Say ("  {0}/{1}" -f $d, $_.Name) }
             } else { Say "  (no $d dir)" }
           }
 
@@ -87,8 +96,9 @@ jobs:
           $bundled = @{}
           Get-ChildItem (Join-Path $root.FullName "bin") -File |
             ForEach-Object { $bundled[$_.Name.ToLower()] = $true }
-          $exes = Get-ChildItem (Join-Path $root.FullName "bin") -Filter *.exe
-          if ($exes.Count -eq 0) { Say "  ERROR: no exe in bin/"; $failed = $true }
+          $exes = @(Get-ChildItem (Join-Path $root.FullName "bin") -Filter *.exe |
+                  Where-Object { $_.Name -match "adaptnote" })
+          if (@($exes).Count -eq 0) { Say "  ERROR: no adaptnote.exe in bin/"; $failed = $true }
           foreach ($exe in $exes) {
             Say "  $($exe.Name):"
             $deps = & dumpbin /nologo /dependents $exe.FullName
@@ -104,9 +114,10 @@ jobs:
 
           # ---------- required runtime pieces ----------
           Say "--- required files ---"
-          foreach ($n in @("bin\Qt6Core.dll","bin\Qt6Gui.dll","bin\Qt6Widgets.dll","bin\Qt6Pdf.dll",
-                           "bin\Qt6Network.dll","bin\Qt6Sql.dll","bin\Qt6Svg.dll",
-                           "platforms\qwindows.dll")) {
+          foreach ($n in @("bin\adaptnote.exe","bin\Qt6Core.dll","bin\Qt6Gui.dll",
+                           "bin\Qt6Widgets.dll","bin\Qt6Network.dll","bin\Qt6Sql.dll",
+                           "bin\Qt6Svg.dll","bin\platforms\qwindows.dll",
+                           "bin\sqldrivers\qsqlite.dll")) {
             $p = Join-Path $root.FullName $n
             if (Test-Path $p) { Say "  present $n" } else { Say "  MISSING $n"; $failed = $true }
           }
