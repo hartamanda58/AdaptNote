@@ -1,5 +1,6 @@
 #include "ui/mainwindow.h"
 
+#include "core/paths.h"
 #include "core/textselect.h"
 #include "import/import.h"
 
