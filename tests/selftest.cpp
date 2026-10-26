@@ -202,6 +202,45 @@ int main(int argc, char** argv)
         check(migrated.tagCounts(m.docPath).size() == 2, QStringLiteral("migrated store tags readable"));
     }
 
+    // An index that never saw these notes (a database created before the FTS table existed,
+    // or a rebuilt index) must be repaired on open. Otherwise every query of 3+ characters
+    // takes the FTS path and silently returns nothing - the LIKE fallback is not consulted.
+    {
+        const QString dbPath = tmp.filePath("repair.db");
+        {
+            Store a;
+            QString e2;
+            check(a.open(dbPath, &e2), QStringLiteral("open index-repair store: %1").arg(e2));
+            a.upsertMarkup(m);
+            a.upsertMarkup(tagged);
+            a.close();   // release the file before poking at it directly
+        }
+
+        bool dropped = false;
+        {
+            QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+                                                          QStringLiteral("rawdrop"));
+            raw.setDatabaseName(dbPath);
+            if (raw.open()) {
+                QSqlQuery q(raw);
+                dropped = q.exec(QStringLiteral("drop table notes_fts"));
+            }
+            raw.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("rawdrop"));
+        check(dropped, QStringLiteral("simulated a database without the FTS index"));
+
+        Store b;
+        QString e3;
+        check(b.open(dbPath, &e3), QStringLiteral("reopen index-repair store: %1").arg(e3));
+        check(b.fullTextSearchEnabled(), QStringLiteral("index table was recreated"));
+        const QVector<Markup> again = b.searchMarkups(QStringLiteral("视图解耦"), m.docPath);
+        check(again.size() == 1,
+              QStringLiteral("notes searchable after the index repair (%1)").arg(again.size()));
+        const QVector<Markup> byTag = b.searchMarkups(QStringLiteral("方法论"), m.docPath);
+        check(byTag.size() == 1, QStringLiteral("tags re-indexed too (%1)").arg(byTag.size()));
+    }
+
     std::printf("\n=== 3c. mind groups (entities + legacy migration) ===\n");
     {
         const QString gid = store.ensureMindGroup(m.docPath, QStringLiteral("考点"));

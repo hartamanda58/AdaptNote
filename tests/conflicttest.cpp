@@ -108,7 +108,7 @@ int main(int argc, char** argv)
             mind::buildFromNotes(QStringLiteral("书"), store.markups(doc), store.mindGroups(doc));
         int groupsSeen = 0;
         std::function<void(const mind::Node&)> walk = [&](const mind::Node& n) {
-            if (n.groupKey.startsWith(QStringLiteral("group:"))) ++groupsSeen;
+            if (n.page < 0 && !n.groupKey.isEmpty()) ++groupsSeen;   // group nodes carry page -1
             for (const mind::Node& ch : n.children) walk(ch);
         };
         walk(tree);

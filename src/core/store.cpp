@@ -124,6 +124,34 @@ QString likePattern(const QString& q)
 
 }  // namespace
 
+void Store::repairSearchIndex()
+{
+    // note: called from ensureSchema(), i.e. before open_ becomes true
+    if (!fts_ || !QSqlDatabase::contains(conn_)) return;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+
+    // cheap guard: only walk the tables when the row counts disagree
+    auto count = [&](const char* sql) {
+        qint64 n = -1;
+        if (q.exec(QString::fromLatin1(sql)) && q.next()) n = q.value(0).toLongLong();
+        return n;
+    };
+    const qint64 live = count("select count(*) from notes where deleted=0");
+    const qint64 indexed = count("select count(*) from notes_fts");
+    if (live < 0 || indexed < 0 || live == indexed) return;
+
+    // drop rows of notes that are gone (or tombstoned), then index whatever is missing
+    q.exec("delete from notes_fts where id not in (select id from notes where deleted=0)");
+    if (!q.exec("insert into notes_fts(id,docName,text,comment,tags)"
+                " select id, docName, text, comment, tags from notes"
+                " where deleted=0 and id not in (select id from notes_fts)"))
+        return;
+
+    indexedFingerprint_.clear();
+    knownIndexLoaded_ = false;
+    knownIndexIds_.clear();
+}
+
 void Store::loadKnownIndexIds() const
 {
     if (knownIndexLoaded_) return;
@@ -321,6 +349,12 @@ bool Store::ensureSchema(QString* error)
     fts_ = fts.exec("create virtual table if not exists notes_fts using fts5("
                     "id unindexed, docName unindexed, text, comment, tags,"
                     " tokenize='trigram')");
+    if (!fts_) return true;   // search falls back to LIKE; never fail the whole open here
+
+    // Repair a missing or stale index. Without this, a database that predates the FTS table
+    // keeps its notes invisible to search: queries of 3+ characters take the FTS path and
+    // silently return nothing for them (the LIKE fallback is not consulted).
+    repairSearchIndex();
     return true;
 }
 

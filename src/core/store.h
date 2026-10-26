@@ -120,6 +120,9 @@ private:
     mutable QSet<QString> knownIndexIds_;                  // ids present in notes_fts
     mutable bool knownIndexLoaded_ = false;
     bool fastImport_ = false;
+    // Brings notes_fts back in sync with notes (upgrade, dropped index).
+    void repairSearchIndex();
+
     void loadKnownIndexIds() const;
     mutable QHash<QString, QSqlQuery*> stmtCache_;        // prepared statement reuse
 };
