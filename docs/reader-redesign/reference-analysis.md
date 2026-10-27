@@ -135,3 +135,11 @@ class Lr{constructor(){var t=window.devicePixelRatio||1;this.sx=t;this.sy=t} …
 - 未读取 24 个迁移的字段定义（下一步）。
 - 未验证其 OCR 实际精度、性能与离线程度。
 - 未验证许可/激活机制，也不对此做绕过。
+
+---
+
+## 9. 工程环境备注（本轮踩到的）
+
+1. **检出路径含空格会让 clangd 失效**：`compile_commands.json` 里的 `-I"/path with space/src"` 被部分 LSP 桥接按空白切分，导致 `core/store.h` 找不到、`QString` 全未定义。把工作副本放到不含空格的路径（如 `/root/adaptnote`）即可恢复真实诊断。
+2. **需要一个不依赖完整构建的语法检查**：`scripts/syntax_check.py` 用 `compile_commands.json` 里的原始参数跑 `-fsyntax-only`，可在本地快速发现编译错误，不必等一轮 CI。
+3. **`git clone` 本地目录会把 `origin` 指向那个目录**：迁移工作副本后要 `git remote set-url`，否则 push 只进本地、CI 构建的仍是旧提交。
