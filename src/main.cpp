@@ -130,7 +130,7 @@ int main(int argc, char** argv)
                 const bool ok = w.exportMarkups(ext, base + "." + ext, &err);
                 qInfo("export %s: %s", qPrintable(ext), ok ? "ok" : qPrintable(err));
             }
-            if (!parser.isSet(optShot)) QTimer::singleShot(0, &app, &QCoreApplication::quit);
+            if (!parser.isSet(optShot)) return 0;
         }
     }
 
