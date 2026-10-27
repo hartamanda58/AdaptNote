@@ -169,7 +169,8 @@ jobs:
           $pdf = Join-Path $root.FullName "samples\test.pdf"
           $epub = Join-Path $root.FullName "samples\test.epub"
           $exports = Join-Path $smoke "exports"
-          RunSmoke "help" @("--help")
+          # --help is not a useful GUI smoke command: this app may continue its event loop
+          # after printing parser help. Use the documented auto-quit screenshot path instead.
           RunSmoke "pdf-shot" @("--doc", $pdf, "--shot", (Join-Path $smoke "pdf.png"))
           if (!(Test-Path (Join-Path $smoke "pdf.png"))) { throw "smoke pdf-shot produced no image" }
           RunSmoke "pdf-export" @("--doc", $pdf, "--export-dir", $exports)
