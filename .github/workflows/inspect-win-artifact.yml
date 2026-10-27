@@ -196,20 +196,29 @@ jobs:
             if (!(Test-Path $shot) -or (Get-Item $shot).Length -eq 0) { throw "missing $kind screenshot" }
           }
 
-          # High-DPI acceptance: at 200% scaling the rendered page must carry ~2x the
-          # pixels, otherwise the page is a 1x bitmap stretched by the painter (the bug
-          # that made text look soft). Same command, only the scale factor differs.
-          $shot1 = Join-Path $smoke "pdf.png"
-          $shot2 = Join-Path $smoke "pdf-2x.png"
-          $env:QT_SCALE_FACTOR = "2"
-          RunSmoke -label "pdf-screenshot-2x" -CliArgs @("--doc", $pdf, "--screenshot", $shot2)
-          Remove-Item Env:\QT_SCALE_FACTOR
-          Add-Type -AssemblyName System.Drawing
-          $w1 = [System.Drawing.Image]::FromFile($shot1).Width
-          $w2 = [System.Drawing.Image]::FromFile($shot2).Width
+          # High-DPI acceptance: the *bitmap* must grow with the scale factor. Comparing
+          # window screenshots is unreliable on a runner whose screen clamps the window, so
+          # ask the app to print the rendered page size instead.
+          function ProbeSize([string]$label, [string]$scaleFactor) {
+            if ($scaleFactor) { $env:QT_SCALE_FACTOR = $scaleFactor } else { Remove-Item Env:\QT_SCALE_FACTOR -ErrorAction SilentlyContinue }
+            $out = Join-Path $smokeLog "$label.out.txt"
+            $err = Join-Path $smokeLog "$label.err.txt"
+            $p = Start-Process -FilePath $exe -ArgumentList @("--doc", $pdf, "--render-probe") -PassThru `
+                 -RedirectStandardOutput $out -RedirectStandardError $err
+            if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw "probe $label timed out" }
+            $text = ((Get-Content $out -ErrorAction SilentlyContinue) + (Get-Content $err -ErrorAction SilentlyContinue)) -join "`n"
+            Say "probe ${label}: $($text.Trim())"
+            if ($p.ExitCode -ne 0) { throw "probe $label failed ($($p.ExitCode)): $text" }
+            $m = [regex]::Match($text, 'bitmap=(\d+)x(\d+)')
+            if (!$m.Success) { throw "probe $label printed no bitmap size" }
+            return [int]$m.Groups[1].Value
+          }
+          $w1 = ProbeSize "dpr1" ""
+          $w2 = ProbeSize "dpr2" "2"
+          Remove-Item Env:\QT_SCALE_FACTOR -ErrorAction SilentlyContinue
           $ratio = [math]::Round($w2 / [double]$w1, 2)
           Say "dpi: 1x=$w1 px, 2x=$w2 px, ratio=$ratio"
-          if ($ratio -lt 1.8) { throw "high-dpi render did not scale (ratio $ratio)" }
+          if ($ratio -lt 1.8) { throw "render bitmap did not scale with dpi (ratio $ratio)" }
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
           Add-Content ci/windows-report.txt "--- runtime smoke ---"

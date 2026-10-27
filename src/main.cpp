@@ -44,6 +44,10 @@ int main(int argc, char** argv)
                                         "png");
     const QCommandLineOption optFastImport(
         "fast-import", "relax fsync while opening/syncing (speed over durability)");
+    // Renders the first page and prints its bitmap size, then exits. Used by the packaged
+    // acceptance test to prove that the render resolution follows the device pixel ratio
+    // without depending on the window size.
+    const QCommandLineOption optProbe("render-probe", "print the rendered page bitmap size and exit");
     parser.addOption(optDoc);
     parser.addOption(optShot);
     parser.addOption(optDemo);
@@ -58,6 +62,7 @@ int main(int argc, char** argv)
     parser.addOption(optMindMap);
     parser.addOption(optLibrary);
     parser.addOption(optFastImport);
+    parser.addOption(optProbe);
     parser.process(app);
 
     an::MainWindow w;
@@ -107,6 +112,12 @@ int main(int argc, char** argv)
         w.view()->setRotation(parser.value(optRotate).toInt());
 
         if (parser.isSet(optDemo)) w.applyDemoMarkups();
+        if (parser.isSet(optProbe)) {
+            const QImage page = w.view()->cachedImageForTest(0);
+            qInfo("probe page=1 bitmap=%dx%d dpr=%.2f scale=%.2f", page.width(), page.height(),
+                  double(w.view()->effectiveDevicePixelRatio()), double(w.view()->zoom()));
+            return page.isNull() ? 3 : 0;
+        }
         if (parser.isSet(optFind)) w.findText(parser.value(optFind));
         if (parser.isSet(optMindMap)) {
             const QString out = parser.value(optMindMap);

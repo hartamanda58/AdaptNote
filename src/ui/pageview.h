@@ -138,6 +138,7 @@ public:
     // resolution without depending on the host screen. 0 = use the real one.
     void setDevicePixelRatioOverride(qreal dpr) { dprOverride_ = dpr; invalidateCache(); }
     qreal devicePixelRatioOverride() const { return dprOverride_; }
+    float effectiveDevicePixelRatio() const { return viewDpr(); }
     // Exposes the render path so tests can assert the bitmap resolution.
     QImage cachedImageForTest(int page) { return imageFor(page); }
     int cacheEntryCount() const { return cache_.size(); }
