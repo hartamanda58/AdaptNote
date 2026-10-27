@@ -268,79 +268,6 @@ int main(int argc, char** argv)
     }
 
 
-    // ---- reading topics: cross-document organisation ----
-    {
-        std::printf("\n=== 3d. reading topics (cross-document) ===\n");
-
-        Topic t = store.stampTopicForLocalWrite(Topic{});
-        t.name = QStringLiteral("编译器课程");
-        t.description = QStringLiteral("一组论文 + 教材");
-        check(store.upsertTopic(t), QStringLiteral("create topic"));
-        check(!t.id.isEmpty() && !t.vv.isEmpty(), QStringLiteral("topic id and vv assigned"));
-        check(store.topics().size() == 1, QStringLiteral("one live topic (%1)").arg(store.topics().size()));
-
-        // a second, different document
-        const QString second = tmp.filePath("second.pdf");
-        { QFile f(second); f.open(QIODevice::WriteOnly); f.write("pdf"); }
-
-        check(store.addTopicDoc(t.id, m.docPath), QStringLiteral("attach document A"));
-        check(store.addTopicDoc(t.id, second), QStringLiteral("attach document B"));
-        check(store.topicDocs(t.id).size() == 2,
-              QStringLiteral("topic holds two documents (%1)").arg(store.topicDocs(t.id).size()));
-        check(store.topicsForDoc(second).contains(t.id),
-              QStringLiteral("document B reports the topic"));
-
-        // the same document may belong to another topic
-        Topic t2 = store.stampTopicForLocalWrite(Topic{});
-        t2.name = QStringLiteral("论文综述");
-        check(store.upsertTopic(t2), QStringLiteral("second topic"));
-        check(store.addTopicDoc(t2.id, second), QStringLiteral("B also joins the second topic"));
-        check(store.topicsForDoc(second).size() == 2,
-              QStringLiteral("a document can serve several topics (%1)")
-                  .arg(store.topicsForDoc(second).size()));
-
-        // groups get an owner and can be queried per topic
-        check(store.setMindGroupTopic(m.docPath, t.id), QStringLiteral("assign groups to topic"));
-        const QVector<MindGroup> forTopic = store.mindGroupsForTopic(t.id);
-        check(!forTopic.isEmpty(), QStringLiteral("topic exposes its groups (%1)").arg(forTopic.size()));
-        for (const MindGroup& g : forTopic)
-            check(g.topicId == t.id, QStringLiteral("group carries the topic id"));
-
-        // free-form link between two nodes, independent from the tree
-        const QVector<MindGroup> groups = store.mindGroups(m.docPath);
-        if (groups.size() >= 2) {
-            MindLink l;
-            l.id = newId();
-            l.topicId = t.id;
-            l.fromNode = groups.at(0).id;
-            l.toNode = groups.at(1).id;
-            l.arrow = QStringLiteral("both");
-            l.points = QStringLiteral("[[10,20],[30,40]]");
-            l.label = QStringLiteral("相关");
-            check(store.upsertMindLink(l), QStringLiteral("create link"));
-            const QVector<MindLink> links = store.mindLinks(t.id);
-            check(links.size() == 1, QStringLiteral("one link stored (%1)").arg(links.size()));
-            check(links.first().arrow == QStringLiteral("both") && !links.first().points.isEmpty(),
-                  QStringLiteral("link keeps arrow and control points"));
-            check(store.removeMindLink(l.id), QStringLiteral("delete link"));
-            check(store.mindLinks(t.id).isEmpty(), QStringLiteral("deleted link is not listed"));
-        } else {
-            check(false, QStringLiteral("expected at least two groups for the link test"));
-        }
-
-        // detaching a document must not delete the other memberships
-        check(store.removeTopicDoc(t.id, second), QStringLiteral("detach B from topic A"));
-        check(store.topicDocs(t.id).size() == 1, QStringLiteral("topic A keeps one document"));
-        check(store.topicsForDoc(second).size() == 1,
-              QStringLiteral("B keeps its other topic (%1)").arg(store.topicsForDoc(second).size()));
-
-        // removing a topic is a tombstone, not a delete
-        check(store.removeTopic(t.id), QStringLiteral("remove topic A"));
-        check(store.topics().size() == 1, QStringLiteral("only the live topic remains"));
-        check(store.topicsIncludingDeleted().size() == 2,
-              QStringLiteral("tombstone kept for sync (%1)").arg(store.topicsIncludingDeleted().size()));
-    }
-
     std::printf("\n=== 3c. mind groups (entities + legacy migration) ===\n");
     {
         const QString gid = store.ensureMindGroup(m.docPath, QStringLiteral("考点"));
@@ -432,6 +359,79 @@ int main(int argc, char** argv)
         const QVector<Markup> notes = migrated.markups(m.docPath);
         check(notes.size() == 1 && notes.first().mindGroup == adopted.value(0).id,
               QStringLiteral("note rewritten to the group id"));
+    }
+
+    // ---- reading topics: cross-document organisation ----
+    {
+        std::printf("\n=== 3d. reading topics (cross-document) ===\n");
+
+        Topic t = store.stampTopicForLocalWrite(Topic{});
+        t.name = QStringLiteral("编译器课程");
+        t.description = QStringLiteral("一组论文 + 教材");
+        check(store.upsertTopic(t), QStringLiteral("create topic"));
+        check(!t.id.isEmpty() && !t.vv.isEmpty(), QStringLiteral("topic id and vv assigned"));
+        check(store.topics().size() == 1, QStringLiteral("one live topic (%1)").arg(store.topics().size()));
+
+        // a second, different document
+        const QString second = tmp.filePath("second.pdf");
+        { QFile f(second); f.open(QIODevice::WriteOnly); f.write("pdf"); }
+
+        check(store.addTopicDoc(t.id, m.docPath), QStringLiteral("attach document A"));
+        check(store.addTopicDoc(t.id, second), QStringLiteral("attach document B"));
+        check(store.topicDocs(t.id).size() == 2,
+              QStringLiteral("topic holds two documents (%1)").arg(store.topicDocs(t.id).size()));
+        check(store.topicsForDoc(second).contains(t.id),
+              QStringLiteral("document B reports the topic"));
+
+        // the same document may belong to another topic
+        Topic t2 = store.stampTopicForLocalWrite(Topic{});
+        t2.name = QStringLiteral("论文综述");
+        check(store.upsertTopic(t2), QStringLiteral("second topic"));
+        check(store.addTopicDoc(t2.id, second), QStringLiteral("B also joins the second topic"));
+        check(store.topicsForDoc(second).size() == 2,
+              QStringLiteral("a document can serve several topics (%1)")
+                  .arg(store.topicsForDoc(second).size()));
+
+        // groups get an owner and can be queried per topic
+        check(store.setMindGroupTopic(m.docPath, t.id), QStringLiteral("assign groups to topic"));
+        const QVector<MindGroup> forTopic = store.mindGroupsForTopic(t.id);
+        check(!forTopic.isEmpty(), QStringLiteral("topic exposes its groups (%1)").arg(forTopic.size()));
+        for (const MindGroup& g : forTopic)
+            check(g.topicId == t.id, QStringLiteral("group carries the topic id"));
+
+        // free-form link between two nodes, independent from the tree
+        const QVector<MindGroup> groups = store.mindGroups(m.docPath);
+        if (groups.size() >= 2) {
+            MindLink l;
+            l.id = newId();
+            l.topicId = t.id;
+            l.fromNode = groups.at(0).id;
+            l.toNode = groups.at(1).id;
+            l.arrow = QStringLiteral("both");
+            l.points = QStringLiteral("[[10,20],[30,40]]");
+            l.label = QStringLiteral("相关");
+            check(store.upsertMindLink(l), QStringLiteral("create link"));
+            const QVector<MindLink> links = store.mindLinks(t.id);
+            check(links.size() == 1, QStringLiteral("one link stored (%1)").arg(links.size()));
+            check(links.first().arrow == QStringLiteral("both") && !links.first().points.isEmpty(),
+                  QStringLiteral("link keeps arrow and control points"));
+            check(store.removeMindLink(l.id), QStringLiteral("delete link"));
+            check(store.mindLinks(t.id).isEmpty(), QStringLiteral("deleted link is not listed"));
+        } else {
+            check(false, QStringLiteral("expected at least two groups for the link test"));
+        }
+
+        // detaching a document must not delete the other memberships
+        check(store.removeTopicDoc(t.id, second), QStringLiteral("detach B from topic A"));
+        check(store.topicDocs(t.id).size() == 1, QStringLiteral("topic A keeps one document"));
+        check(store.topicsForDoc(second).size() == 1,
+              QStringLiteral("B keeps its other topic (%1)").arg(store.topicsForDoc(second).size()));
+
+        // removing a topic is a tombstone, not a delete
+        check(store.removeTopic(t.id), QStringLiteral("remove topic A"));
+        check(store.topics().size() == 1, QStringLiteral("only the live topic remains"));
+        check(store.topicsIncludingDeleted().size() == 2,
+              QStringLiteral("tombstone kept for sync (%1)").arg(store.topicsIncludingDeleted().size()));
     }
 
     std::printf("\n=== 4. PDF annotation write-back ===\n");
