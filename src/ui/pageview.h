@@ -124,12 +124,22 @@ private:
     QPointF viewToPage(int page, const QPointF& viewPt) const;
     QRectF quadToView(int page, const Quad& q) const;
     QImage imageFor(int page);
+    // Physical pixels per logical pixel. Rendering at this factor is what keeps text
+    // crisp on 125%/150%/200% Windows scaling; drawing a 1x bitmap into a 2x device is
+    // what made pages look blurry.
+    float viewDpr() const;
     void drawMarkup(QPainter& p, const Markup& m);
     void invalidateCache();
 
 public:
     // ---- render cache diagnostics (also used by tests) ----
     void setCacheBudgetBytes(qint64 bytes);
+    // Test seam: pin the device pixel ratio so the offscreen tests can assert the render
+    // resolution without depending on the host screen. 0 = use the real one.
+    void setDevicePixelRatioOverride(qreal dpr) { dprOverride_ = dpr; invalidateCache(); }
+    qreal devicePixelRatioOverride() const { return dprOverride_; }
+    // Exposes the render path so tests can assert the bitmap resolution.
+    QImage cachedImageForTest(int page) { return imageFor(page); }
     int cacheEntryCount() const { return cache_.size(); }
     qint64 cacheBytes() const { return cacheBytes_; }
     bool isPageCached(int page) const;
@@ -153,6 +163,8 @@ private:
     QHash<quint64, CacheEntry> cache_;
     QList<quint64> cacheLru_;      // most recently used last
     qint64 cacheBytes_ = 0;
+    qreal dprOverride_ = 0.0;      // tests only
+    qreal lastDpr_ = 1.0;          // detected ratio of the last paint
     qint64 cacheBudget_ = 96ll * 1024 * 1024;
     static constexpr int kCacheMaxEntries = 64;
 

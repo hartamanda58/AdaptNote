@@ -112,6 +112,33 @@ int main(int argc, char** argv)
     check(markups.size() == 6,
           QStringLiteral("demo markups = %1 (4 text + 1 image + 1 ink)").arg(markups.size()));
 
+    // ---- render resolution follows the device pixel ratio ----
+    // Before this was honoured the page was rendered at 1x and stretched by the painter,
+    // which is what made text look soft on 125%/150%/200% Windows scaling.
+    {
+        const QRectF pageRect = v->pageRectInViewport(0);
+        v->setDevicePixelRatioOverride(1.0);
+        const QImage at1 = v->cachedImageForTest(0);
+        v->setDevicePixelRatioOverride(2.0);
+        const QImage at2 = v->cachedImageForTest(0);
+        v->setDevicePixelRatioOverride(3.0);
+        const QImage at3 = v->cachedImageForTest(0);
+
+        check(!at1.isNull() && !at2.isNull() && !at3.isNull(),
+              QStringLiteral("pages render at every dpr"));
+        const double ratio2 = at1.isNull() ? 0.0 : double(at2.width()) / double(at1.width());
+        const double ratio3 = at1.isNull() ? 0.0 : double(at3.width()) / double(at1.width());
+        check(qAbs(ratio2 - 2.0) < 0.06,
+              QStringLiteral("dpr 2 renders ~2x pixels (%1x -> %2x, ratio %3)")
+                  .arg(at1.width()).arg(at2.width()).arg(ratio2, 0, 'f', 2));
+        check(qAbs(ratio3 - 3.0) < 0.06,
+              QStringLiteral("dpr 3 renders ~3x pixels (ratio %1)").arg(ratio3, 0, 'f', 2));
+        check(at2.width() >= pageRect.width() * 1.9,
+              QStringLiteral("2x bitmap is not smaller than the logical page (%1 vs %2)")
+                  .arg(at2.width()).arg(pageRect.width()));
+        v->setDevicePixelRatioOverride(0.0);   // back to the real screen
+    }
+
     QImage img = grabView(w);
     check(!img.isNull() && img.width() > 600 && img.height() > 400,
           QStringLiteral("window grabbed %1x%2").arg(img.width()).arg(img.height()));

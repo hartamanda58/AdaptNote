@@ -292,9 +292,14 @@ bool PageView::isPageCached(int page) const
 QImage PageView::imageFor(int page)
 {
     if (!engine_ || !engine_->isOpen()) return {};
+
+    const float dpr = viewDpr();
     const int bucket = static_cast<int>(scale_ * 100.f);
-    const quint64 key = (static_cast<quint64>(page) << 32) | (static_cast<quint64>(bucket) << 4) |
-                        static_cast<quint64>(rotation_ / 90);
+    const int dprBucket = static_cast<int>(dpr * 100.f + 0.5f);
+    const quint64 key = (static_cast<quint64>(page) << 32) |
+                        (static_cast<quint64>(bucket & 0xffff) << 16) |
+                        (static_cast<quint64>(dprBucket & 0x3fff) << 2) |
+                        static_cast<quint64>((rotation_ / 90) & 0x3);
 
     auto it = cache_.constFind(key);
     if (it != cache_.constEnd()) {
@@ -302,7 +307,23 @@ QImage PageView::imageFor(int page)
         return it.value().image;
     }
 
-    const QImage img = engine_->renderPage(page, scale_, rotation_);
+    // Render at scale * dpr physical pixels. The painter lays it into the logical page
+    // rectangle, so on a 2x screen the bitmap maps 1:1 to device pixels instead of being
+    // stretched up from a 1x image.
+    float renderScale = scale_ * dpr;
+    const QSizeF pt = engine_->pageSize(page);
+    if (pt.width() > 0 && pt.height() > 0) {
+        // Guard against absurd allocations on very large pages at high zoom.
+        constexpr double kMaxPixels = 40.0 * 1000.0 * 1000.0;
+        const double px = static_cast<double>(pt.width()) * renderScale;
+        const double py = static_cast<double>(pt.height()) * renderScale;
+        if (px * py > kMaxPixels) {
+            const double shrink = std::sqrt(kMaxPixels / (px * py));
+            renderScale = static_cast<float>(renderScale * shrink);
+        }
+    }
+
+    const QImage img = engine_->renderPage(page, renderScale, rotation_);
     if (img.isNull()) return img;
 
     CacheEntry entry;
@@ -313,6 +334,15 @@ QImage PageView::imageFor(int page)
     touchCache(key);
     evictCache();
     return entry.image;
+}
+
+float PageView::viewDpr() const
+{
+    if (dprOverride_ > 0.0) return static_cast<float>(dprOverride_);
+    QWidget* w = viewport();
+    const qreal dpr = w ? w->devicePixelRatioF() : 1.0;
+    // Below 1.0 there is nothing to gain; above 4.0 the memory cost stops being worth it.
+    return static_cast<float>(qBound<qreal>(1.0, dpr > 0.0 ? dpr : 1.0, 4.0));
 }
 
 QPointF PageView::mapPageToViewport(int page, const QPointF& pagePt) const
@@ -331,6 +361,8 @@ QRectF PageView::pageRectInViewport(int page) const
 QImage PageView::renderPageToImage(int page)
 {
     if (!engine_ || !engine_->isOpen()) return {};
+    // Export path: keep the historical 1x semantics so exported PNGs do not silently
+    // change resolution; a caller that wants more passes a bigger scale explicitly.
     return engine_->renderPage(page, scale_, rotation_);
 }
 
@@ -651,7 +683,18 @@ void PageView::drawMarkup(QPainter& p, const Markup& m)
 
 void PageView::paintEvent(QPaintEvent*)
 {
+    // A window dragged to a screen with a different scale factor keeps its logical layout
+    // but needs new bitmaps; drop the cache so pages are re-rendered at the new density.
+    const qreal dpr = viewDpr();
+    if (!qFuzzyCompare(lastDpr_, dpr)) {
+        lastDpr_ = dpr;
+        invalidateCache();
+    }
+
     QPainter p(viewport());
+    // Pages are usually downscaled a little (or a lot at high DPI); without this Qt uses
+    // nearest-neighbour and small text looks ragged even from a correct bitmap.
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
     p.fillRect(viewport()->rect(), QColor(0x2b, 0x2e, 0x33));
 
     if (!engine_ || !engine_->isOpen()) {
