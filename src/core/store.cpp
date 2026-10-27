@@ -1361,7 +1361,10 @@ bool Store::setMindGroupTopic(const QString& docPath, const QString& topicId)
 {
     if (!open_) return false;
     QSqlQuery q(QSqlDatabase::database(conn_));
-    q.prepare("update mind_groups set topicId=? where docPath=? and topicId<>?");
+    // coalesce(): rows written before the topicId column existed hold NULL, and
+    // `NULL <> ?` is NULL (never true), which silently skipped every legacy group.
+    q.prepare("update mind_groups set topicId=? where docPath=?"
+              " and coalesce(topicId,'') <> ?");
     q.addBindValue(topicId);
     q.addBindValue(nonNull(docPath));
     q.addBindValue(topicId);
