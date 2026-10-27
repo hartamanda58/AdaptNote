@@ -203,7 +203,10 @@ jobs:
             if ($scaleFactor) { $env:QT_SCALE_FACTOR = $scaleFactor } else { Remove-Item Env:\QT_SCALE_FACTOR -ErrorAction SilentlyContinue }
             $out = Join-Path $smokeLog "$label.out.txt"
             $err = Join-Path $smokeLog "$label.err.txt"
-            $p = Start-Process -FilePath $exe -ArgumentList @("--doc", $pdf, "--render-probe") -PassThru `
+            # Fixed 100% zoom: the bitmap size then depends only on the page geometry and
+            # the device pixel ratio. "Fit width" couples it to the window, which the runner
+            # screen clamps - that made an earlier version of this check meaningless.
+            $p = Start-Process -FilePath $exe -ArgumentList @("--doc", $pdf, "--zoom", "100", "--render-probe") -PassThru `
                  -RedirectStandardOutput $out -RedirectStandardError $err
             if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw "probe $label timed out" }
             $text = ((Get-Content $out -ErrorAction SilentlyContinue) + (Get-Content $err -ErrorAction SilentlyContinue)) -join "`n"
@@ -218,6 +221,7 @@ jobs:
           Remove-Item Env:\QT_SCALE_FACTOR -ErrorAction SilentlyContinue
           $ratio = [math]::Round($w2 / [double]$w1, 2)
           Say "dpi: 1x=$w1 px, 2x=$w2 px, ratio=$ratio"
+          if ($w1 -lt 500) { throw "probe bitmap too small to be a 100% page ($w1 px)" }
           if ($ratio -lt 1.8) { throw "render bitmap did not scale with dpi (ratio $ratio)" }
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
