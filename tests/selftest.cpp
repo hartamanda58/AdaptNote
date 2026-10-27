@@ -399,14 +399,19 @@ int main(int argc, char** argv)
         for (const MindGroup& g : forTopic)
             check(g.topicId == t.id, QStringLiteral("group carries the topic id"));
 
-        // free-form link between two nodes, independent from the tree
-        const QVector<MindGroup> groups = store.mindGroups(m.docPath);
-        if (groups.size() >= 2) {
+        // free-form link between two nodes, independent from the tree. The groups are
+        // created here on purpose: this test must not depend on what earlier sections left
+        // behind in the shared store.
+        const QString linkA = store.ensureMindGroup(m.docPath, QStringLiteral("连线起点"));
+        const QString linkB = store.ensureMindGroup(m.docPath, QStringLiteral("连线终点"));
+        check(!linkA.isEmpty() && !linkB.isEmpty() && linkA != linkB,
+              QStringLiteral("two distinct groups for the link test"));
+        {
             MindLink l;
             l.id = newId();
             l.topicId = t.id;
-            l.fromNode = groups.at(0).id;
-            l.toNode = groups.at(1).id;
+            l.fromNode = linkA;
+            l.toNode = linkB;
             l.arrow = QStringLiteral("both");
             l.points = QStringLiteral("[[10,20],[30,40]]");
             l.label = QStringLiteral("相关");
@@ -417,8 +422,6 @@ int main(int argc, char** argv)
                   QStringLiteral("link keeps arrow and control points"));
             check(store.removeMindLink(l.id), QStringLiteral("delete link"));
             check(store.mindLinks(t.id).isEmpty(), QStringLiteral("deleted link is not listed"));
-        } else {
-            check(false, QStringLiteral("expected at least two groups for the link test"));
         }
 
         // detaching a document must not delete the other memberships
