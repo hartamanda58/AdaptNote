@@ -1025,11 +1025,12 @@ MindGroup readGroupRow(const QSqlQuery& q)
     g.vv = q.value(6).toString();
     g.deviceId = q.value(7).toString();
     g.parentId = q.value(8).toString();
+    g.topicId = q.value(9).toString();
     return g;
 }
 
 const char* kGroupSelect =
-    "select id,docPath,name,[order],updated,deleted,vv,deviceId,parentId from mind_groups";
+    "select id,docPath,name,[order],updated,deleted,vv,deviceId,parentId,topicId from mind_groups";
 
 }  // namespace
 
@@ -1092,11 +1093,11 @@ bool Store::upsertMindGroup(const MindGroup& gIn, QString* error, bool writeMirr
         g.parentId.clear();
 
     QSqlQuery q(QSqlDatabase::database(conn_));
-    q.prepare("insert into mind_groups(id,docPath,name,parentId,[order],updated,deleted,vv,deviceId)"
-              " values(?,?,?,?,?,?,?,?,?)"
+    q.prepare("insert into mind_groups(id,docPath,name,parentId,[order],updated,deleted,vv,deviceId,topicId)"
+              " values(?,?,?,?,?,?,?,?,?,?)"
               " on conflict(id) do update set name=excluded.name, parentId=excluded.parentId,"
               " [order]=excluded.[order], updated=excluded.updated, deleted=excluded.deleted,"
-              " vv=excluded.vv, deviceId=excluded.deviceId");
+              " vv=excluded.vv, deviceId=excluded.deviceId, topicId=excluded.topicId");
     q.addBindValue(g.id);
     q.addBindValue(nonNull(g.docPath));
     q.addBindValue(g.name);
@@ -1106,6 +1107,7 @@ bool Store::upsertMindGroup(const MindGroup& gIn, QString* error, bool writeMirr
     q.addBindValue(g.deleted ? 1 : 0);
     q.addBindValue(g.vv);
     q.addBindValue(g.deviceId);
+    q.addBindValue(g.topicId);
     if (!q.exec()) {
         if (error) *error = q.lastError().text();
         return false;
@@ -1167,6 +1169,270 @@ bool Store::setMindGroupParent(const QString& id, const QString& parentId)
     target.parentId = parentId;
     target.order = siblings;
     return upsertMindGroup(stampGroupForLocalWrite(target));
+}
+
+// ---------------------------------------------------------------- reading topics
+namespace {
+Topic readTopicRow(const QSqlQuery& q)
+{
+    Topic t;
+    t.id = q.value(0).toString();
+    t.name = q.value(1).toString();
+    t.description = q.value(2).toString();
+    t.updated = q.value(3).toLongLong();
+    t.deleted = q.value(4).toInt() != 0;
+    t.vv = q.value(5).toString();
+    t.deviceId = q.value(6).toString();
+    return t;
+}
+
+MindLink readLinkRow(const QSqlQuery& q)
+{
+    MindLink l;
+    l.id = q.value(0).toString();
+    l.topicId = q.value(1).toString();
+    l.fromNode = q.value(2).toString();
+    l.toNode = q.value(3).toString();
+    l.points = q.value(4).toString();
+    l.arrow = q.value(5).toString();
+    l.label = q.value(6).toString();
+    l.updated = q.value(7).toLongLong();
+    l.deleted = q.value(8).toInt() != 0;
+    l.vv = q.value(9).toString();
+    l.deviceId = q.value(10).toString();
+    return l;
+}
+
+const char* kTopicSelect =
+    "select id,name,description,updated,deleted,vv,deviceId from topics";
+const char* kLinkSelect =
+    "select id,topicId,fromNode,toNode,points,arrow,label,updated,deleted,vv,deviceId"
+    " from mind_links";
+}  // namespace
+
+QVector<Topic> Store::topics() const
+{
+    QVector<Topic> out;
+    if (!open_) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    if (!q.exec(QString::fromLatin1(kTopicSelect) + " where deleted=0 order by updated desc, name"))
+        return out;
+    while (q.next()) out.append(readTopicRow(q));
+    return out;
+}
+
+QVector<Topic> Store::topicsIncludingDeleted() const
+{
+    QVector<Topic> out;
+    if (!open_) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    if (!q.exec(QString::fromLatin1(kTopicSelect) + " order by updated desc, name")) return out;
+    while (q.next()) out.append(readTopicRow(q));
+    return out;
+}
+
+Topic Store::stampTopicForLocalWrite(const Topic& t)
+{
+    Topic out = t;
+    VersionVector vv = VersionVector::parse(t.vv);
+    vv.bump(deviceId(), static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+    out.vv = vv.toString();
+    out.deviceId = deviceId();
+    out.updated = QDateTime::currentMSecsSinceEpoch();
+    if (out.id.isEmpty()) out.id = newId();
+    return out;
+}
+
+bool Store::upsertTopic(const Topic& t, QString* error, bool writeMirror)
+{
+    Q_UNUSED(writeMirror);
+    if (!open_ || t.id.isEmpty()) return false;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("insert into topics(id,name,description,updated,deleted,vv,deviceId)"
+              " values(?,?,?,?,?,?,?)"
+              " on conflict(id) do update set name=excluded.name,"
+              " description=excluded.description, updated=excluded.updated,"
+              " deleted=excluded.deleted, vv=excluded.vv, deviceId=excluded.deviceId");
+    q.addBindValue(t.id);
+    q.addBindValue(t.name);
+    q.addBindValue(t.description);
+    q.addBindValue(t.updated);
+    q.addBindValue(t.deleted ? 1 : 0);
+    q.addBindValue(t.vv);
+    q.addBindValue(t.deviceId);
+    if (!q.exec()) {
+        if (error) *error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Store::removeTopic(const QString& id)
+{
+    if (!open_ || id.isEmpty()) return false;
+    Topic t;
+    for (const Topic& row : topicsIncludingDeleted())
+        if (row.id == id) t = row;
+    if (t.id.isEmpty()) return false;
+    t.deleted = true;
+    return upsertTopic(stampTopicForLocalWrite(t));
+}
+
+QVector<TopicDoc> Store::topicDocs(const QString& topicId) const
+{
+    QVector<TopicDoc> out;
+    if (!open_) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("select topicId,docPath,[order],deleted,vv,deviceId,updated from topic_docs"
+              " where topicId=? and deleted=0 order by [order], docPath");
+    q.addBindValue(nonNull(topicId));
+    if (!q.exec()) return out;
+    while (q.next()) {
+        TopicDoc d;
+        d.topicId = q.value(0).toString();
+        d.docPath = q.value(1).toString();
+        d.order = q.value(2).toInt();
+        d.deleted = q.value(3).toInt() != 0;
+        d.vv = q.value(4).toString();
+        d.deviceId = q.value(5).toString();
+        d.updated = q.value(6).toLongLong();
+        out.append(d);
+    }
+    return out;
+}
+
+bool Store::addTopicDoc(const QString& topicId, const QString& docPath, QString* error)
+{
+    if (!open_ || topicId.isEmpty() || docPath.isEmpty()) return false;
+    int next = 0;
+    for (const TopicDoc& d : topicDocs(topicId)) next = qMax(next, d.order + 1);
+
+    VersionVector vv;
+    vv.bump(deviceId(), static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("insert into topic_docs(topicId,docPath,[order],updated,deleted,vv,deviceId)"
+              " values(?,?,?,?,0,?,?)"
+              " on conflict(topicId,docPath) do update set deleted=0,"
+              " [order]=excluded.[order], updated=excluded.updated,"
+              " vv=excluded.vv, deviceId=excluded.deviceId");
+    q.addBindValue(topicId);
+    q.addBindValue(nonNull(docPath));
+    q.addBindValue(next);
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(vv.toString());
+    q.addBindValue(deviceId());
+    if (!q.exec()) {
+        if (error) *error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Store::removeTopicDoc(const QString& topicId, const QString& docPath)
+{
+    if (!open_ || topicId.isEmpty() || docPath.isEmpty()) return false;
+    VersionVector vv;
+    vv.bump(deviceId(), static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("update topic_docs set deleted=1, updated=?, vv=?, deviceId=?"
+              " where topicId=? and docPath=?");
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(vv.toString());
+    q.addBindValue(deviceId());
+    q.addBindValue(topicId);
+    q.addBindValue(nonNull(docPath));
+    if (!q.exec()) return false;
+    return q.numRowsAffected() > 0;
+}
+
+QVector<QString> Store::topicsForDoc(const QString& docPath) const
+{
+    QVector<QString> out;
+    if (!open_) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("select topicId from topic_docs where docPath=? and deleted=0");
+    q.addBindValue(nonNull(docPath));
+    if (!q.exec()) return out;
+    while (q.next()) out.append(q.value(0).toString());
+    return out;
+}
+
+bool Store::setMindGroupTopic(const QString& docPath, const QString& topicId)
+{
+    if (!open_) return false;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("update mind_groups set topicId=? where docPath=? and topicId<>?");
+    q.addBindValue(topicId);
+    q.addBindValue(nonNull(docPath));
+    q.addBindValue(topicId);
+    return q.exec();
+}
+
+QVector<MindGroup> Store::mindGroupsForTopic(const QString& topicId) const
+{
+    QVector<MindGroup> out;
+    if (!open_ || topicId.isEmpty()) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare(QString::fromLatin1(kGroupSelect) +
+              " where topicId=? and deleted=0 order by [order], name");
+    q.addBindValue(topicId);
+    if (!q.exec()) return out;
+    while (q.next()) out.append(readGroupRow(q));
+    return out;
+}
+
+QVector<MindLink> Store::mindLinks(const QString& topicId) const
+{
+    QVector<MindLink> out;
+    if (!open_ || topicId.isEmpty()) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare(QString::fromLatin1(kLinkSelect) +
+              " where topicId=? and deleted=0 order by updated desc");
+    q.addBindValue(topicId);
+    if (!q.exec()) return out;
+    while (q.next()) out.append(readLinkRow(q));
+    return out;
+}
+
+bool Store::upsertMindLink(const MindLink& lIn, QString* error)
+{
+    if (!open_ || lIn.id.isEmpty()) return false;
+    MindLink l = lIn;
+    if (l.id.isEmpty()) l.id = newId();
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("insert into mind_links"
+              "(id,topicId,fromNode,toNode,points,arrow,label,updated,deleted,vv,deviceId)"
+              " values(?,?,?,?,?,?,?,?,?,?,?)"
+              " on conflict(id) do update set topicId=excluded.topicId,"
+              " fromNode=excluded.fromNode, toNode=excluded.toNode, points=excluded.points,"
+              " arrow=excluded.arrow, label=excluded.label, updated=excluded.updated,"
+              " deleted=excluded.deleted, vv=excluded.vv, deviceId=excluded.deviceId");
+    q.addBindValue(l.id);
+    q.addBindValue(l.topicId);
+    q.addBindValue(l.fromNode);
+    q.addBindValue(l.toNode);
+    q.addBindValue(l.points);
+    q.addBindValue(l.arrow);
+    q.addBindValue(l.label);
+    q.addBindValue(l.updated ? l.updated : QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(l.deleted ? 1 : 0);
+    q.addBindValue(l.vv);
+    q.addBindValue(l.deviceId);
+    if (!q.exec()) {
+        if (error) *error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Store::removeMindLink(const QString& id)
+{
+    if (!open_ || id.isEmpty()) return false;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("update mind_links set deleted=1, updated=? where id=?");
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(id);
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool Store::removeMindGroup(const QString& id)

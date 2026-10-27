@@ -85,6 +85,7 @@ add_library(adapt_core STATIC
   src/ai/ai_client.cpp
   src/ai/prompts.cpp
   src/mind/tree.cpp
+  src/mind/layout.cpp
   src/migrate/migrate.cpp
   src/import/import.cpp
   src/sync/conflicts.cpp

@@ -1,6 +1,7 @@
 // P5 tests: handwriting geometry (ink), mind map layout, read-aloud sentence iterator.
 #include "core/textselect.h"
 #include "ink/ink.h"
+#include "mind/layout.h"
 #include "mind/mindmap.h"
 #include "read/reader.h"
 #include "render/mupdf_engine.h"
@@ -533,6 +534,102 @@ int main(int argc, char** argv)
 
         reader.stop();
         check(!reader.active(), QStringLiteral("stop() deactivates the reader"));
+    }
+
+
+    // ---- mind-map layout: the rules the view and the exporters both rely on ----
+    {
+        std::printf("\n=== 6. mind map layout ===\n");
+        mind::Node root;
+        root.text = QStringLiteral("书");
+        mind::Node g1;
+        g1.text = QStringLiteral("组一");
+        g1.groupKey = QStringLiteral("group:g1");
+        mind::Node g2;
+        g2.text = QStringLiteral("组二");
+        g2.groupKey = QStringLiteral("group:g2");
+        mind::Node leaf1;
+        leaf1.text = QStringLiteral("摘录一");
+        leaf1.page = 0;
+        leaf1.markupId = QStringLiteral("m1");
+        mind::Node leaf2;
+        leaf2.text = QStringLiteral("摘录二");
+        leaf2.page = 1;
+        leaf2.markupId = QStringLiteral("m2");
+        mind::Node leaf3;
+        leaf3.text = QStringLiteral("摘录三");
+        leaf3.page = 2;
+        leaf3.markupId = QStringLiteral("m3");
+        g1.children = {leaf1, leaf2};
+        g2.children = {leaf3};
+        root.children = {g1, g2};
+
+        QHash<QString, double> heights;
+        heights[QStringLiteral("group:g1")] = 58;
+        heights[QStringLiteral("group:g2")] = 58;
+        heights[QStringLiteral("page:0")] = 84;   // a long excerpt is a taller card
+        heights[QStringLiteral("page:1")] = 40;
+        heights[QStringLiteral("page:2")] = 40;
+
+        QSizeF canvas;
+        const QVector<mind::PlacedNode> placed = mind::layoutTree(root, heights, 64.0, {}, {}, &canvas);
+        check(placed.size() == 6, QStringLiteral("one rect per visible node (%1)").arg(placed.size()));
+
+        // columns follow depth
+        QHash<QString, QRectF> byKey;
+        for (const mind::PlacedNode& p : placed) {
+            const QString key = p.groupId.isEmpty() ? QString() : QStringLiteral("group:") + p.groupId;
+            if (!key.isEmpty()) byKey.insert(key, p.rect);
+        }
+        check(byKey.contains(QStringLiteral("group:g1")) &&
+                  byKey.value(QStringLiteral("group:g1")).left() >
+                      placed.first().rect.left(),
+              QStringLiteral("children sit in a column right of the root"));
+
+        // no two cards in the same column may overlap
+        bool overlap = false;
+        for (int i = 0; i < placed.size(); ++i) {
+            for (int j = i + 1; j < placed.size(); ++j) {
+                if (placed[i].rect.intersects(placed[j].rect)) overlap = true;
+            }
+        }
+        check(!overlap, QStringLiteral("cards never overlap"));
+
+        // a parent with children is vertically centred on them
+        const QRectF g1r = byKey.value(QStringLiteral("group:g1"));
+        double top = 1e9, bottom = -1e9;
+        for (const mind::PlacedNode& p : placed) {
+            if (p.groupId.startsWith(QStringLiteral("page"))) continue;
+            if (p.depth == 2) {
+                top = qMin(top, p.rect.top());
+                bottom = qMax(bottom, p.rect.bottom());
+            }
+        }
+        const double g1center = g1r.center().y();
+        check(g1center > top - 40 && g1center < bottom + 40,
+              QStringLiteral("parent is near the vertical centre of its subtree"));
+
+        // measured height is respected (variable card sizes)
+        double tall = 0;
+        for (const mind::PlacedNode& p : placed)
+            if (p.rect.height() > tall) tall = p.rect.height();
+        check(qAbs(tall - 84.0) < 0.01,
+              QStringLiteral("layout uses the measured card height (%1)").arg(tall));
+        check(canvas.height() >= 84 && canvas.width() > 400,
+              QStringLiteral("canvas covers the tree (%1x%2)")
+                  .arg(canvas.width()).arg(canvas.height()));
+
+        // collapsing a group hides its subtree
+        QSet<QString> collapsed;
+        collapsed.insert(QStringLiteral("group:g1"));
+        QSizeF shrunken;
+        const QVector<mind::PlacedNode> folded =
+            mind::layoutTree(root, heights, 64.0, {}, collapsed, &shrunken);
+        check(folded.size() == 4,
+              QStringLiteral("collapsed group hides its children (%1 rects)").arg(folded.size()));
+        check(shrunken.height() < canvas.height(),
+              QStringLiteral("collapsing shrinks the canvas (%1 < %2)")
+                  .arg(shrunken.height()).arg(canvas.height()));
     }
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "P5 CHECKS PASSED" : "P5 CHECKS FAILED", g_fail);

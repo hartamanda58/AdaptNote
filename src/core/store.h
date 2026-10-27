@@ -95,6 +95,29 @@ public:
                             const QString& parentId = {});
     // Moves a group under another one (empty = top level). Rejects cycles.
     bool setMindGroupParent(const QString& id, const QString& parentId);
+
+    // ---- reading topics (cross-document organisation) ----
+    QVector<Topic> topics() const;                       // live only
+    QVector<Topic> topicsIncludingDeleted() const;
+    bool upsertTopic(const Topic& t, QString* error = nullptr, bool writeMirror = false);
+    bool removeTopic(const QString& id);                  // tombstone
+    Topic stampTopicForLocalWrite(const Topic& t);
+
+    QVector<TopicDoc> topicDocs(const QString& topicId) const;   // live only
+    // Links a document into a topic. A document may belong to several topics.
+    bool addTopicDoc(const QString& topicId, const QString& docPath, QString* error = nullptr);
+    bool removeTopicDoc(const QString& topicId, const QString& docPath);
+    QVector<QString> topicsForDoc(const QString& docPath) const;
+
+    // Gives an existing per-document group tree a topic owner (used by the migration and
+    // when a document is first attached to a topic).
+    bool setMindGroupTopic(const QString& docPath, const QString& topicId);
+    QVector<MindGroup> mindGroupsForTopic(const QString& topicId) const;   // live only
+
+    // ---- free-form links between nodes ----
+    QVector<MindLink> mindLinks(const QString& topicId) const;   // live only
+    bool upsertMindLink(const MindLink& l, QString* error = nullptr);
+    bool removeMindLink(const QString& id);
     bool purgeMarkup(const QString& id);
 
     bool exportMirror(const QString& docPath, QString* error = nullptr) const;

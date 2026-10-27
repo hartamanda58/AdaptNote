@@ -184,6 +184,7 @@ QJsonObject MindGroup::toJson() const
     o["name"] = name;
     o["order"] = order;
     if (!parentId.isEmpty()) o["parentId"] = parentId;
+    if (!topicId.isEmpty()) o["topicId"] = topicId;
     o["updated"] = updated;
     if (deleted) o["deleted"] = true;
     if (!vv.isEmpty()) o["vv"] = vv;
@@ -198,12 +199,73 @@ MindGroup MindGroup::fromJson(const QJsonObject& o)
     g.docPath = o["docPath"].toString();
     g.name = o["name"].toString();
     g.parentId = o["parentId"].toString();
+    g.topicId = o["topicId"].toString();
     g.order = o["order"].toInt();
     g.deleted = o["deleted"].toBool();
     g.vv = o["vv"].toString();
     g.deviceId = o["deviceId"].toString();
     g.updated = static_cast<qint64>(o["updated"].toDouble());
     return g;
+}
+
+QJsonObject Topic::toJson() const
+{
+    QJsonObject o;
+    o["id"] = id;
+    o["name"] = name;
+    if (!description.isEmpty()) o["description"] = description;
+    o["updated"] = updated;
+    if (deleted) o["deleted"] = true;
+    if (!vv.isEmpty()) o["vv"] = vv;
+    if (!deviceId.isEmpty()) o["deviceId"] = deviceId;
+    return o;
+}
+
+Topic Topic::fromJson(const QJsonObject& o)
+{
+    Topic t;
+    t.id = o["id"].toString();
+    t.name = o["name"].toString();
+    t.description = o["description"].toString();
+    t.deleted = o["deleted"].toBool();
+    t.vv = o["vv"].toString();
+    t.deviceId = o["deviceId"].toString();
+    t.updated = static_cast<qint64>(o["updated"].toDouble());
+    return t;
+}
+
+QJsonObject MindLink::toJson() const
+{
+    QJsonObject o;
+    o["id"] = id;
+    o["topicId"] = topicId;
+    o["from"] = fromNode;
+    o["to"] = toNode;
+    if (!points.isEmpty()) o["points"] = points;
+    if (!arrow.isEmpty()) o["arrow"] = arrow;
+    if (!label.isEmpty()) o["label"] = label;
+    o["updated"] = updated;
+    if (deleted) o["deleted"] = true;
+    if (!vv.isEmpty()) o["vv"] = vv;
+    if (!deviceId.isEmpty()) o["deviceId"] = deviceId;
+    return o;
+}
+
+MindLink MindLink::fromJson(const QJsonObject& o)
+{
+    MindLink l;
+    l.id = o["id"].toString();
+    l.topicId = o["topicId"].toString();
+    l.fromNode = o["from"].toString();
+    l.toNode = o["to"].toString();
+    l.points = o["points"].toString();
+    l.arrow = o["arrow"].toString();
+    l.label = o["label"].toString();
+    l.deleted = o["deleted"].toBool();
+    l.vv = o["vv"].toString();
+    l.deviceId = o["deviceId"].toString();
+    l.updated = static_cast<qint64>(o["updated"].toDouble());
+    return l;
 }
 
 QRectF Markup::boundingRect() const

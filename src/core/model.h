@@ -117,6 +117,7 @@ struct MindGroup {
     QString docPath;
     QString name;
     QString parentId;   // empty = top level (groups form a tree per document)
+    QString topicId;    // owning reading topic; empty = legacy per-document tree
     int order = 0;
     bool deleted = false;
     QString vv;
@@ -125,6 +126,53 @@ struct MindGroup {
 
     QJsonObject toJson() const;
     static MindGroup fromJson(const QJsonObject& o);
+};
+
+// A reading topic gathers several documents (a course, a project, a paper set).
+// Notes stay per document; the topic decides which documents are viewed together
+// and owns the mind-map tree.
+struct Topic {
+    QString id;
+    QString name;
+    QString description;
+    bool deleted = false;
+    QString vv;
+    QString deviceId;
+    qint64 updated = 0;
+
+    QJsonObject toJson() const;
+    static Topic fromJson(const QJsonObject& o);
+};
+
+// Which documents belong to a topic (a document may belong to several topics).
+struct TopicDoc {
+    QString topicId;
+    QString docPath;
+    int order = 0;
+    bool deleted = false;
+    QString vv;
+    QString deviceId;
+    qint64 updated = 0;
+};
+
+// Free-form relation between two mind-map nodes. Deliberately separate from
+// MindGroup::parentId: a relation line must never be read as tree structure, and it
+// carries its own arrow direction and control points.
+struct MindLink {
+    QString id;
+    QString topicId;
+    QString fromNode;
+    QString toNode;
+    QString points;   // JSON array of [x,y] control points, optional
+    QString arrow;    // "", "start", "end", "both"
+    QString label;
+    bool deleted = false;
+    QString vv;
+    QString deviceId;
+    qint64 updated = 0;
+
+    QJsonObject toJson() const;
+    static MindLink fromJson(const QJsonObject& o);
 };
 
 struct OutlineItem {
