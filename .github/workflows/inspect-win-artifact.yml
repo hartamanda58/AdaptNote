@@ -141,7 +141,9 @@ jobs:
           $smoke = Join-Path $env:RUNNER_TEMP "adaptnote-smoke"
           if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
           New-Item -ItemType Directory -Force $smoke | Out-Null
-          $env:QT_QPA_PLATFORM = "offscreen"
+          # The packaged Windows build contains qwindows.dll, not Qt's Linux offscreen
+          # plugin. The runner has a desktop session, so use the real Windows platform.
+          $env:QT_QPA_PLATFORM = "windows"
           $env:ADAPT_HEADLESS = "1"
           $env:ADAPT_DATA_DIR = Join-Path $smoke "data"
           function Say($line) { Write-Host $line }
