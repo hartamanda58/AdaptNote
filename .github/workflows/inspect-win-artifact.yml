@@ -131,6 +131,50 @@ jobs:
           $report -join "`n" | Out-File ci/windows-report.txt -Encoding utf8
           if ($failed) { throw "package checks failed - see ci/windows-report.txt" }
 
+      - name: Runtime smoke test (PDF + EPUB + portable data)
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Get-ChildItem pkg -Directory | Select-Object -First 1
+          $exe = Join-Path $root.FullName "bin\adaptnote.exe"
+          $smoke = Join-Path $env:RUNNER_TEMP "adaptnote-smoke"
+          if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
+          New-Item -ItemType Directory -Force $smoke | Out-Null
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:ADAPT_HEADLESS = "1"
+          $env:ADAPT_DATA_DIR = Join-Path $smoke "data"
+          function Say($line) { Write-Host $line }
+
+          function RunSmoke([string]$label, [string[]]$args) {
+            Say "smoke ${label}: $($args -join ' ')"
+            $p = Start-Process -FilePath $exe -ArgumentList $args -PassThru
+            if (-not $p.WaitForExit(120000)) {
+              Stop-Process -Id $p.Id -Force
+              throw "smoke $label timed out"
+            }
+            Say "  exit=$($p.ExitCode)"
+            if ($p.ExitCode -ne 0) { throw "smoke $label failed with exit $($p.ExitCode)" }
+          }
+
+          $pdf = Join-Path $root.FullName "samples\test.pdf"
+          $epub = Join-Path $root.FullName "samples\test.epub"
+          $exports = Join-Path $smoke "exports"
+          RunSmoke "pdf-export" @("--doc", $pdf, "--export-dir", $exports)
+          foreach ($ext in @("md","html","opml","xmind","apkg")) {
+            if (!(Test-Path (Join-Path $exports "notes.$ext"))) {
+              throw "smoke pdf-export missing notes.$ext"
+            }
+          }
+          RunSmoke "epub-shot" @("--doc", $epub, "--shot", (Join-Path $smoke "epub.png"))
+          if (!(Test-Path (Join-Path $smoke "epub.png"))) { throw "smoke epub-shot produced no image" }
+          if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
+
+          Add-Content ci/windows-report.txt "--- runtime smoke ---"
+          Add-Content ci/windows-report.txt "PDF export: PASS (md/html/opml/xmind/apkg)"
+          Add-Content ci/windows-report.txt "EPUB screenshot: PASS"
+          Add-Content ci/windows-report.txt "Portable data dir: PASS"
+
       - name: Publish report
         if: always()
         shell: pwsh
