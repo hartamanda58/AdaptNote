@@ -141,8 +141,7 @@ jobs:
           $smoke = Join-Path $env:RUNNER_TEMP "adaptnote-smoke"
           if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
           New-Item -ItemType Directory -Force $smoke | Out-Null
-          # The packaged Windows build contains qwindows.dll, not Qt's Linux offscreen
-          # plugin. The runner has a desktop session, so use the real Windows platform.
+          # Exercise the platform shipped in the package; do not require qoffscreen.dll.
           $env:QT_QPA_PLATFORM = "windows"
           $env:ADAPT_HEADLESS = "1"
           $env:ADAPT_DATA_DIR = Join-Path $smoke "data"
@@ -150,43 +149,67 @@ jobs:
 
           $smokeLog = Join-Path $smoke "logs"
           New-Item -ItemType Directory -Force $smokeLog | Out-Null
-          function RunSmoke([string]$label, [string[]]$args) {
-            Say "smoke ${label}: $($args -join ' ')"
-            $out = Join-Path $smokeLog "${label}.out.txt"
-            $err = Join-Path $smokeLog "${label}.err.txt"
-            $p = Start-Process -FilePath $exe -ArgumentList ($args -join ' ') -PassThru `
-                 -RedirectStandardOutput $out -RedirectStandardError $err
-            if (-not $p.WaitForExit(120000)) {
-              if (Test-Path $out) { Get-Content $out | ForEach-Object { Say "  TIMEOUT OUT $_" } }
-              if (Test-Path $err) { Get-Content $err | ForEach-Object { Say "  TIMEOUT ERR $_" } }
-              Stop-Process -Id $p.Id -Force
-              throw "smoke $label timed out"
-            }
+          function RunSmoke([string]$label, [string[]]$CliArgs) {
+            # $args is a PowerShell automatic variable: never use it as a parameter.
+            if ($CliArgs.Count -eq 0) { throw "empty CLI arguments for $label" }
+            Say "smoke ${label}: $($CliArgs | ConvertTo-Json -Compress)"
+            $info = [System.Diagnostics.ProcessStartInfo]::new()
+            $info.FileName = $exe
+            $info.UseShellExecute = $false
+            $info.RedirectStandardOutput = $true
+            $info.RedirectStandardError = $true
+            # ArgumentList preserves spaces and Unicode without manual command-line quoting.
+            foreach ($item in $CliArgs) { $info.ArgumentList.Add($item) }
+            if ($info.ArgumentList.Count -ne $CliArgs.Count) { throw "argument count mismatch" }
+            $p = [System.Diagnostics.Process]::new()
+            $p.StartInfo = $info
+            if (!$p.Start()) { throw "could not start $label" }
+            $stdout = $p.StandardOutput.ReadToEndAsync()
+            $stderr = $p.StandardError.ReadToEndAsync()
+            $finished = $p.WaitForExit(120000)
+            if (!$finished) { $p.Kill($true); $p.WaitForExit() }
+            $outText = $stdout.GetAwaiter().GetResult()
+            $errText = $stderr.GetAwaiter().GetResult()
+            $outText | Set-Content (Join-Path $smokeLog "${label}.out.txt")
+            $errText | Set-Content (Join-Path $smokeLog "${label}.err.txt")
+            Say "  OUT $outText"
+            Say "  ERR $errText"
+            if (!$finished) { throw "smoke $label timed out" }
             Say "  exit=$($p.ExitCode)"
-            if (Test-Path $out) { Get-Content $out | ForEach-Object { Say "  OUT $_" } }
-            if (Test-Path $err) { Get-Content $err | ForEach-Object { Say "  ERR $_" } }
             if ($p.ExitCode -ne 0) { throw "smoke $label failed with exit $($p.ExitCode)" }
           }
 
           $pdf = Join-Path $root.FullName "samples\test.pdf"
           $epub = Join-Path $root.FullName "samples\test.epub"
           $exports = Join-Path $smoke "exports"
-          # CLI export schedules an explicit quit and works on a runner without an interactive
-          # desktop. Window screenshots are intentionally left to a real Windows desktop.
-          RunSmoke "pdf-export" @("--doc", $pdf, "--export-dir", $exports)
+          RunSmoke -label "pdf-export" -CliArgs @("--doc", $pdf, "--demo", "--export-dir", $exports)
           foreach ($ext in @("md","html","opml","xmind","apkg")) {
             if (!(Test-Path (Join-Path $exports "notes.$ext"))) {
               throw "smoke pdf-export missing notes.$ext"
             }
           }
-          RunSmoke "epub-export" @("--doc", $epub, "--export-dir", (Join-Path $smoke "epub-exports"))
+          RunSmoke -label "epub-export" -CliArgs @("--doc", $epub, "--export-dir", (Join-Path $smoke "epub-exports"))
+          foreach ($kind in @("pdf", "epub")) {
+            $doc = Join-Path $root.FullName "samples\test.$kind"
+            $shot = Join-Path $smoke "$kind.png"
+            RunSmoke -label "$kind-screenshot" -CliArgs @("--doc", $doc, "--screenshot", $shot)
+            if (!(Test-Path $shot) -or (Get-Item $shot).Length -eq 0) { throw "missing $kind screenshot" }
+          }
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
           Add-Content ci/windows-report.txt "--- runtime smoke ---"
           Add-Content ci/windows-report.txt "PDF CLI export: PASS (md/html/opml/xmind/apkg)"
           Add-Content ci/windows-report.txt "EPUB CLI open/export: PASS"
           Add-Content ci/windows-report.txt "Portable data dir: PASS"
-          Add-Content ci/windows-report.txt "GUI screenshot: not run (runner has no interactive desktop)"
+          Add-Content ci/windows-report.txt "PDF/EPUB window screenshots: PASS (qwindows)"
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-evidence
+          path: ${{ runner.temp }}/adaptnote-smoke
+          if-no-files-found: warn
 
       - name: Publish report
         if: always()
