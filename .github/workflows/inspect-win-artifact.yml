@@ -146,20 +146,30 @@ jobs:
           $env:ADAPT_DATA_DIR = Join-Path $smoke "data"
           function Say($line) { Write-Host $line }
 
+          $smokeLog = Join-Path $smoke "logs"
+          New-Item -ItemType Directory -Force $smokeLog | Out-Null
           function RunSmoke([string]$label, [string[]]$args) {
             Say "smoke ${label}: $($args -join ' ')"
-            $p = Start-Process -FilePath $exe -ArgumentList $args -PassThru
+            $out = Join-Path $smokeLog "${label}.out.txt"
+            $err = Join-Path $smokeLog "${label}.err.txt"
+            $p = Start-Process -FilePath $exe -ArgumentList ($args -join ' ') -PassThru `
+                 -RedirectStandardOutput $out -RedirectStandardError $err
             if (-not $p.WaitForExit(120000)) {
               Stop-Process -Id $p.Id -Force
               throw "smoke $label timed out"
             }
             Say "  exit=$($p.ExitCode)"
+            if (Test-Path $out) { Get-Content $out | ForEach-Object { Say "  OUT $_" } }
+            if (Test-Path $err) { Get-Content $err | ForEach-Object { Say "  ERR $_" } }
             if ($p.ExitCode -ne 0) { throw "smoke $label failed with exit $($p.ExitCode)" }
           }
 
           $pdf = Join-Path $root.FullName "samples\test.pdf"
           $epub = Join-Path $root.FullName "samples\test.epub"
           $exports = Join-Path $smoke "exports"
+          RunSmoke "help" @("--help")
+          RunSmoke "pdf-shot" @("--doc", $pdf, "--shot", (Join-Path $smoke "pdf.png"))
+          if (!(Test-Path (Join-Path $smoke "pdf.png"))) { throw "smoke pdf-shot produced no image" }
           RunSmoke "pdf-export" @("--doc", $pdf, "--export-dir", $exports)
           foreach ($ext in @("md","html","opml","xmind","apkg")) {
             if (!(Test-Path (Join-Path $exports "notes.$ext"))) {
@@ -171,6 +181,8 @@ jobs:
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
           Add-Content ci/windows-report.txt "--- runtime smoke ---"
+          Add-Content ci/windows-report.txt "Runtime help: PASS"
+          Add-Content ci/windows-report.txt "PDF screenshot: PASS"
           Add-Content ci/windows-report.txt "PDF export: PASS (md/html/opml/xmind/apkg)"
           Add-Content ci/windows-report.txt "EPUB screenshot: PASS"
           Add-Content ci/windows-report.txt "Portable data dir: PASS"
