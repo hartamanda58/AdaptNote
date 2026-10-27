@@ -292,6 +292,22 @@ bool Store::ensureSchema(QString* error)
         " updated integer, deleted integer default 0, vv text, deviceId text)",
         "create index if not exists idx_groups_doc on mind_groups(docPath)",
         "create index if not exists idx_groups_parent on mind_groups(parentId)",
+        // ---- 阅读主题：一个主题可以组织多份资料（一个课程、一个项目、一组论文）。
+        // 笔记仍然属于文档；主题决定哪些文档放在一起看，并拥有脑图树。
+        "create table if not exists topics ("
+        " id text primary key, name text, description text,"
+        " updated integer, deleted integer default 0, vv text, deviceId text)",
+        "create table if not exists topic_docs ("
+        " topicId text, docPath text, [order] integer default 0,"
+        " updated integer, deleted integer default 0, vv text, deviceId text,"
+        " primary key (topicId, docPath))",
+        "create index if not exists idx_topic_docs_doc on topic_docs(docPath)",
+        // 节点之间的自由连线：与父子树分开存，避免关联线被误当作结构，也能单独带箭头。
+        "create table if not exists mind_links ("
+        " id text primary key, topicId text, fromNode text, toNode text,"
+        " points text, arrow text, label text,"
+        " updated integer, deleted integer default 0, vv text, deviceId text)",
+        "create index if not exists idx_links_topic on mind_links(topicId)",
     };
     for (const QString& s : ddl) {
         if (!q.exec(s)) {
@@ -314,6 +330,7 @@ bool Store::ensureSchema(QString* error)
     ensureColumn("markups", "mindGroup", "text");
     ensureColumn("markups", "mindOrder", "integer default 0");
     ensureColumn("mind_groups", "parentId", "text");
+    ensureColumn("mind_groups", "topicId", "text default ''");
     ensureColumn("markups", "anchorChapter", "text");
     ensureColumn("markups", "anchorOffset", "integer default -1");
 
