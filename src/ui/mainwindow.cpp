@@ -15,6 +15,7 @@
 #include "ui/pageview.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -34,6 +35,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QSplitter>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
@@ -378,7 +380,12 @@ void MainWindow::buildUi()
 
     view_ = new PageView(this);
     view_->setEngine(&engine_);
-    setCentralWidget(view_);
+    // Reading area and mind map live side by side instead of in a modal dialog: jumping to
+    // the source must not throw away the map the user is working in.
+    splitter_ = new QSplitter(Qt::Horizontal, this);
+    splitter_->addWidget(view_);
+    setCentralWidget(splitter_);
+    ensureMindPanel();
 
     view_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(view_, &QWidget::customContextMenuRequested, this, &MainWindow::showViewContextMenu);
@@ -546,10 +553,38 @@ void MainWindow::buildToolbar()
         setInkColor(saved.isValid() ? saved : QColor(0x1f, 0x23, 0x28));
     }
 
-    QAction* mindAction = tb->addAction(glyphIcon("image", QColor("#2a6fd0")), QStringLiteral("脑图"));
-    mindAction->setToolTip(QStringLiteral("把当前文档的笔记做成脑图（M）"));
-    mindAction->setShortcut(QKeySequence(Qt::Key_M));
-    connect(mindAction, &QAction::triggered, this, &MainWindow::showMindMap);
+    // Workspace modes: the mind map is a panel beside the page, not a modal dialog.
+    tb->addSeparator();
+    auto* modeGroup = new QActionGroup(this);
+    modeGroup->setExclusive(true);
+    struct ModeDef {
+        const char* label;
+        const char* tip;
+        int mode;
+        QKeySequence key;
+    };
+    const ModeDef modes[] = {
+        {"阅读", "专注阅读：隐藏脑图（Ctrl+1）", 0, QKeySequence(QStringLiteral("Ctrl+1"))},
+        {"整理", "阅读 + 脑图并排（Ctrl+2）", 1, QKeySequence(QStringLiteral("Ctrl+2"))},
+        {"脑图", "专注脑图（Ctrl+3 / M）", 2, QKeySequence(QStringLiteral("Ctrl+3"))},
+    };
+    for (const ModeDef& def : modes) {
+        QAction* a = tb->addAction(glyphIcon("image", QColor("#2a6fd0")),
+                                   QString::fromUtf8(def.label));
+        a->setToolTip(QString::fromUtf8(def.tip));
+        a->setCheckable(true);
+        a->setShortcut(def.key);
+        a->setActionGroup(modeGroup);
+        if (def.mode == workspaceMode_) a->setChecked(true);
+        connect(a, &QAction::triggered, this, [this, mode = def.mode]() { setWorkspaceMode(mode); });
+    }
+    {
+        auto* mindShortcut = new QAction(this);
+        mindShortcut->setShortcut(QKeySequence(Qt::Key_M));
+        mindShortcut->setShortcutContext(Qt::WindowShortcut);
+        addAction(mindShortcut);
+        connect(mindShortcut, &QAction::triggered, this, &MainWindow::showMindMap);
+    }
 
     QAction* libraryAction = tb->addAction(glyphIcon("open", QColor("#2a6fd0")),
                                           QStringLiteral("书库"));
@@ -963,6 +998,8 @@ void MainWindow::reloadMarkups()
     updateFilterWidgets();
     updateNotesPanel();
     updateStatus();
+    // The panel shows the same notes the list shows, so it has to follow every change.
+    if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
 }
 
 void MainWindow::refreshFromStore()
@@ -2442,6 +2479,167 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
     return true;
 }
 
+void MainWindow::ensureMindPanel()
+{
+    if (mindPanel_ || !splitter_) return;
+
+    mindPanel_ = new QWidget(splitter_);
+    auto* vbox = new QVBoxLayout(mindPanel_);
+    vbox->setContentsMargins(0, 0, 0, 0);
+    vbox->setSpacing(0);
+
+    auto* bar = new QWidget(mindPanel_);
+    auto* row = new QHBoxLayout(bar);
+    row->setContentsMargins(8, 4, 8, 4);
+    row->setSpacing(6);
+    auto* title = new QLabel(QStringLiteral("脑图"), bar);
+    title->setStyleSheet(QStringLiteral("font-weight:600;"));
+    row->addWidget(title);
+    row->addStretch(1);
+
+    auto* newGroupBtn = new QPushButton(QStringLiteral("新建分组"), bar);
+    newGroupBtn->setToolTip(QStringLiteral("在选中节点下新建分组，未选中则建在顶层"));
+    row->addWidget(newGroupBtn);
+
+    auto* fitBtn = new QPushButton(QStringLiteral("适配"), bar);
+    fitBtn->setToolTip(QStringLiteral("缩放到能看见整张脑图"));
+    row->addWidget(fitBtn);
+
+    auto* collapseBtn = new QPushButton(QStringLiteral("折叠/展开"), bar);
+    collapseBtn->setToolTip(QStringLiteral("折叠或展开选中的节点"));
+    row->addWidget(collapseBtn);
+
+    auto* pngBtn = new QPushButton(QStringLiteral("PNG"), bar);
+    pngBtn->setToolTip(QStringLiteral("把脑图导出成图片"));
+    row->addWidget(pngBtn);
+    vbox->addWidget(bar);
+
+    mindView_ = new mind::MindMapView(mindPanel_);
+    vbox->addWidget(mindView_, 1);
+
+    auto* hint = new QLabel(
+        QStringLiteral("单击卡片选中并跳回原文 · 双击改名 · 拖动笔记换分组 · 右键分组更多操作"),
+        mindPanel_);
+    hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:11px;padding:2px 8px 4px;"));
+    hint->setWordWrap(true);
+    vbox->addWidget(hint);
+
+    splitter_->addWidget(mindPanel_);
+    splitter_->setStretchFactor(0, 3);
+    splitter_->setStretchFactor(1, 2);
+    mindPanel_->setMinimumWidth(280);
+    // Start in reading mode: opening a document must not silently shrink the page area.
+    mindPanel_->hide();
+
+    connect(newGroupBtn, &QPushButton::clicked, this, [this]() {
+        const QString parent = mindView_ ? groupIdOf(mindView_->selectedKey()) : QString();
+        const QString name = askText(mindView_, QStringLiteral("新建分组"),
+                                     QStringLiteral("分组名："), QStringLiteral("新分组"));
+        if (name.trimmed().isEmpty()) return;
+        if (!createMindGroup(name.trimmed(), parent).isEmpty()) rebuildMindMap();
+    });
+    connect(fitBtn, &QPushButton::clicked, this, [this]() {
+        if (mindView_) mindView_->fitToContent();
+    });
+    connect(collapseBtn, &QPushButton::clicked, this, [this]() {
+        if (!mindView_) return;
+        const QString key = mindView_->selectedKey();
+        if (key.isEmpty()) return;
+        mindView_->setCollapsed(key, !mindView_->isCollapsed(key));
+    });
+    connect(pngBtn, &QPushButton::clicked, this, [this]() {
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
+                             QStringLiteral("/mindmap");
+        const QString path = QFileDialog::getSaveFileName(mindPanel_, QStringLiteral("导出脑图 PNG"),
+                                                          base, QStringLiteral("PNG (*.png)"));
+        if (path.isEmpty()) return;
+        if (mindView_ && mindView_->exportPng(path))
+            inform(mindPanel_, QStringLiteral("导出完成"), path);
+    });
+
+    connect(mindView_, &mind::MindMapView::nodeReparented, this,
+            [this](const QString& markupId, const QString& groupKey) {
+                if (applyMindReparent(markupId, groupKey)) rebuildMindMap();
+            });
+    connect(mindView_, &mind::MindMapView::noteReorderRequested, this,
+            [this](const QString& markupId, const QString& groupKey, const QString& beforeId) {
+                if (applyMindReorder(markupId, groupKey, beforeId)) rebuildMindMap();
+            });
+    connect(mindView_, &mind::MindMapView::groupMenuRequested, this,
+            [this](const QString& groupKey, const QPoint& globalPos) {
+                QString name;
+                for (const MindGroup& g : store_.mindGroups(docPath_))
+                    if (groupKey.endsWith(g.id)) name = g.name;
+
+                QMenu menu(mindView_);
+                menu.addAction(QStringLiteral("重命名分组「%1」…").arg(name), [this, groupKey, name]() {
+                    const QString text = askText(mindView_, QStringLiteral("重命名分组"),
+                                                 QStringLiteral("分组名："), name);
+                    if (text.trimmed().isEmpty()) return;
+                    if (renameMindGroup(groupKey, text.trimmed())) rebuildMindMap();
+                });
+                menu.addAction(QStringLiteral("新建子分组…"), [this, groupKey]() {
+                    const QString text = askText(mindView_, QStringLiteral("新建子分组"),
+                                                 QStringLiteral("分组名："), QStringLiteral("子分组"));
+                    if (text.trimmed().isEmpty()) return;
+                    if (!createMindGroup(text.trimmed(), groupIdOf(groupKey)).isEmpty())
+                        rebuildMindMap();
+                });
+                menu.addAction(QStringLiteral("上移一级"), [this, groupKey]() {
+                    if (moveMindGroupUp(groupKey)) rebuildMindMap();
+                });
+                menu.addAction(QStringLiteral("删除分组"), [this, groupKey]() {
+                    if (deleteMindGroup(groupKey)) {
+                        rebuildMindMap();
+                        updateNotesPanel();
+                    }
+                });
+                menu.exec(globalPos);
+            });
+    // Jump to the page but stay in the map: the old modal dialog closed on every click.
+    connect(mindView_, &mind::MindMapView::nodeActivated, this, [this](int page) {
+        if (page < 0) return;
+        view_->gotoPage(page);
+        updateStatus();
+    });
+}
+
+void MainWindow::rebuildMindMap()
+{
+    if (!mindView_) return;
+    if (!engine_.isOpen() || markups_.isEmpty()) {
+        mind::Node empty;
+        mindView_->setTree(empty);
+        return;
+    }
+    mindView_->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
+                                            store_.mindGroups(docPath_)));
+}
+
+void MainWindow::setWorkspaceMode(int mode)
+{
+    ensureMindPanel();
+    workspaceMode_ = qBound(0, mode, 2);
+    if (!splitter_ || !mindPanel_) return;
+
+    if (workspaceMode_ == 0) {
+        mindPanel_->hide();
+        view_->show();
+    } else if (workspaceMode_ == 2) {
+        view_->hide();
+        mindPanel_->show();
+        rebuildMindMap();
+    } else {
+        view_->show();
+        mindPanel_->show();
+        if (!mindPanel_->isVisible() || splitter_->sizes().value(0) < 200) {
+            const int total = qMax(600, splitter_->width());
+            splitter_->setSizes({total * 55 / 100, total * 45 / 100});
+        }
+        rebuildMindMap();
+    }
+}
+
 void MainWindow::showMindMap()
 {
     if (!engine_.isOpen()) {
@@ -2452,116 +2650,7 @@ void MainWindow::showMindMap()
         statusBar()->showMessage(QStringLiteral("当前文档还没有笔记，脑图会是空的"), 3000);
         return;
     }
-
-    QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("脑图 — %1").arg(QFileInfo(docPath_).completeBaseName()));
-    dlg.resize(1000, 700);
-    auto* vbox = new QVBoxLayout(&dlg);
-
-    auto* view = new mind::MindMapView(&dlg);
-    auto rebuild = [this, view]() {
-        view->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
-                                          store_.mindGroups(docPath_)));
-    };
-    rebuild();
-    vbox->addWidget(view, 1);
-
-    auto* row = new QHBoxLayout;
-    auto* newGroupBtn = new QPushButton(QStringLiteral("新建分组…"), &dlg);
-    connect(newGroupBtn, &QPushButton::clicked, this, [this, rebuild]() {
-        const QString name = askText(this, QStringLiteral("新建分组"),
-                                     QStringLiteral("分组名："), QStringLiteral("新分组"));
-        if (name.trimmed().isEmpty()) return;
-        if (!createMindGroup(name.trimmed()).isEmpty()) rebuild();
-    });
-    row->addWidget(newGroupBtn);
-
-    auto* fitBtn = new QPushButton(QStringLiteral("适应窗口"), &dlg);
-    connect(fitBtn, &QPushButton::clicked, view, [view]() { view->fitToContent(); });
-    row->addWidget(fitBtn);
-    auto* zoomIn = new QPushButton(QStringLiteral("放大"), &dlg);
-    connect(zoomIn, &QPushButton::clicked, view, [view]() { view->setZoom(view->zoom() * 1.2); });
-    row->addWidget(zoomIn);
-    auto* zoomOut = new QPushButton(QStringLiteral("缩小"), &dlg);
-    connect(zoomOut, &QPushButton::clicked, view, [view]() { view->setZoom(view->zoom() / 1.2); });
-    row->addWidget(zoomOut);
-    row->addStretch(1);
-    auto* pngBtn = new QPushButton(QStringLiteral("导出 PNG…"), &dlg);
-    connect(pngBtn, &QPushButton::clicked, this, [view, &dlg]() {
-        const QString base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
-                             QStringLiteral("/mindmap");
-        const QString path = QFileDialog::getSaveFileName(&dlg, QStringLiteral("导出脑图 PNG"), base,
-                                                          QStringLiteral("PNG (*.png)"));
-        if (path.isEmpty()) return;
-        if (view->exportPng(path)) inform(&dlg, QStringLiteral("导出完成"), path);
-    });
-    row->addWidget(pngBtn);
-
-    auto* exportBtn = new QPushButton(QStringLiteral("导出 XMind…"), &dlg);
-    connect(exportBtn, &QPushButton::clicked, this, [this]() { doExport(QStringLiteral("xmind")); });
-    row->addWidget(exportBtn);
-    vbox->addLayout(row);
-
-    auto* hint = new QLabel(
-        QStringLiteral("点击节点跳回原文 · 拖动笔记可换分组或插到某条之前（Alt+↑/↓ 微调顺序）"),
-        &dlg);
-    hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:12px;"));
-    vbox->addWidget(hint);
-
-    connect(view, &mind::MindMapView::nodeReparented, this,
-            [this, view, rebuild](const QString& markupId, const QString& groupKey) {
-                if (!applyMindReparent(markupId, groupKey)) return;
-                rebuild();
-            });
-
-    connect(view, &mind::MindMapView::noteReorderRequested, this,
-            [this, rebuild](const QString& markupId, const QString& groupKey,
-                            const QString& beforeId) {
-                if (!applyMindReorder(markupId, groupKey, beforeId)) return;
-                rebuild();
-            });
-
-    connect(view, &mind::MindMapView::groupMenuRequested, this,
-            [this, view, rebuild](const QString& groupKey, const QPoint& globalPos) {
-                QString name;
-                for (const MindGroup& g : store_.mindGroups(docPath_))
-                    if (groupKey.endsWith(g.id)) name = g.name;
-
-                QMenu menu(view);
-                menu.addAction(QStringLiteral("重命名分组「%1」…").arg(name), [this, view, groupKey,
-                                                                          name, rebuild]() {
-                    const QString text =
-                        askText(view, QStringLiteral("重命名分组"), QStringLiteral("分组名："), name);
-                    if (text.trimmed().isEmpty()) return;
-                    if (renameMindGroup(groupKey, text.trimmed())) rebuild();
-                });
-                menu.addAction(QStringLiteral("新建子分组…"), [this, view, groupKey, rebuild]() {
-                    const QString text = askText(view, QStringLiteral("新建子分组"),
-                                                 QStringLiteral("分组名："),
-                                                 QStringLiteral("子分组"));
-                    if (text.trimmed().isEmpty()) return;
-                    if (!createMindGroup(text.trimmed(), groupIdOf(groupKey)).isEmpty()) rebuild();
-                });
-                menu.addAction(QStringLiteral("上移一级"), [this, groupKey, rebuild]() {
-                    if (moveMindGroupUp(groupKey)) rebuild();
-                });
-                menu.addAction(QStringLiteral("删除分组"), [this, groupKey, rebuild]() {
-                    if (deleteMindGroup(groupKey)) {
-                        rebuild();
-                        updateNotesPanel();
-                    }
-                });
-                menu.exec(globalPos);
-            });
-
-    connect(view, &mind::MindMapView::nodeActivated, this, [this, &dlg](int page) {
-        if (page < 0) return;
-        view_->gotoPage(page);
-        updateStatus();
-        dlg.accept();   // jump and close so the user sees the page
-    });
-
-    dlg.exec();
+    setWorkspaceMode(workspaceMode_ == 2 ? 1 : 2);
 }
 
 // ---------------------------------------------------------------- library view

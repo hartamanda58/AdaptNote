@@ -64,7 +64,12 @@ void MindMapView::setTree(const Node& root)
 {
     root_ = root;
     rebuild();
-    fitToContent();
+    // Keep the user's zoom while editing: re-fitting on every change made the map jump
+    // around and shrink to unreadable size inside a narrow panel. The first tree is fitted.
+    if (!didInitialFit_) {
+        didInitialFit_ = true;
+        fitToContent();
+    }
 }
 
 int MindMapView::sceneNodeCount() const
@@ -272,8 +277,17 @@ void MindMapView::fitToContent()
     if (!scene_) return;
     const QRectF r = scene_->itemsBoundingRect();
     if (r.isEmpty()) return;
-    fitInView(r.adjusted(-30, -30, 30, 30), Qt::KeepAspectRatio);
+    fitInView(r.adjusted(-24, -24, 24, 24), Qt::KeepAspectRatio);
+    // Cards must stay readable: below 85% the titles start to blur, so scroll instead.
+    if (transform().m11() < 0.85) {
+        resetTransform();
+        scale(0.85, 0.85);
+    }
     zoom_ = transform().m11();
+    didInitialFit_ = true;
+    // Start at the root instead of whatever scroll offset the previous layout left behind.
+    const double z = qMax(0.2, zoom_);
+    centerOn(r.left() + viewport()->width() / (2.0 * z), r.center().y());
 }
 
 // One card: rounded box with a title, an excerpt block, the reader's own comment and a

@@ -829,6 +829,32 @@ int main(int argc, char** argv)
         }
     }
 
+    // ---- workspace modes: the mind map is a panel, not a modal dialog ----
+    {
+        std::printf("\n=== workspace modes (reading / both / mind map) ===\n");
+        check(w.workspaceMode() == 0, QStringLiteral("starts in reading mode"));
+
+        w.setWorkspaceMode(1);
+        settle();
+        check(w.workspaceMode() == 1, QStringLiteral("mode 1 = reading + mind map"));
+        check(w.mindMapView() != nullptr, QStringLiteral("mind map panel exists"));
+        const int nodesInPanel = w.mindMapView()->sceneNodeCount();
+        check(nodesInPanel > 0,
+              QStringLiteral("panel shows the notes as cards (%1 nodes)").arg(nodesInPanel));
+        check(w.view()->width() > 300,
+              QStringLiteral("page area still usable (%1 px wide)").arg(w.view()->width()));
+
+        w.setWorkspaceMode(2);
+        settle();
+        check(w.workspaceMode() == 2, QStringLiteral("mode 2 = mind map only"));
+        check(!w.view()->isVisible(), QStringLiteral("reading area hidden in mind mode"));
+
+        w.setWorkspaceMode(0);
+        settle();
+        check(w.view()->isVisible(), QStringLiteral("back to reading mode"));
+        check(!w.mindMapView()->isVisible(), QStringLiteral("mind map hidden again"));
+    }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

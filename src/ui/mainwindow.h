@@ -6,6 +6,7 @@
 #include "ai/ai_client.h"
 #include "ai/prompts.h"
 #include "read/reader.h"
+#include "mind/mindmap.h"
 #include "ui/libraryview.h"
 #include "sync/sync_manager.h"
 
@@ -15,6 +16,7 @@
 #include <QVector>
 
 class QComboBox;
+class QSplitter;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -62,6 +64,12 @@ public:
     int eraseInkAt(int page, const QPointF& pagePoint, double tolerance);
     void toggleInkMode();
     void showMindMap();
+    // 0 = reading only, 1 = reading + mind map, 2 = mind map only
+    void setWorkspaceMode(int mode);
+    int workspaceMode() const { return workspaceMode_; }
+    // The mind-map panel (null until the workspace is built); tests use it to assert that
+    // the map really shows the same notes the reader sees.
+    mind::MindMapView* mindMapView() const { return mindView_; }
     void showLibrary();
     void showConflicts();
     // Mind map: regroup a note (empty group = back to page grouping). Undoable.
@@ -160,6 +168,12 @@ private:
     Store store_;
     SyncManager sync_{store_};
     PageView* view_ = nullptr;
+    QSplitter* splitter_ = nullptr;
+    QWidget* mindPanel_ = nullptr;
+    mind::MindMapView* mindView_ = nullptr;
+    int workspaceMode_ = 0;
+    void ensureMindPanel();
+    void rebuildMindMap();
     QTreeWidget* outlineTree_ = nullptr;
     QListWidget* notesList_ = nullptr;
     QTabWidget* leftTabs_ = nullptr;

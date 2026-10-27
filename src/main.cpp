@@ -48,6 +48,7 @@ int main(int argc, char** argv)
     // acceptance test to prove that the render resolution follows the device pixel ratio
     // without depending on the window size.
     const QCommandLineOption optProbe("render-probe", "print the rendered page bitmap size and exit");
+    const QCommandLineOption optWorkspace("workspace", "workspace mode: read|both|mind", "mode");
     parser.addOption(optDoc);
     parser.addOption(optShot);
     parser.addOption(optDemo);
@@ -63,6 +64,7 @@ int main(int argc, char** argv)
     parser.addOption(optLibrary);
     parser.addOption(optFastImport);
     parser.addOption(optProbe);
+    parser.addOption(optWorkspace);
     parser.process(app);
 
     an::MainWindow w;
@@ -112,6 +114,10 @@ int main(int argc, char** argv)
         w.view()->setRotation(parser.value(optRotate).toInt());
 
         if (parser.isSet(optDemo)) w.applyDemoMarkups();
+        if (parser.isSet(optWorkspace)) {
+            const QString mode = parser.value(optWorkspace).toLower();
+            w.setWorkspaceMode(mode == "mind" ? 2 : mode == "both" ? 1 : 0);
+        }
         if (parser.isSet(optProbe)) {
             const QImage page = w.view()->cachedImageForTest(0);
             qInfo("probe page=1 bitmap=%dx%d dpr=%.2f scale=%.2f", page.width(), page.height(),

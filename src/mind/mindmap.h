@@ -71,6 +71,7 @@ private:
     QString dragMarkupId_;
     QPointF dragStartScene_;
     bool dragMoved_ = false;
+    bool didInitialFit_ = false;
     QGraphicsScene* scene_ = nullptr;
     int nodeItems_ = 0;
     QSet<QString> collapsed_;   // nodeKey() values whose subtree is hidden
