@@ -862,7 +862,11 @@ void MainWindow::buildDocks()
     });
 
     connect(notesList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
-        if (item) jumpToMarkup(item->data(Qt::UserRole).toString());
+        if (!item) return;
+        const QString id = item->data(Qt::UserRole).toString();
+        jumpToMarkup(id);
+        // Reverse direction: the mind map should follow the annotation the user picked.
+        if (mindView_ && mindPanel_->isVisible()) mindView_->selectForMarkup(id);
     });
     connect(notesList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         if (item) editMarkupComment(item->data(Qt::UserRole).toString());
@@ -2596,12 +2600,78 @@ void MainWindow::ensureMindPanel()
                 });
                 menu.exec(globalPos);
             });
+    // ---- editing requests from the map: the window owns dialogs and undo ----
+    connect(mindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
+        if (key.startsWith(QStringLiteral("group:"))) {
+            QString name;
+            for (const MindGroup& g : store_.mindGroups(docPath_))
+                if (key.endsWith(g.id)) name = g.name;
+            const QString text =
+                askText(mindView_, QStringLiteral("重命名分组"), QStringLiteral("分组名："), name);
+            if (text.trimmed().isEmpty()) return;
+            if (renameMindGroup(key, text.trimmed())) rebuildMindMap();
+            return;
+        }
+        // A note card renames its own comment: the excerpt belongs to the document.
+        const QString id = noteIdOfKey(key);
+        if (!id.isEmpty()) editMarkupComment(id);
+    });
+    connect(mindView_, &mind::MindMapView::deleteRequested, this, [this](const QString& key) {
+        if (key.startsWith(QStringLiteral("group:"))) {
+            if (deleteMindGroup(key)) {
+                rebuildMindMap();
+                updateNotesPanel();
+            }
+            return;
+        }
+        const QString id = noteIdOfKey(key);
+        if (!id.isEmpty() && confirm(mindView_, QStringLiteral("删除标注"),
+                                     QStringLiteral("删除这条标注？可以用 Ctrl+Z 撤销。")))
+            deleteMarkupById(id);
+    });
+    connect(mindView_, &mind::MindMapView::childRequested, this, [this](const QString& key) {
+        const QString parent = key.startsWith(QStringLiteral("group:")) ? groupIdOf(key)
+                                                                        : parentGroupOfNote(key);
+        const QString name = askText(mindView_, QStringLiteral("新建子分组"),
+                                     QStringLiteral("分组名："), QStringLiteral("新分组"));
+        if (name.trimmed().isEmpty()) return;
+        if (!createMindGroup(name.trimmed(), parent).isEmpty()) rebuildMindMap();
+    });
+    connect(mindView_, &mind::MindMapView::siblingRequested, this, [this](const QString& key) {
+        const QString name = askText(mindView_, QStringLiteral("新建同级分组"),
+                                     QStringLiteral("分组名："), QStringLiteral("新分组"));
+        if (name.trimmed().isEmpty()) return;
+        QString parent;
+        if (key.startsWith(QStringLiteral("group:"))) {
+            const QString id = groupIdOf(key);
+            for (const MindGroup& g : store_.mindGroups(docPath_))
+                if (g.id == id) parent = g.parentId;
+        } else {
+            parent = parentGroupOfNote(key);
+        }
+        if (!createMindGroup(name.trimmed(), parent).isEmpty()) rebuildMindMap();
+    });
+
     // Jump to the page but stay in the map: the old modal dialog closed on every click.
     connect(mindView_, &mind::MindMapView::nodeActivated, this, [this](int page) {
         if (page < 0) return;
         view_->gotoPage(page);
         updateStatus();
     });
+}
+
+QString MainWindow::noteIdOfKey(const QString& key)
+{
+    return key.startsWith(QStringLiteral("note:")) ? key.mid(5) : QString();
+}
+
+QString MainWindow::parentGroupOfNote(const QString& key) const
+{
+    const QString noteId = noteIdOfKey(key);
+    if (noteId.isEmpty()) return {};
+    for (const Markup& m : markups_)
+        if (m.id == noteId) return m.mindGroup;
+    return {};
 }
 
 void MainWindow::rebuildMindMap()

@@ -854,6 +854,47 @@ int main(int argc, char** argv)
         check(w.view()->isVisible(), QStringLiteral("back to reading mode"));
         check(!w.mindMapView()->isVisible(), QStringLiteral("mind map hidden again"));
     }
+        // ---- reverse navigation and card identity ----
+        {
+            std::printf("\n=== mind map: selection, collapse, reverse navigation ===\n");
+            w.setWorkspaceMode(2);
+            settle();
+            auto* mv = w.mindMapView();
+            check(mv != nullptr, QStringLiteral("map view available"));
+
+            // the first note of the document must have a card we can select
+            const QVector<Markup> notes = w.visibleMarkups();
+            check(!notes.isEmpty(), QStringLiteral("document has notes to locate"));
+            if (!notes.isEmpty()) {
+                const QString id = notes.first().id;
+                check(mv->selectForMarkup(id), QStringLiteral("selectForMarkup finds the card"));
+                check(mv->selectedKey() == QStringLiteral("note:") + id,
+                      QStringLiteral("selected key belongs to that note (%1)").arg(mv->selectedKey()));
+                check(!mv->rectForKey(mv->selectedKey()).isNull(),
+                      QStringLiteral("selected card has a position"));
+            }
+
+            // collapsing a bucket hides its notes, selecting one of them reopens it
+            const QString bucketKey = QStringLiteral("page:0");
+            const int before = mv->sceneNodeCount();
+            mv->setCollapsed(bucketKey, true);
+            const int folded = mv->sceneNodeCount();
+            check(folded < before,
+                  QStringLiteral("collapse hides children (%1 -> %2)").arg(before).arg(folded));
+            if (!notes.isEmpty()) {
+                check(mv->selectForMarkup(notes.first().id),
+                      QStringLiteral("selectForMarkup works inside a collapsed branch"));
+                check(!mv->isCollapsed(bucketKey),
+                      QStringLiteral("the branch was reopened automatically"));
+            }
+
+            // unknown ids are reported, not silently selected
+            check(!mv->selectForMarkup(QStringLiteral("does-not-exist")),
+                  QStringLiteral("unknown note id is rejected"));
+            w.setWorkspaceMode(0);
+            settle();
+        }
+
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;

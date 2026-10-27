@@ -174,6 +174,8 @@ private:
     int workspaceMode_ = 0;
     void ensureMindPanel();
     void rebuildMindMap();
+    static QString noteIdOfKey(const QString& key);
+    QString parentGroupOfNote(const QString& key) const;
     QTreeWidget* outlineTree_ = nullptr;
     QListWidget* notesList_ = nullptr;
     QTabWidget* leftTabs_ = nullptr;

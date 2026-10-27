@@ -44,8 +44,20 @@ public:
     // Renders the whole map to a PNG file (used by the dialog's export button).
     bool exportPng(const QString& path, const QSize& size = QSize(1600, 1000));
 
+    // Selects the card belonging to a note and expands whatever hides it. Used for the
+    // reverse direction (annotation -> mind map). Returns false when the note has no card.
+    bool selectForMarkup(const QString& markupId);
+    QString keyAt(const QPointF& scenePos) const;
+    QRectF rectForKey(const QString& key) const;
+
 signals:
-    void nodeActivated(int page);   // emitted when a node with a page is clicked
+    void nodeActivated(int page);
+    // Keyboard / double-click editing requests; the window owns the dialogs and the undo
+    // stack, so the view only reports intent.
+    void renameRequested(const QString& key);
+    void deleteRequested(const QString& key);
+    void childRequested(const QString& key);
+    void siblingRequested(const QString& key);   // emitted when a node with a page is clicked
     // A note was dragged onto a group (or onto another note's group) -> regroup it.
     // An empty groupKey means "ungroup" (dropped on empty canvas).
     void nodeReparented(const QString& markupId, const QString& groupKey);
@@ -60,6 +72,7 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 

@@ -141,6 +141,62 @@ bool MindMapView::dropTargetAt(const QPointF& scenePos, QString* groupKey,
     return false;
 }
 
+QString MindMapView::keyAt(const QPointF& scenePos) const
+{
+    if (!scene_) return {};
+    for (QGraphicsItem* item : scene_->items(scenePos)) {
+        // Cards carry their nodeKey in data(4) and so do their text children, so the whole
+        // card is a hit target rather than just the painted rectangle.
+        const QVariant key = item->data(4);
+        if (key.isValid() && !key.toString().isEmpty()) return key.toString();
+    }
+    return {};
+}
+
+QRectF MindMapView::rectForKey(const QString& key) const
+{
+    if (!scene_ || key.isEmpty()) return {};
+    for (QGraphicsItem* item : scene_->items()) {
+        const QVariant k = item->data(4);
+        if (k.isValid() && k.toString() == key) return item->sceneBoundingRect();
+    }
+    return {};
+}
+
+bool MindMapView::selectForMarkup(const QString& markupId)
+{
+    if (markupId.isEmpty()) return false;
+
+    QStringList path;
+    QString foundKey;
+    std::function<bool(const Node&, bool)> walk = [&](const Node& n, bool inPath) -> bool {
+        const QString key = nodeKey(n);
+        if (!n.markupId.isEmpty() && n.markupId == markupId) {
+            foundKey = key;
+            if (inPath) path.append(key);
+            return true;
+        }
+        for (const Node& c : n.children) {
+            if (walk(c, true)) {
+                if (inPath) path.append(key);
+                return true;
+            }
+        }
+        return false;
+    };
+    if (!walk(root_, false)) return false;
+
+    bool expanded = false;
+    for (const QString& key : path)
+        if (collapsed_.remove(key)) expanded = true;
+    if (expanded) rebuild();
+
+    setSelectedKey(foundKey);
+    const QRectF rect = rectForKey(foundKey);
+    if (!rect.isNull()) ensureVisible(rect.adjusted(-40, -40, 40, 40), 20, 20);
+    return true;
+}
+
 QString MindMapView::markupIdAt(const QPointF& scenePos) const
 {
     if (!scene_) return {};
@@ -158,6 +214,20 @@ QPointF MindMapView::nodeCenter(const QString& markupId) const
         if (item->data(1).toString() == markupId) return item->sceneBoundingRect().center();
     }
     return {};
+}
+
+void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (scene_) {
+        const QString key = keyAt(mapToScene(event->pos()));
+        if (!key.isEmpty()) {
+            setSelectedKey(key);
+            emit renameRequested(key);
+            event->accept();
+            return;
+        }
+    }
+    QGraphicsView::mouseDoubleClickEvent(event);
 }
 
 void MindMapView::mouseReleaseEvent(QMouseEvent* event)
@@ -222,6 +292,35 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
         event->accept();
         return;
     }
+    // Editing keys act on the selected card.
+    if (!selectedKey_.isEmpty()) {
+        switch (event->key()) {
+        case Qt::Key_F2:
+            emit renameRequested(selectedKey_);
+            event->accept();
+            return;
+        case Qt::Key_Delete:
+        case Qt::Key_Backspace:
+            emit deleteRequested(selectedKey_);
+            event->accept();
+            return;
+        case Qt::Key_Tab:
+            emit childRequested(selectedKey_);
+            event->accept();
+            return;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            emit siblingRequested(selectedKey_);
+            event->accept();
+            return;
+        case Qt::Key_Space:
+            setCollapsed(selectedKey_, !isCollapsed(selectedKey_));
+            event->accept();
+            return;
+        default:
+            break;
+        }
+    }
     QGraphicsView::keyPressEvent(event);
 }
 
@@ -237,6 +336,8 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             QGraphicsView::mousePressEvent(event);
             return;
         }
+        const QString key = keyAt(scenePos);
+        if (!key.isEmpty()) setSelectedKey(key);
         for (QGraphicsItem* item : scene_->items(scenePos)) {
             const QVariant data = item->data(0);
             if (data.isValid()) {
@@ -481,6 +582,7 @@ void MindMapView::rebuild()
         card->setZValue(2);
         card->setData(0, n.page);
         card->setData(2, n.groupKey);
+        card->setData(4, key);   // nodeKey(): hit target for select/rename/keys
         if (!n.markupId.isEmpty()) {
             card->setData(1, n.markupId);
             card->setFlag(QGraphicsItem::ItemIsMovable, true);
@@ -498,6 +600,7 @@ void MindMapView::rebuild()
             t->setPos(rect.left() + kPadX, y);
             t->setZValue(3);
             if (!n.markupId.isEmpty()) t->setData(1, n.markupId);
+            t->setData(4, key);
             y += titleFm.height();
         }
 
@@ -515,6 +618,7 @@ void MindMapView::rebuild()
                 t->setBrush(QBrush(bodyColor));
                 t->setPos(rect.left() + kPadX + 8, ly);
                 t->setZValue(3);
+                t->setData(4, key);
                 ly += bodyFm.height();
             }
             y += blockH + 3;
@@ -526,6 +630,7 @@ void MindMapView::rebuild()
                 t->setBrush(QBrush(depth == 0 ? bodyColor : QColor(0x1d, 0x21, 0x29)));
                 t->setPos(rect.left() + kPadX, y);
                 t->setZValue(3);
+                t->setData(4, key);
                 y += bodyFm.height();
             }
             y += 2;
