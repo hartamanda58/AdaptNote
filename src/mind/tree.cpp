@@ -30,12 +30,30 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
             default: text = QStringLiteral("(标注)"); break;
             }
         }
+        // The card shows the full excerpt below the title, so the title only needs to be a
+        // short label: cut at the first sentence/clause break, never mid-word.
+        if (!m.text.simplified().isEmpty()) {
+            QString head = m.text.simplified();
+            static const QString stops = QStringLiteral("。！？；，、.!?;,");
+            for (int i = 0; i < head.size() && i < 30; ++i) {
+                if (stops.contains(head.at(i))) {
+                    head = head.left(i);
+                    break;
+                }
+            }
+            if (head.size() > 22) head = head.left(22);
+            if (!head.isEmpty()) text = head;
+        }
         if (text.size() > 60) text = text.left(60) + QStringLiteral("…");
         leaf.text = text;
         leaf.page = m.page;
         leaf.markupId = m.id;
         leaf.groupKey = m.mindGroup.isEmpty() ? QString()
                                               : QStringLiteral("group:%1").arg(m.mindGroup);
+        // Card body: quoted source text, the reader's own words, and where it came from.
+        leaf.excerpt = m.text.simplified();
+        leaf.comment = m.comment.simplified();
+        if (m.page >= 0) leaf.source = QStringLiteral("第 %1 页").arg(m.page + 1);
         return leaf;
     };
 
@@ -110,6 +128,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         node.text = g.name;
         node.groupKey = QStringLiteral("group:%1").arg(id);
         node.page = -1;
+        node.isGroup = true;
         emitted.insert(id);
         for (const QString& childId : childrenOf.value(id)) {
             if (emitted.contains(childId)) continue;
@@ -139,6 +158,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
             bucket.text = QStringLiteral("第 %1 页").arg(currentPage + 1);
             bucket.page = currentPage;
             bucket.groupKey = QStringLiteral("page:%1").arg(currentPage);
+            bucket.isGroup = true;
             root.children.append(bucket);
         }
         Node leaf = leafOf(m);

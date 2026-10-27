@@ -1,5 +1,7 @@
 #include "mind/mindmap.h"
 
+#include "mind/layout.h"
+
 #include <QFontMetricsF>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
@@ -274,93 +276,281 @@ void MindMapView::fitToContent()
     zoom_ = transform().m11();
 }
 
+// One card: rounded box with a title, an excerpt block, the reader's own comment and a
+// source footer. Heights are measured first so the layout can place variable-size cards
+// without overlaps (see mind/layout.h).
+namespace {
+
+struct CardMetrics {
+    double width = 0.0;
+    double height = 0.0;
+    double titleH = 0.0;
+    double excerptH = 0.0;
+    double commentH = 0.0;
+    int excerptLines = 0;
+};
+
+QStringList wrapToLines(const QString& text, const QFontMetricsF& fm, double width, int maxLines)
+{
+    QStringList lines;
+    QString line;
+    bool truncated = false;
+    for (const QChar& ch : text) {
+        const QString candidate = line + ch;
+        if (fm.horizontalAdvance(candidate) > width && !line.isEmpty()) {
+            // Prefer a space boundary so Latin words are not split; CJK has no spaces and
+            // breaks per character, which is the expected behaviour there.
+            const int spaceAt = line.lastIndexOf(QLatin1Char(' '));
+            if (spaceAt > 0 && ch.isLetterOrNumber() && line.at(spaceAt + 1).isLetterOrNumber()) {
+                lines.append(line.left(spaceAt));
+                line = line.mid(spaceAt + 1) + ch;
+            } else {
+                lines.append(line);
+                line = ch;
+            }
+            if (lines.size() >= maxLines) {
+                truncated = true;
+                break;
+            }
+        } else {
+            line = candidate;
+        }
+    }
+    if (!line.isEmpty() && lines.size() < maxLines) {
+        lines.append(line);
+    } else if (!line.isEmpty()) {
+        truncated = true;
+    }
+    if (truncated && !lines.isEmpty()) lines.last() += QStringLiteral("…");
+    return lines;
+}
+
+CardMetrics measureCard(const Node& n, double width, bool isRoot)
+{
+    QFont titleFont;
+    titleFont.setPixelSize(isRoot ? 15 : 13);
+    titleFont.setBold(true);
+    QFont bodyFont;
+    bodyFont.setPixelSize(12);
+    QFont smallFont;
+    smallFont.setPixelSize(11);
+
+    const QFontMetricsF titleFm(titleFont);
+    const QFontMetricsF bodyFm(bodyFont);
+    const QFontMetricsF smallFm(smallFont);
+
+    CardMetrics m;
+    m.width = width;
+    m.titleH = qMin(2, wrapToLines(n.text, titleFm, width - 2 * kPadX, 2).size()) *
+               titleFm.height();
+
+    double body = 0;
+    if (!n.excerpt.isEmpty() && !n.isGroup) {
+        // The excerpt is a quote block: 2px rule on the left, muted text, max 3 lines.
+        const QStringList lines = wrapToLines(n.excerpt, bodyFm, width - 2 * kPadX - 8, 3);
+        m.excerptLines = lines.size();
+        m.excerptH = lines.size() * bodyFm.height() + 8;
+        body += m.excerptH + 6;
+    }
+    if (!n.comment.isEmpty()) {
+        const QStringList lines = wrapToLines(n.comment, bodyFm, width - 2 * kPadX, 3);
+        m.commentH = lines.size() * bodyFm.height();
+        body += m.commentH + 4;
+    } else if (n.isGroup && !n.children.isEmpty()) {
+        body += bodyFm.height() + 4;   // "N 个节点" hint
+    }
+    m.height = 2 * kPadY + m.titleH + body + smallFm.height() + 6;
+    return m;
+}
+
+}  // namespace
+
+void MindMapView::setCollapsed(const QString& key, bool collapsed)
+{
+    if (key.isEmpty()) return;
+    const bool was = collapsed_.contains(key);
+    if (was == collapsed) return;
+    if (collapsed) collapsed_.insert(key); else collapsed_.remove(key);
+    rebuild();
+}
+
+void MindMapView::setSelectedKey(const QString& key)
+{
+    if (selectedKey_ == key) return;
+    selectedKey_ = key;
+    rebuild();
+}
+
 void MindMapView::rebuild()
 {
     scene_->clear();
     nodeItems_ = 0;
     if (root_.text.isEmpty()) return;
 
-    QFont font;
-    font.setPixelSize(13);
-    QFontMetricsF metrics(font);
-    font.setBold(true);
-    QFontMetricsF rootMetrics(font);
+    // Flatten first: heights must be known before the layout runs, and the layout must see
+    // exactly the nodes that are visible (collapsed subtrees are skipped).
+    QHash<QString, const Node*> byKey;
+    QHash<QString, double> heights;
+    QVector<const Node*> order;
 
-    // --- pass 1: subtree heights (leaves are stacked vertically) ---
-    std::function<double(const Node&, int)> height = [&](const Node& n, int depth) -> double {
-        const QFontMetricsF& fm = depth == 0 ? rootMetrics : metrics;
-        const double boxH = fm.height() + 2 * kPadY;
-        if (n.children.isEmpty()) return boxH;
-        double sum = 0;
-        for (const Node& c : n.children) sum += height(c, depth + 1) + kVSpace;
-        sum -= kVSpace;
-        return qMax(boxH, sum);
+    std::function<void(const Node&, int)> measure = [&](const Node& n, int depth) {
+        const QString key = nodeKey(n);
+        const double width = depth == 0 ? 190.0 : 206.0;
+        const CardMetrics m = measureCard(n, width, depth == 0);
+        byKey.insert(key, &n);
+        heights.insert(key, m.height);
+        order.append(&n);
+        if (collapsed_.contains(key)) return;
+        for (const Node& c : n.children) measure(c, depth + 1);
     };
+    measure(root_, 0);
 
-    struct Placed {
-        QPointF topLeft;
-        QSizeF size;
-        int depth = 0;
+    LayoutOptions opts;
+    opts.nodeWidth = 206.0;
+    opts.columnGap = 34.0;
+    opts.rowGap = 14.0;
+    opts.padding = 16.0;
+
+    // The root card is narrower; the layout uses one column width, so keep the wider value
+    // for placement and let the root card sit left-aligned inside it.
+    QSizeF canvas;
+    const QVector<PlacedNode> placed =
+        layoutTree(root_, heights, 64.0, opts, collapsed_, &canvas);
+
+    QHash<QString, QRectF> rectOf;
+    for (const PlacedNode& p : placed) { rectOf.insert(p.key, p.rect); }
+
+    // Links first so cards paint over them.
+    std::function<void(const Node&)> drawLinks = [&](const Node& n) {
+        const QRectF from = rectOf.value(nodeKey(n));
+        if (collapsed_.contains(nodeKey(n))) return;
+        for (const Node& c : n.children) {
+            const QRectF to = rectOf.value(nodeKey(c));
+            if (from.isNull() || to.isNull()) continue;
+            QPainterPath path;
+            const QPointF a(from.right(), from.center().y());
+            const QPointF b(to.left(), to.center().y());
+            const double mx = (a.x() + b.x()) / 2.0;
+            path.moveTo(a);
+            path.cubicTo(QPointF(mx, a.y()), QPointF(mx, b.y()), b);
+            auto* item = scene_->addPath(path, QPen(QColor(0xc6, 0xd0, 0xde), 1.6));
+            item->setZValue(1);
+            drawLinks(c);
+        }
     };
-    QVector<Placed> placed;
+    drawLinks(root_);
 
-    // --- pass 2: place boxes and draw ---
-    std::function<void(const Node&, int, double, double)> place =
-        [&](const Node& n, int depth, double x, double centerY) {
-            const QFontMetricsF& fm = depth == 0 ? rootMetrics : metrics;
-            QFont f = font;
-            f.setBold(depth <= 1);
-            f.setPixelSize(depth == 0 ? 15 : 13);
-            const QFontMetricsF m2(f);
-            const double w = qMin(320.0, m2.horizontalAdvance(n.text) + 2 * kPadX);
-            const double h = m2.height() + 2 * kPadY;
-            const QRectF box(x, centerY - h / 2, w, h);
+    // Cards.
+    std::function<void(const Node&, int)> drawCards = [&](const Node& n, int depth) {
+        const QString key = nodeKey(n);
+        const QRectF rect = rectOf.value(key);
+        if (rect.isNull()) return;
 
-            auto* rect = scene_->addRect(box, QPen(colorForDepth(depth), depth == 0 ? 0 : 1.2),
-                                         QBrush(fillForDepth(depth)));
-            rect->setZValue(2);
-            if (n.page >= 0) rect->setData(0, n.page);   // clickable -> jump to page
-            if (!n.groupKey.isEmpty()) rect->setData(2, n.groupKey);
-            if (!n.markupId.isEmpty()) {
-                rect->setData(1, n.markupId);
-                rect->setFlag(QGraphicsItem::ItemIsMovable, true);   // drag to regroup
+        QFont titleFont;
+        titleFont.setPixelSize(depth == 0 ? 15 : 13);
+        titleFont.setBold(true);
+        QFont bodyFont;
+        bodyFont.setPixelSize(12);
+        QFont smallFont;
+        smallFont.setPixelSize(11);
+        const QFontMetricsF titleFm(titleFont);
+        const QFontMetricsF bodyFm(bodyFont);
+
+        const bool selected = selectedKey_ == key;
+        QPen border(selected ? QColor(0x2f, 0x6b, 0xd8) : QColor(0xe3, 0xe7, 0xee),
+                    selected ? 1.6 : 1.0);
+        QColor fill = QColor(0xff, 0xff, 0xff);
+        if (n.isGroup) fill = QColor(0xf2, 0xf7, 0xff);
+        if (depth == 0) fill = QColor(0x2f, 0x6b, 0xd8);
+
+        auto* card = scene_->addRect(rect, border, QBrush(fill));
+        card->setZValue(2);
+        card->setData(0, n.page);
+        card->setData(2, n.groupKey);
+        if (!n.markupId.isEmpty()) {
+            card->setData(1, n.markupId);
+            card->setFlag(QGraphicsItem::ItemIsMovable, true);
+        }
+        if (selected) card->setData(3, 1);   // hit-test helper: selected marker
+
+        double y = rect.top() + kPadY;
+        const QColor titleColor = depth == 0 ? QColor(Qt::white) : QColor(0x1d, 0x21, 0x29);
+        const QColor bodyColor = depth == 0 ? QColor(0xe8, 0xef, 0xfb) : QColor(0x5b, 0x64, 0x72);
+        const QColor accent = depth == 0 ? QColor(0xc9, 0xdc, 0xfb) : QColor(0x2f, 0x6b, 0xd8);
+
+        for (const QString& line : wrapToLines(n.text, titleFm, rect.width() - 2 * kPadX, 2)) {
+            auto* t = scene_->addSimpleText(line, titleFont);
+            t->setBrush(QBrush(titleColor));
+            t->setPos(rect.left() + kPadX, y);
+            t->setZValue(3);
+            if (!n.markupId.isEmpty()) t->setData(1, n.markupId);
+            y += titleFm.height();
+        }
+
+        if (!n.excerpt.isEmpty() && !n.isGroup) {
+            y += 3;
+            const double textW = rect.width() - 2 * kPadX - 8;
+            const QStringList lines = wrapToLines(n.excerpt, bodyFm, textW, 3);
+            const double blockH = lines.size() * bodyFm.height() + 8;
+            auto* rule = scene_->addRect(QRectF(rect.left() + kPadX, y + 2, 2, blockH - 4),
+                                         QPen(Qt::NoPen), QBrush(QColor(0xd7, 0xe1, 0xf2)));
+            rule->setZValue(3);
+            double ly = y + 4;
+            for (const QString& line : lines) {
+                auto* t = scene_->addSimpleText(line, bodyFont);
+                t->setBrush(QBrush(bodyColor));
+                t->setPos(rect.left() + kPadX + 8, ly);
+                t->setZValue(3);
+                ly += bodyFm.height();
             }
-            auto* text = scene_->addSimpleText(n.text, f);
-            if (!n.markupId.isEmpty()) text->setData(1, n.markupId);
-            text->setBrush(depth == 0 ? QBrush(Qt::white) : QBrush(QColor(0x23, 0x2a, 0x33)));
-            text->setPos(box.left() + kPadX, box.top() + kPadY);
-            text->setZValue(3);
-            ++nodeItems_;
-            placed.append({box.topLeft(), box.size(), depth});
+            y += blockH + 3;
+        }
 
-            if (n.children.isEmpty()) return;
-
-            double totalH = 0;
-            for (const Node& c : n.children) totalH += height(c, depth + 1) + kVSpace;
-            totalH -= kVSpace;
-            double cursor = centerY - totalH / 2;
-            const double childX = x + w + kHSpace;
-
-            for (const Node& c : n.children) {
-                const double ch = height(c, depth + 1);
-                const double childCenter = cursor + ch / 2;
-
-                QPainterPath link;
-                const QPointF from(box.right(), centerY);
-                const QPointF to(childX, childCenter);
-                const double midX = (from.x() + to.x()) / 2;
-                link.moveTo(from);
-                link.cubicTo(QPointF(midX, from.y()), QPointF(midX, to.y()), to);
-                auto* linkItem = scene_->addPath(link, QPen(colorForDepth(depth + 1).lighter(125), 1.4));
-                linkItem->setZValue(1);
-
-                place(c, depth + 1, childX, childCenter);
-                cursor += ch + kVSpace;
+        if (!n.comment.isEmpty()) {
+            for (const QString& line : wrapToLines(n.comment, bodyFm, rect.width() - 2 * kPadX, 3)) {
+                auto* t = scene_->addSimpleText(line, bodyFont);
+                t->setBrush(QBrush(depth == 0 ? bodyColor : QColor(0x1d, 0x21, 0x29)));
+                t->setPos(rect.left() + kPadX, y);
+                t->setZValue(3);
+                y += bodyFm.height();
             }
-        };
+            y += 2;
+        } else if (n.isGroup && !n.children.isEmpty()) {
+            auto* t = scene_->addSimpleText(
+                QStringLiteral("%1 个子节点").arg(n.children.size()), bodyFont);
+            t->setBrush(QBrush(bodyColor));
+            t->setPos(rect.left() + kPadX, y);
+            t->setZValue(3);
+            y += bodyFm.height() + 2;
+        }
 
-    const double totalRoot = height(root_, 0);
-    place(root_, 0, 0, totalRoot / 2);
+        // footer: source on the left, affordance on the right. Page buckets are containers,
+        // not quotations, so they do not claim to be "原文".
+        const bool isBucket = key.startsWith(QStringLiteral("page:"));
+        if (!isBucket && (!n.source.isEmpty() || n.page >= 0)) {
+            auto* foot = scene_->addSimpleText(n.source.isEmpty() ? QStringLiteral("原文")
+                                                                  : n.source,
+                                               smallFont);
+            foot->setBrush(QBrush(accent));
+            foot->setPos(rect.left() + kPadX, rect.bottom() - kPadY - foot->boundingRect().height());
+            foot->setZValue(3);
+        }
+        if (!n.children.isEmpty()) {
+            auto* badge = scene_->addSimpleText(QStringLiteral("%1").arg(n.children.size()),
+                                                smallFont);
+            badge->setBrush(QBrush(accent));
+            badge->setPos(rect.right() - kPadX - badge->boundingRect().width(),
+                          rect.bottom() - kPadY - badge->boundingRect().height());
+            badge->setZValue(3);
+        }
+
+        ++nodeItems_;
+        if (!collapsed_.contains(key))
+            for (const Node& c : n.children) drawCards(c, depth + 1);
+    };
+    drawCards(root_, 0);
+
+    scene_->setSceneRect(QRectF(0, 0, qMax(canvas.width(), 320.0), qMax(canvas.height(), 240.0)));
 }
 
 QImage MindMapView::renderToImage(const QSize& size)

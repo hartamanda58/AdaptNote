@@ -13,10 +13,11 @@ namespace mind {
 
 QString nodeKey(const Node& n)
 {
-    if (!n.groupKey.isEmpty()) {
-        // group keys look like "group:<id>"; keep the raw key so callers can measure by it
-        return n.groupKey;
-    }
+    // Must be unique per node: notes inside a page bucket share the bucket's groupKey (that
+    // is how drop targets are resolved), so keying them by groupKey would collapse every
+    // note of a page into one layout slot.
+    if (!n.markupId.isEmpty()) return QStringLiteral("note:%1").arg(n.markupId);
+    if (!n.groupKey.isEmpty()) return n.groupKey;   // "group:<id>" or "page:<n>"
     return QStringLiteral("page:%1").arg(n.page);
 }
 
@@ -105,6 +106,7 @@ QVector<PlacedNode> layoutTree(const Node& root, const QHash<QString, double>& m
     out.reserve(rows.size());
     for (int i = 0; i < rows.size(); ++i) {
         PlacedNode p;
+        p.key = rows[i].key;
         p.groupId = rows[i].key.startsWith(QStringLiteral("group:"))
                         ? rows[i].key.mid(QStringLiteral("group:").size())
                         : QString();

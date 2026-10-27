@@ -15,6 +15,7 @@ namespace mind {
 // Geometry for one mind-map node. The layout is computed from measured card sizes, so the
 // same algorithm works whether a card shows a one-line title or a three-line excerpt.
 struct PlacedNode {
+    QString key;       // nodeKey(): "group:<id>" or "page:<n>" - matches the Node it came from
     QString groupId;   // group id, or empty for page buckets
     QRectF rect;       // in canvas coordinates
     int depth = 0;

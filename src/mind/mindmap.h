@@ -3,6 +3,7 @@
 #include "mind/tree.h"
 
 #include <QGraphicsView>
+#include <QSet>
 #include <QImage>
 #include <QString>
 #include <QVector>
@@ -24,6 +25,13 @@ public:
     void fitToContent();
 
     QImage renderToImage(const QSize& size);
+
+    // Collapse/expand a group (or a page bucket) by nodeKey(); the selection is the card
+    // that gets the accent outline.
+    void setCollapsed(const QString& key, bool collapsed);
+    bool isCollapsed(const QString& key) const { return collapsed_.contains(key); }
+    void setSelectedKey(const QString& key);
+    QString selectedKey() const { return selectedKey_; }
 
     // Hit testing helpers (also used by tests).
     QString groupKeyAt(const QPointF& scenePos) const;
@@ -65,6 +73,8 @@ private:
     bool dragMoved_ = false;
     QGraphicsScene* scene_ = nullptr;
     int nodeItems_ = 0;
+    QSet<QString> collapsed_;   // nodeKey() values whose subtree is hidden
+    QString selectedKey_;       // nodeKey() of the selected card (empty = none)
 };
 
 }  // namespace mind

@@ -12,11 +12,19 @@ namespace mind {
 // One node of the generated mind map. This part has no dependency on QtWidgets so the
 // exporters (adapt_core) can build the same tree the view shows.
 struct Node {
-    QString text;
-    int page = -1;
+    QString text;       // card title (group name, or a short headline for a note)
+    int page = -1;      // >= 0 means "this node points at a place in a document"
     QString markupId;
     QString groupKey;   // stable key of the group (empty for notes without one)
     QVector<Node> children;
+
+    // Extra card content. The view shows these as separate rows (excerpt block, own
+    // comment); exporters may ignore them. Keeping them here means "what you export" and
+    // "what you see" are built from the same tree instead of two parallel models.
+    QString excerpt;    // the quoted source text (may be empty)
+    QString comment;    // the reader's own note (may be empty)
+    QString source;     // human readable origin, e.g. "第 3 页" / "第 2 章"
+    bool isGroup = false;
 };
 
 // Root = document title, then the group tree (MindGroup::parentId), notes as leaves.

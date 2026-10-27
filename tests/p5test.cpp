@@ -565,11 +565,11 @@ int main(int argc, char** argv)
         root.children = {g1, g2};
 
         QHash<QString, double> heights;
-        heights[QStringLiteral("group:g1")] = 58;
-        heights[QStringLiteral("group:g2")] = 58;
-        heights[QStringLiteral("page:0")] = 84;   // a long excerpt is a taller card
-        heights[QStringLiteral("page:1")] = 40;
-        heights[QStringLiteral("page:2")] = 40;
+        heights[mind::nodeKey(g1)] = 58;
+        heights[mind::nodeKey(g2)] = 58;
+        heights[mind::nodeKey(leaf1)] = 84;   // a long excerpt is a taller card
+        heights[mind::nodeKey(leaf2)] = 40;
+        heights[mind::nodeKey(leaf3)] = 40;
 
         QSizeF canvas;
         const QVector<mind::PlacedNode> placed = mind::layoutTree(root, heights, 64.0, {}, {}, &canvas);
