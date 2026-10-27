@@ -169,26 +169,22 @@ jobs:
           $pdf = Join-Path $root.FullName "samples\test.pdf"
           $epub = Join-Path $root.FullName "samples\test.epub"
           $exports = Join-Path $smoke "exports"
-          # --help is not a useful GUI smoke command: this app may continue its event loop
-          # after printing parser help. Use the documented auto-quit screenshot path instead.
-          RunSmoke "pdf-shot" @("--doc", $pdf, "--shot", (Join-Path $smoke "pdf.png"))
-          if (!(Test-Path (Join-Path $smoke "pdf.png"))) { throw "smoke pdf-shot produced no image" }
+          # CLI export schedules an explicit quit and works on a runner without an interactive
+          # desktop. Window screenshots are intentionally left to a real Windows desktop.
           RunSmoke "pdf-export" @("--doc", $pdf, "--export-dir", $exports)
           foreach ($ext in @("md","html","opml","xmind","apkg")) {
             if (!(Test-Path (Join-Path $exports "notes.$ext"))) {
               throw "smoke pdf-export missing notes.$ext"
             }
           }
-          RunSmoke "epub-shot" @("--doc", $epub, "--shot", (Join-Path $smoke "epub.png"))
-          if (!(Test-Path (Join-Path $smoke "epub.png"))) { throw "smoke epub-shot produced no image" }
+          RunSmoke "epub-export" @("--doc", $epub, "--export-dir", (Join-Path $smoke "epub-exports"))
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
           Add-Content ci/windows-report.txt "--- runtime smoke ---"
-          Add-Content ci/windows-report.txt "Runtime help: PASS"
-          Add-Content ci/windows-report.txt "PDF screenshot: PASS"
-          Add-Content ci/windows-report.txt "PDF export: PASS (md/html/opml/xmind/apkg)"
-          Add-Content ci/windows-report.txt "EPUB screenshot: PASS"
+          Add-Content ci/windows-report.txt "PDF CLI export: PASS (md/html/opml/xmind/apkg)"
+          Add-Content ci/windows-report.txt "EPUB CLI open/export: PASS"
           Add-Content ci/windows-report.txt "Portable data dir: PASS"
+          Add-Content ci/windows-report.txt "GUI screenshot: not run (runner has no interactive desktop)"
 
       - name: Publish report
         if: always()
