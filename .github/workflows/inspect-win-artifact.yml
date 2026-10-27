@@ -195,6 +195,21 @@ jobs:
             RunSmoke -label "$kind-screenshot" -CliArgs @("--doc", $doc, "--screenshot", $shot)
             if (!(Test-Path $shot) -or (Get-Item $shot).Length -eq 0) { throw "missing $kind screenshot" }
           }
+
+          # High-DPI acceptance: at 200% scaling the rendered page must carry ~2x the
+          # pixels, otherwise the page is a 1x bitmap stretched by the painter (the bug
+          # that made text look soft). Same command, only the scale factor differs.
+          $shot1 = Join-Path $smoke "pdf.png"
+          $shot2 = Join-Path $smoke "pdf-2x.png"
+          $env:QT_SCALE_FACTOR = "2"
+          RunSmoke -label "pdf-screenshot-2x" -CliArgs @("--doc", $pdf, "--screenshot", $shot2)
+          Remove-Item Env:\QT_SCALE_FACTOR
+          Add-Type -AssemblyName System.Drawing
+          $w1 = [System.Drawing.Image]::FromFile($shot1).Width
+          $w2 = [System.Drawing.Image]::FromFile($shot2).Width
+          $ratio = [math]::Round($w2 / [double]$w1, 2)
+          Say "dpi: 1x=$w1 px, 2x=$w2 px, ratio=$ratio"
+          if ($ratio -lt 1.8) { throw "high-dpi render did not scale (ratio $ratio)" }
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
           Add-Content ci/windows-report.txt "--- runtime smoke ---"
@@ -202,6 +217,7 @@ jobs:
           Add-Content ci/windows-report.txt "EPUB CLI open/export: PASS"
           Add-Content ci/windows-report.txt "Portable data dir: PASS"
           Add-Content ci/windows-report.txt "PDF/EPUB window screenshots: PASS (qwindows)"
+          Add-Content ci/windows-report.txt ("High-DPI render ratio at 200% scaling: " + $ratio)
 
       - name: Upload runtime evidence
         if: always()
