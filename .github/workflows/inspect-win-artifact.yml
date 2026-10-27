@@ -157,9 +157,10 @@ jobs:
             $p = Start-Process -FilePath $exe -ArgumentList ($args -join ' ') -PassThru `
                  -RedirectStandardOutput $out -RedirectStandardError $err
             if (-not $p.WaitForExit(120000)) {
+              if (Test-Path $out) { Get-Content $out | ForEach-Object { Say "  TIMEOUT OUT $_" } }
+              if (Test-Path $err) { Get-Content $err | ForEach-Object { Say "  TIMEOUT ERR $_" } }
               Stop-Process -Id $p.Id -Force
               throw "smoke $label timed out"
-            }
             Say "  exit=$($p.ExitCode)"
             if (Test-Path $out) { Get-Content $out | ForEach-Object { Say "  OUT $_" } }
             if (Test-Path $err) { Get-Content $err | ForEach-Object { Say "  ERR $_" } }
