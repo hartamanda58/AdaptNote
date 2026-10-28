@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = {
     "src/ui/mainwindow.cpp": {"confirm", "askYes", "inform", "warnUser", "askText",
                               "askMultiline", "askItem"},
-    "src/ui/libraryview.cpp": {"confirm", "askText"},
+    "src/ui/libraryview.cpp": {"confirm", "askText", "warnUser"},
     "src/ui/conflictdialog.cpp": set(),
     "src/ui/pageview.cpp": set(),
 }
