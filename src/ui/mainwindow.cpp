@@ -431,20 +431,36 @@ void MainWindow::buildToolbar()
     auto* tb = addToolBar(QStringLiteral("主工具栏"));
     tb->setObjectName("mainToolbar");
     tb->setMovable(false);
-    tb->setIconSize(QSize(20, 20));
+    tb->setIconSize(QSize(18, 18));
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 
     QAction* open = tb->addAction(glyphIcon("open"), QStringLiteral("打开"));
     open->setShortcut(QKeySequence::Open);
     connect(open, &QAction::triggered, this, &MainWindow::chooseFile);
 
-    QAction* undoAction = undo_->createUndoAction(this, QStringLiteral("撤销"));
-    undoAction->setIcon(glyphIcon("undo"));
+    // Short, stable labels: createUndoAction() appends the command name ("撤销 摘录图片"),
+    // which made the button grow and shift the whole toolbar. The command name goes into
+    // the tooltip instead.
+    QAction* undoAction = new QAction(glyphIcon("undo"), QStringLiteral("撤销"), this);
     undoAction->setShortcut(QKeySequence::Undo);
+    undoAction->setEnabled(false);
+    connect(undoAction, &QAction::triggered, undo_, &QUndoStack::undo);
+    connect(undo_, &QUndoStack::canUndoChanged, undoAction, &QAction::setEnabled);
+    connect(undo_, &QUndoStack::undoTextChanged, undoAction, [undoAction](const QString& t) {
+        undoAction->setToolTip(t.isEmpty() ? QStringLiteral("没有可撤销的操作")
+                                           : QStringLiteral("撤销：%1").arg(t));
+    });
     tb->addAction(undoAction);
-    QAction* redoAction = undo_->createRedoAction(this, QStringLiteral("重做"));
-    redoAction->setIcon(glyphIcon("redo"));
+
+    QAction* redoAction = new QAction(glyphIcon("redo"), QStringLiteral("重做"), this);
     redoAction->setShortcuts({QKeySequence::Redo, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)});
+    redoAction->setEnabled(false);
+    connect(redoAction, &QAction::triggered, undo_, &QUndoStack::redo);
+    connect(undo_, &QUndoStack::canRedoChanged, redoAction, &QAction::setEnabled);
+    connect(undo_, &QUndoStack::redoTextChanged, redoAction, [redoAction](const QString& t) {
+        redoAction->setToolTip(t.isEmpty() ? QStringLiteral("没有可重做的操作")
+                                           : QStringLiteral("重做：%1").arg(t));
+    });
     tb->addAction(redoAction);
 
     tb->addSeparator();
@@ -478,19 +494,23 @@ void MainWindow::buildToolbar()
         }
     });
 
-    tb->addWidget(new QLabel(QStringLiteral(" 版式 ")));
-    modeBox_ = new QComboBox;
-    modeBox_->addItems({QStringLiteral("单页"), QStringLiteral("连续"), QStringLiteral("双页")});
-    modeBox_->setCurrentIndex(1);
-    tb->addWidget(modeBox_);
-    connect(modeBox_, &QComboBox::activated, this, [this](int idx) {
-        view_->setLayoutMode(idx == 0 ? PageLayoutMode::Single
-                                      : (idx == 1 ? PageLayoutMode::Continuous
-                                                  : PageLayoutMode::Double));
-    });
-
-    QAction* rot = tb->addAction(glyphIcon("rotate"), QString());
-    rot->setToolTip(QStringLiteral("顺时针旋转 90°"));
+    // Layout and rotation are "set once" preferences, not moment-to-moment tools, so they
+    // live in the 更多 menu instead of taking a third of the toolbar.
+    auto* layoutMenu = new QMenu(QStringLiteral("版式"), this);
+    auto* layoutGroup = new QActionGroup(layoutMenu);
+    const struct { const char* label; PageLayoutMode mode; } layouts[] = {
+        {"单页", PageLayoutMode::Single},
+        {"连续", PageLayoutMode::Continuous},
+        {"双页", PageLayoutMode::Double},
+    };
+    for (const auto& l : layouts) {
+        QAction* a = layoutMenu->addAction(QString::fromUtf8(l.label));
+        a->setCheckable(true);
+        a->setActionGroup(layoutGroup);
+        if (l.mode == PageLayoutMode::Continuous) a->setChecked(true);
+        connect(a, &QAction::triggered, this, [this, mode = l.mode]() { view_->setLayoutMode(mode); });
+    }
+    QAction* rot = new QAction(glyphIcon("rotate"), QStringLiteral("旋转 90°"), this);
     rot->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
     connect(rot, &QAction::triggered, this, [this]() { view_->setRotation(view_->rotation() + 90); });
 
@@ -506,9 +526,12 @@ void MainWindow::buildToolbar()
     addMarkupAction("squiggly", QStringLiteral("波浪线"), QKeySequence(Qt::Key_S));
     addMarkupAction("note", QStringLiteral("批注"), QKeySequence(Qt::Key_N));
 
+    auto* toolGroup = new QActionGroup(this);
+    toolGroup->setExclusive(true);
     inkAction_ = tb->addAction(glyphIcon("note", QColor("#1f2328")), QStringLiteral("手写"));
     inkAction_->setToolTip(QStringLiteral("手写笔迹（P）：拖拽书写，再按一次退出"));
     inkAction_->setCheckable(true);
+    inkAction_->setActionGroup(toolGroup);
     inkAction_->setShortcut(QKeySequence(Qt::Key_P));
     connect(inkAction_, &QAction::toggled, this, [this](bool on) {
         view_->setInkMode(on);
@@ -519,6 +542,7 @@ void MainWindow::buildToolbar()
     eraseAction_ = tb->addAction(glyphIcon("delete", QColor("#d93025")), QStringLiteral("橡皮"));
     eraseAction_->setToolTip(QStringLiteral("橡皮（E）：拖过手写笔迹即可擦除"));
     eraseAction_->setCheckable(true);
+    eraseAction_->setActionGroup(toolGroup);
     eraseAction_->setShortcut(QKeySequence(Qt::Key_E));
     connect(eraseAction_, &QAction::toggled, this, [this](bool on) {
         view_->setEraseMode(on);
@@ -599,12 +623,12 @@ void MainWindow::buildToolbar()
     connect(readAction_, &QAction::toggled, this, [this](bool) { toggleReading(); });
     buildReaderMenu();
 
-    QAction* excerpt = tb->addAction(glyphIcon("image"), QStringLiteral("摘录图"));
+    QAction* excerpt = new QAction(glyphIcon("image"), QStringLiteral("摘录图片"), this);
     excerpt->setToolTip(QStringLiteral("拖拽框选页面区域，保存为图片摘录（X）"));
     excerpt->setShortcut(QKeySequence(Qt::Key_X));
     connect(excerpt, &QAction::triggered, this, &MainWindow::captureImageExcerpt);
 
-    QAction* color = tb->addAction(glyphIcon("color", markupColor_), QString());
+    QAction* color = new QAction(glyphIcon("color", markupColor_), QStringLiteral("标注颜色…"), this);
     color->setToolTip(QStringLiteral("选择颜色"));
     connect(color, &QAction::triggered, this, [this]() {
         QStringList names;
@@ -614,7 +638,7 @@ void MainWindow::buildToolbar()
         if (!s.isEmpty()) markupColor_ = QColor(s);
     });
 
-    QAction* del = tb->addAction(glyphIcon("delete"), QString());
+    QAction* del = new QAction(glyphIcon("delete"), QStringLiteral("删除选中标注"), this);
     del->setToolTip(QStringLiteral("删除选中的笔记（Del）"));
     del->setShortcut(QKeySequence::Delete);
     connect(del, &QAction::triggered, this, [this]() {
@@ -710,6 +734,33 @@ void MainWindow::buildToolbar()
     save->setToolTip(QStringLiteral("把标注写回 PDF（增量保存，Ctrl+S）"));
     save->setShortcut(QKeySequence::Save);
     connect(save, &QAction::triggered, this, &MainWindow::saveAnnotationsToPdf);
+
+    // ---- 更多：低频操作收进菜单，工具栏才能保持一行不溢出 ----
+    // Rules from docs/reader-redesign/ui-spec.md: one row, task-essential actions only,
+    // shortcuts and menus keep the rest reachable.
+    auto* moreBtn = new QToolButton(tb);
+    moreBtn->setText(QStringLiteral("更多"));
+    moreBtn->setToolTip(QStringLiteral("书库、导入、同步、导出等"));
+    moreBtn->setPopupMode(QToolButton::InstantPopup);
+    moreBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    auto* more = new QMenu(moreBtn);
+    for (QAction* a : {libraryAction, readAction_, excerpt, importAction, conflictAction,
+                       importPdfAction, syncAction, save}) {
+        if (!a) continue;
+        tb->removeAction(a);
+        more->addAction(a);
+    }
+    more->addSeparator();
+    more->addMenu(layoutMenu);
+    more->addAction(rot);
+    more->addSeparator();
+    for (QAction* a : {color, del}) {
+        if (!a) continue;
+        tb->removeAction(a);
+        more->addAction(a);
+    }
+    moreBtn->setMenu(more);
+    tb->addWidget(moreBtn);
 }
 
 void MainWindow::buildFindBar()
@@ -718,6 +769,10 @@ void MainWindow::buildFindBar()
     tb->setObjectName("findToolbar");
     tb->setMovable(false);
     tb->setIconSize(QSize(18, 18));
+    // A permanently visible search bar steals width from the page for something used
+    // occasionally; Ctrl+F reveals it and Escape hides it again.
+    tb->hide();
+    findBar_ = tb;
     tb->addWidget(new QLabel(QStringLiteral(" 查找 ")));
     findEdit_ = new QLineEdit;
     findEdit_->setPlaceholderText(QStringLiteral("在本书中查找…（Ctrl+F）"));
@@ -752,6 +807,7 @@ void MainWindow::buildFindBar()
     findAction->setShortcut(QKeySequence::Find);
     addAction(findAction);
     connect(findAction, &QAction::triggered, this, [this]() {
+        if (findBar_) findBar_->show();
         findEdit_->setFocus();
         findEdit_->selectAll();
     });
@@ -760,6 +816,7 @@ void MainWindow::buildFindBar()
     escAction->setShortcut(QKeySequence(Qt::Key_Escape));
     addAction(escAction);
     connect(escAction, &QAction::triggered, this, [this]() {
+        if (findBar_ && findBar_->isVisible() && !findEdit_->hasFocus()) findBar_->hide();
         if (view_->captureMode()) {
             view_->setCaptureMode(false);
             statusBar()->showMessage(QStringLiteral("已取消框选"), 1500);

@@ -17,6 +17,7 @@
 
 class QComboBox;
 class QSplitter;
+class QToolBar;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -169,6 +170,7 @@ private:
     SyncManager sync_{store_};
     PageView* view_ = nullptr;
     QSplitter* splitter_ = nullptr;
+    QToolBar* findBar_ = nullptr;
     QWidget* mindPanel_ = nullptr;
     mind::MindMapView* mindView_ = nullptr;
     int workspaceMode_ = 0;

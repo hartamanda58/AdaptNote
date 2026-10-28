@@ -4,35 +4,80 @@ QMainWindow, QDialog {
     background: #f6f7f9;
 }
 
+/* ---- design tokens (keep in sync with docs/reader-redesign/ui-spec.md) ----
+   bg        #f5f6f8   panel #ffffff   line #e3e7ee
+   text      #1d2129   muted #5b6472   faint #98a2b3
+   accent    #2f6bd8   accent-soft #e9f0fd
+   radius 6px (controls) / 10px (cards) · control height 24px · toolbar 34px
+*/
 QToolBar {
     background: #ffffff;
     border: none;
-    border-bottom: 1px solid #e3e6ea;
-    padding: 4px 8px;
-    spacing: 4px;
+    border-bottom: 1px solid #e3e7ee;
+    padding: 3px 8px;
+    spacing: 3px;
+    min-height: 34px;
+}
+QToolBar::separator {
+    background: #e3e7ee;
+    width: 1px;
+    margin: 6px 6px;
 }
 
 QToolBar QToolButton, QToolBar QPushButton {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
-    padding: 4px 8px;
-    color: #2b3138;
-    font-size: 13px;
+    padding: 3px 8px;
+    min-height: 24px;
+    color: #1d2129;
+    font-size: 12.5px;
 }
-QToolBar QToolButton:hover {
-    background: #eef2f8;
-    border-color: #dbe3ee;
+QToolBar QToolButton:hover, QToolBar QPushButton:hover {
+    background: #eef1f6;
+    border-color: #dfe5ee;
 }
-QToolBar QToolButton:pressed {
+QToolBar QToolButton:pressed, QToolBar QPushButton:pressed {
     background: #e2e9f4;
+}
+/* an active (exclusive) tool must be obvious, not just a slightly darker hover */
+QToolBar QToolButton:checked {
+    background: #e9f0fd;
+    border-color: #c7dbfa;
+    color: #17418f;
+    font-weight: 600;
+}
+QToolBar QToolButton:disabled, QToolBar QPushButton:disabled {
+    color: #aab2bd;
+    background: transparent;
+}
+QToolBar QToolButton:focus, QToolBar QPushButton:focus {
+    border-color: #c7dbfa;
 }
 
 QToolBar QLabel {
-    color: #5a636e;
+    color: #5b6472;
     font-size: 12px;
     padding: 0 2px;
 }
+
+/* buttons that are not in a toolbar (mind panel, dialogs) share the same metrics */
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #dbe1ea;
+    border-radius: 6px;
+    padding: 3px 10px;
+    min-height: 24px;
+    color: #1d2129;
+    font-size: 12.5px;
+}
+QPushButton:hover { background: #f4f7fb; border-color: #c4d2e4; }
+QPushButton:pressed { background: #e9eef6; }
+QPushButton:disabled { color: #aab2bd; background: #f7f8fa; border-color: #e6e9ee; }
+
+QSplitter::handle { background: #eceff4; }
+QSplitter::handle:hover { background: #d8e0ec; }
+QSplitter::handle:horizontal { width: 4px; }
 
 QComboBox {
     background: #ffffff;
