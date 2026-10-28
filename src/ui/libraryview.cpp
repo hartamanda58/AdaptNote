@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QTabWidget>
 #include <QPainter>
 #include <QSplitter>
 #include <QSet>
@@ -35,6 +36,11 @@ QString askText(QWidget* parent, const QString& title, const QString& label,
     bool ok = false;
     const QString s = QInputDialog::getText(parent, title, label, QLineEdit::Normal, initial, &ok);
     return ok ? s : QString();
+}
+
+void warnUser(QWidget* parent, const QString& title, const QString& text)
+{
+    if (!kHeadless) QMessageBox::warning(parent, title, text);
 }
 
 bool confirm(QWidget* parent, const QString& title, const QString& text)
@@ -88,12 +94,96 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     auto* leftBox = new QVBoxLayout(left);
     leftBox->setContentsMargins(0, 0, 0, 0);
 
-    auto* leftHeader = new QLabel(QStringLiteral("文档"), left);
-    leftHeader->setStyleSheet(QStringLiteral("font-weight:600;color:#4a525c;padding:4px;"));
-    leftBox->addWidget(leftHeader);
+    // Two ways into the same library: individual documents, or a reading topic that
+    // groups several of them (a course, a project, a paper set).
+    leftTabs_ = new QTabWidget(left);
+    leftBox->addWidget(leftTabs_, 1);
+
+    auto* docsPage = new QWidget(leftTabs_);
+    auto* docsBox = new QVBoxLayout(docsPage);
+    docsBox->setContentsMargins(0, 6, 0, 0);
+    leftTabs_->addTab(docsPage, QStringLiteral("文档"));
+
+    auto* topicsPage = new QWidget(leftTabs_);
+    auto* topicsBox = new QVBoxLayout(topicsPage);
+    topicsBox->setContentsMargins(0, 6, 0, 0);
+    leftTabs_->addTab(topicsPage, QStringLiteral("阅读主题"));
+
+    topics_ = new QListWidget(topicsPage);
+    topics_->setToolTip(QStringLiteral("双击打开主题：进入它的第一本书并把脑图切到主题视图"));
+    topicsBox->addWidget(topics_, 1);
+
+    auto* topicRow = new QHBoxLayout;
+    auto* newTopicBtn = new QPushButton(QStringLiteral("新建"), topicsPage);
+    auto* renameTopicBtn = new QPushButton(QStringLiteral("重命名"), topicsPage);
+    auto* deleteTopicBtn = new QPushButton(QStringLiteral("删除"), topicsPage);
+    topicRow->addWidget(newTopicBtn);
+    topicRow->addWidget(renameTopicBtn);
+    topicRow->addWidget(deleteTopicBtn);
+    topicRow->addStretch(1);
+    topicsBox->addLayout(topicRow);
+
+    auto* memberRow = new QHBoxLayout;
+    auto* addDocsBtn = new QPushButton(QStringLiteral("加入选中文档"), topicsPage);
+    addDocsBtn->setToolTip(QStringLiteral("把「文档」页里选中的书加入这个主题"));
+    auto* removeDocsBtn = new QPushButton(QStringLiteral("移出"), topicsPage);
+    memberRow->addWidget(addDocsBtn);
+    memberRow->addWidget(removeDocsBtn);
+    memberRow->addStretch(1);
+    topicsBox->addLayout(memberRow);
+
+    connect(newTopicBtn, &QPushButton::clicked, this, [this]() {
+        const QString name = askText(this, QStringLiteral("新建阅读主题"),
+                                     QStringLiteral("主题名："), QStringLiteral("新主题"));
+        if (name.trimmed().isEmpty()) return;
+        if (!createTopic(name.trimmed()).isEmpty()) {
+            reloadTopics();
+            emit libraryChanged();
+        }
+    });
+    connect(renameTopicBtn, &QPushButton::clicked, this, [this]() {
+        const QString current = topics_ && topics_->currentItem()
+                                    ? topics_->currentItem()->text().section(QLatin1Char(' '), 0, 0)
+                                    : QString();
+        const QString name = askText(this, QStringLiteral("重命名主题"),
+                                     QStringLiteral("主题名："), current);
+        if (name.trimmed().isEmpty()) return;
+        if (renameSelectedTopic(name.trimmed())) reloadTopics();
+    });
+    connect(deleteTopicBtn, &QPushButton::clicked, this, [this]() {
+        if (!confirm(this, QStringLiteral("删除主题"),
+                     QStringLiteral("删除选中的阅读主题？\n\n"
+                                    "· 主题里的笔记和书籍文件都不会被删除\n"
+                                    "· 其他设备同步后也会移除该主题")))
+            return;
+        if (deleteSelectedTopic()) {
+            reloadTopics();
+            emit libraryChanged();
+        }
+    });
+    connect(addDocsBtn, &QPushButton::clicked, this, [this]() {
+        QString err;
+        if (!addSelectedDocumentsToTopic(&err)) {
+            warnUser(this, QStringLiteral("加入失败"), err);
+            return;
+        }
+        reloadTopics();
+        emit libraryChanged();
+    });
+    connect(removeDocsBtn, &QPushButton::clicked, this, [this]() {
+        if (removeSelectedDocumentsFromTopic()) {
+            reloadTopics();
+            emit libraryChanged();
+        }
+    });
+    connect(topics_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        if (!item) return;
+        const QString id = item->data(Qt::UserRole).toString();
+        if (!id.isEmpty()) emit openTopicRequested(id);
+    });
 
     auto* viewRow = new QHBoxLayout;
-    viewRow->addWidget(new QLabel(QStringLiteral("视图"), left));
+    viewRow->addWidget(new QLabel(QStringLiteral("视图"), docsPage));
     viewBox_ = new QComboBox(left);
     viewBox_->addItem(QStringLiteral("全部文档"), static_cast<int>(DocFilter::All));
     viewBox_->addItem(QStringLiteral("最近阅读"), static_cast<int>(DocFilter::Recent));
@@ -105,9 +195,9 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     viewBox_->setToolTip(
         QStringLiteral("「按标签」使用右侧笔记筛选里选中的标签；未选标签时显示全部"));
     viewRow->addWidget(viewBox_, 1);
-    leftBox->addLayout(viewRow);
+    docsBox->addLayout(viewRow);
 
-    docs_ = new QTableWidget(left);
+    docs_ = new QTableWidget(docsPage);
     docs_->setColumnCount(4);
     docs_->setHorizontalHeaderLabels(
         {QStringLiteral("书名"), QStringLiteral("笔记"), QStringLiteral("冲突"), QStringLiteral("上次读到")});
@@ -119,7 +209,7 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     docs_->setColumnWidth(0, 240);
     docs_->setColumnWidth(1, 60);
     docs_->setColumnWidth(2, 60);
-    leftBox->addWidget(docs_, 1);
+    docsBox->addWidget(docs_, 1);
 
     auto* manageRow = new QHBoxLayout;
     auto* renameBtn = new QPushButton(QStringLiteral("改名…"), left);
@@ -246,6 +336,116 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     vbox->addWidget(hint);
 
     reload();
+}
+
+void LibraryView::reloadTopics()
+{
+    if (!topics_) return;
+    const QString keep = currentTopicId();
+    topics_->clear();
+    topicRows_ = store_.topics();
+    for (const Topic& t : topicRows_) {
+        const int docs = store_.topicDocs(t.id).size();
+        auto* item = new QListWidgetItem(
+            QStringLiteral("%1  ·  %2 本").arg(t.name).arg(docs), topics_);
+        item->setData(Qt::UserRole, t.id);
+        if (t.id == keep) topics_->setCurrentItem(item);
+    }
+}
+
+int LibraryView::topicCount() const
+{
+    return topicRows_.size();
+}
+
+QStringList LibraryView::topicNames() const
+{
+    QStringList out;
+    for (const Topic& t : topicRows_) out.append(t.name);
+    return out;
+}
+
+QString LibraryView::createTopic(const QString& name)
+{
+    if (name.trimmed().isEmpty()) return {};
+    Topic t = store_.stampTopicForLocalWrite(Topic{});
+    t.name = name.trimmed();
+    if (!store_.upsertTopic(t)) return {};
+    reloadTopics();
+    return t.id;
+}
+
+bool LibraryView::renameSelectedTopic(const QString& newName)
+{
+    const QString id = currentTopicId();
+    if (id.isEmpty() || newName.trimmed().isEmpty()) return false;
+    for (const Topic& t : topicRows_) {
+        if (t.id != id) continue;
+        Topic updated = t;
+        updated.name = newName.trimmed();
+        const bool ok = store_.upsertTopic(store_.stampTopicForLocalWrite(updated));
+        if (ok) reloadTopics();   // keep the cached list in step with the store
+        return ok;
+    }
+    return false;
+}
+
+bool LibraryView::deleteSelectedTopic()
+{
+    const QString id = currentTopicId();
+    if (id.isEmpty()) return false;
+    const bool ok = store_.removeTopic(id);
+    if (ok) reloadTopics();
+    return ok;
+}
+
+bool LibraryView::addSelectedDocumentsToTopic(QString* error)
+{
+    const QString id = currentTopicId();
+    if (id.isEmpty()) {
+        if (error) *error = QStringLiteral("先选中一个阅读主题");
+        return false;
+    }
+    const QStringList paths = selectedDocumentPaths();
+    if (paths.isEmpty()) {
+        if (error) *error = QStringLiteral("先在「文档」页选中要加入的书");
+        return false;
+    }
+    for (const QString& p : paths) {
+        if (!store_.addTopicDoc(id, p, error)) return false;
+        // groups written from now on belong to the topic as well
+        store_.setMindGroupTopic(p, id);
+    }
+    return true;
+}
+
+bool LibraryView::removeSelectedDocumentsFromTopic()
+{
+    const QString id = currentTopicId();
+    if (id.isEmpty()) return false;
+    bool any = false;
+    for (const QString& p : selectedDocumentPaths())
+        any = store_.removeTopicDoc(id, p) || any;
+    return any;
+}
+
+bool LibraryView::selectTopicRow(int row)
+{
+    if (!topics_ || row < 0 || row >= topics_->count()) return false;
+    topics_->setCurrentRow(row);
+    return true;
+}
+
+QString LibraryView::currentTopicId() const
+{
+    if (!topics_ || !topics_->currentItem()) return {};
+    return topics_->currentItem()->data(Qt::UserRole).toString();
+}
+
+int LibraryView::topicDocumentCount() const
+{
+    const QString id = currentTopicId();
+    return id.isEmpty() ? 0 : store_.topicDocs(id).size();
 }
 
 void LibraryView::reload()

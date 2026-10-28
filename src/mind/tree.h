@@ -27,6 +27,18 @@ struct Node {
     bool isGroup = false;
 };
 
+// One document inside a reading topic (cross-document mind map).
+struct TopicDocInput {
+    QString title;      // document title shown as the branch label
+    QString docPath;
+    QVector<Markup> markups;
+};
+
+// Root = topic name; one branch per document, each containing that document's groups and
+// notes. Documents with no notes are skipped so the map only shows what carries content.
+Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs,
+                    const QVector<MindGroup>& groups);
+
 // Root = document title, then the group tree (MindGroup::parentId), notes as leaves.
 // Notes without a group fall back to page buckets, so an unorganised document still
 // shows a useful outline.

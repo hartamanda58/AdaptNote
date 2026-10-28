@@ -255,6 +255,56 @@ int main(int argc, char** argv)
     }
 
 
+    // ---- reading topics in the library ----
+    {
+        std::printf("\n=== library: reading topics ===\n");
+        view.reload();
+        const int topicsBefore = view.topicCount();
+
+        const QString id = view.createTopic(QStringLiteral("课程主题"));
+        check(!id.isEmpty(), QStringLiteral("create a topic from the library"));
+        check(view.topicCount() == topicsBefore + 1,
+              QStringLiteral("topic list grew (%1 -> %2)").arg(topicsBefore).arg(view.topicCount()));
+        check(view.topicNames().contains(QStringLiteral("课程主题")),
+              QStringLiteral("the new topic is listed by name"));
+
+        // rename through the library API
+        view.reload();
+        int topicRow = -1;
+        for (int i = 0; i < view.topicCount(); ++i) {
+            view.selectTopicRow(i);
+            if (view.currentTopicId() == id) { topicRow = i; break; }
+        }
+        check(topicRow >= 0, QStringLiteral("the topic can be selected"));
+        check(view.renameSelectedTopic(QStringLiteral("课程主题（改）")),
+              QStringLiteral("rename the selected topic"));
+        check(view.topicNames().contains(QStringLiteral("课程主题（改）")),
+              QStringLiteral("renamed topic visible"));
+
+        // attach the document that the library already lists
+        view.reload();
+        for (int i = 0; i < view.topicCount(); ++i) {
+            view.selectTopicRow(i);
+            if (view.currentTopicId() == id) break;
+        }
+        const QStringList paths = view.selectedDocumentPaths();
+        if (!paths.isEmpty()) {
+            QString err;
+            check(view.addSelectedDocumentsToTopic(&err),
+                  QStringLiteral("add the selected document to the topic (%1)").arg(err));
+            check(view.topicDocumentCount() == 1,
+                  QStringLiteral("topic holds one document (%1)").arg(view.topicDocumentCount()));
+            check(view.removeSelectedDocumentsFromTopic(),
+                  QStringLiteral("remove the document again"));
+            check(view.topicDocumentCount() == 0, QStringLiteral("topic is empty again"));
+        } else {
+            std::printf("      (no document row to attach)\n");
+        }
+
+        check(view.deleteSelectedTopic(), QStringLiteral("delete the topic"));
+        check(view.topicCount() == topicsBefore, QStringLiteral("topic list back to the start"));
+    }
+
     std::printf("\n%s (%d failure(s))\n",
                 g_fail == 0 ? "LIBRARY CHECKS PASSED" : "LIBRARY CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;

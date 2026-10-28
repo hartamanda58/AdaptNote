@@ -177,6 +177,7 @@ private:
     QWidget* mindPanel_ = nullptr;
     mind::MindMapView* mindView_ = nullptr;
     int workspaceMode_ = 0;
+    QString currentTopic_;   // non-empty = the mind map shows that reading topic
     void ensureMindPanel();
     void rebuildMindMap();
     static QString noteIdOfKey(const QString& key);

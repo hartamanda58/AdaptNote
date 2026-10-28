@@ -9,9 +9,10 @@
 #include <QVector>
 
 class QComboBox;
+class QListWidget;
+class QTabWidget;
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QTableWidget;
 
 namespace an {
@@ -55,7 +56,20 @@ public:
     bool forgetSelected(int* notesRemoved = nullptr);  // drop from library, keep the file
 
 
+    // ---- reading topics (cross-document) ----
+    int topicCount() const;
+    QStringList topicNames() const;
+    QString createTopic(const QString& name);          // returns the new id ("" on failure)
+    bool renameSelectedTopic(const QString& newName);
+    bool deleteSelectedTopic();
+    bool addSelectedDocumentsToTopic(QString* error = nullptr);
+    bool removeSelectedDocumentsFromTopic();
+    bool selectTopicRow(int row);
+    QString currentTopicId() const;
+    int topicDocumentCount() const;                    // documents in the selected topic
+
 signals:
+    void openTopicRequested(const QString& topicId);
     void openDocumentRequested(const QString& docPath);
     void openNoteRequested(const QString& docPath, const QString& markupId);
     void exportRequested(const QStringList& docPaths, const QString& format);
@@ -66,7 +80,12 @@ private:
     QVector<DocRow> filteredRows() const;
     void updateNotes();
 
+    void reloadTopics();
+
     Store& store_;
+    QTabWidget* leftTabs_ = nullptr;
+    QListWidget* topics_ = nullptr;
+    QVector<Topic> topicRows_;
     QVector<DocRow> allRows_;   // everything the store knows
     QVector<DocRow> rows_;      // after the smart filter
     DocFilter filter_ = DocFilter::All;

@@ -2734,6 +2734,29 @@ QString MainWindow::parentGroupOfNote(const QString& key) const
 void MainWindow::rebuildMindMap()
 {
     if (!mindView_) return;
+
+    if (!currentTopic_.isEmpty()) {
+        // Topic view: one branch per document, so several books share a single map.
+        QString topicName;
+        for (const Topic& t : store_.topics())
+            if (t.id == currentTopic_) topicName = t.name;
+
+        QVector<mind::TopicDocInput> docs;
+        for (const TopicDoc& d : store_.topicDocs(currentTopic_)) {
+            mind::TopicDocInput in;
+            in.title = QFileInfo(d.docPath).completeBaseName();
+            for (const DocRow& row : store_.documents())
+                if (row.path == d.docPath && !row.title.isEmpty()) in.title = row.title;
+            in.docPath = d.docPath;
+            // the currently open document is the freshest source of its own notes
+            in.markups = (d.docPath == docPath_) ? markups_ : store_.markups(d.docPath);
+            docs.append(in);
+        }
+        mindView_->setTree(mind::buildFromTopic(topicName, docs,
+                                                store_.mindGroupsForTopic(currentTopic_)));
+        return;
+    }
+
     if (!engine_.isOpen() || markups_.isEmpty()) {
         mind::Node empty;
         mindView_->setTree(empty);
@@ -2860,7 +2883,30 @@ void MainWindow::showLibrary()
     library_->setAttribute(Qt::WA_DeleteOnClose, true);
 
     connect(library_, &LibraryView::openDocumentRequested, this, [this](const QString& path) {
+        currentTopic_.clear();   // opening a plain document leaves topic view
         if (!openDocument(path)) return;
+        if (library_) library_->reload();
+    });
+    connect(library_, &LibraryView::openTopicRequested, this, [this](const QString& topicId) {
+        // Entering a topic opens its first document so there is something to read next to
+        // the map, and switches the map to the cross-document view.
+        QString name;
+        for (const Topic& t : store_.topics())
+            if (t.id == topicId) name = t.name;
+        const QVector<TopicDoc> docs = store_.topicDocs(topicId);
+        if (docs.isEmpty()) {
+            statusBar()->showMessage(
+                QStringLiteral("主题「%1」还没有资料：在书库里选中文档后点「加入选中文档」")
+                    .arg(name),
+                4000);
+            return;
+        }
+        if (!openDocument(docs.first().docPath)) return;
+        currentTopic_ = topicId;
+        setWorkspaceMode(1);
+        rebuildMindMap();
+        statusBar()->showMessage(QStringLiteral("主题「%1」· %2 份资料").arg(name).arg(docs.size()),
+                                 3500);
         if (library_) library_->reload();
     });
     connect(library_, &LibraryView::openNoteRequested, this,

@@ -1,5 +1,7 @@
 #include "mind/tree.h"
 
+#include <QFileInfo>
+
 #include <algorithm>
 #include <functional>
 
@@ -210,6 +212,31 @@ QVector<QPair<QString, int>> planReorder(const QVector<Markup>& siblings, const 
         if (rest.at(i).mindOrder != newOrder) changes.append({rest.at(i).id, newOrder});
     }
     return changes;
+}
+
+Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs,
+                    const QVector<MindGroup>& groups)
+{
+    Node root;
+    root.text = topicName.isEmpty() ? QStringLiteral("阅读主题") : topicName;
+    root.isGroup = true;
+
+    for (const TopicDocInput& doc : docs) {
+        // Reuse the single-document builder so the per-document structure (groups, page
+        // buckets, ordering) stays byte-for-byte what the reader shows on its own.
+        QVector<MindGroup> own;
+        for (const MindGroup& g : groups)
+            if (g.docPath == doc.docPath) own.append(g);
+
+        Node branch = buildFromNotes(doc.title, doc.markups, own);
+        if (branch.children.isEmpty()) continue;   // nothing to show for that document
+        branch.text = doc.title.isEmpty() ? QFileInfo(doc.docPath).completeBaseName() : doc.title;
+        branch.isGroup = true;
+        branch.markupId.clear();
+        branch.page = -1;
+        root.children.append(branch);
+    }
+    return root;
 }
 
 int nodeCount(const Node& node)

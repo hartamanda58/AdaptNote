@@ -632,6 +632,64 @@ int main(int argc, char** argv)
                   .arg(shrunken.height()).arg(canvas.height()));
     }
 
+        // ---- topic mind map: several documents share one tree ----
+        {
+            std::printf("\n=== reading topic mind map (cross-document) ===\n");
+            Markup a;
+            a.id = QStringLiteral("t-a");
+            a.docPath = QStringLiteral("/books/one.pdf");
+            a.page = 0;
+            a.text = QStringLiteral("第一本书的摘录");
+            Markup b = a;
+            b.id = QStringLiteral("t-b");
+            b.docPath = QStringLiteral("/books/two.pdf");
+            b.page = 1;
+            b.text = QStringLiteral("第二本书的摘录");
+
+            mind::TopicDocInput d1;
+            d1.title = QStringLiteral("书一");
+            d1.docPath = a.docPath;
+            d1.markups = {a};
+            mind::TopicDocInput d2;
+            d2.title = QStringLiteral("书二");
+            d2.docPath = b.docPath;
+            d2.markups = {b};
+            mind::TopicDocInput empty;
+            empty.title = QStringLiteral("空书");
+            empty.docPath = QStringLiteral("/books/empty.pdf");
+
+            const mind::Node tree = mind::buildFromTopic(QStringLiteral("我的主题"),
+                                                         {d1, d2, empty}, {});
+            check(tree.text == QStringLiteral("我的主题"), QStringLiteral("root is the topic name"));
+            check(tree.children.size() == 2,
+                  QStringLiteral("one branch per non-empty document (%1)").arg(tree.children.size()));
+            check(tree.children.at(0).text == QStringLiteral("书一") &&
+                      tree.children.at(1).text == QStringLiteral("书二"),
+                  QStringLiteral("branches carry the document titles"));
+            int leaves = 0;
+            std::function<void(const mind::Node&)> walk = [&](const mind::Node& n) {
+                if (!n.markupId.isEmpty()) ++leaves;
+                for (const mind::Node& c : n.children) walk(c);
+            };
+            walk(tree);
+            check(leaves == 2, QStringLiteral("both notes appear (%1)").arg(leaves));
+
+            // groups stay with their own document
+            MindGroup g;
+            g.id = QStringLiteral("g-one");
+            g.docPath = a.docPath;
+            g.name = QStringLiteral("书一的分组");
+            const mind::Node grouped =
+                mind::buildFromTopic(QStringLiteral("T"), {d1, d2}, {g});
+            bool sawGroup = false;
+            std::function<void(const mind::Node&)> scan = [&](const mind::Node& n) {
+                if (n.text == QStringLiteral("书一的分组")) sawGroup = true;
+                for (const mind::Node& c : n.children) scan(c);
+            };
+            scan(grouped);
+            check(sawGroup, QStringLiteral("a group appears under its own document"));
+        }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "P5 CHECKS PASSED" : "P5 CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
