@@ -2,6 +2,7 @@
 
 #include "mind/tree.h"
 
+#include <QGraphicsItem>
 #include <QGraphicsView>
 #include <QSet>
 #include <QImage>
@@ -32,6 +33,7 @@ public:
     bool isCollapsed(const QString& key) const { return collapsed_.contains(key); }
     void setSelectedKey(const QString& key);
     QString selectedKey() const { return selectedKey_; }
+    bool hasDropIndicator() const { return dropIndicator_ != nullptr; }
 
     // Hit testing helpers (also used by tests).
     QString groupKeyAt(const QPointF& scenePos) const;
@@ -72,6 +74,7 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
@@ -85,6 +88,11 @@ private:
     QPointF dragStartScene_;
     bool dragMoved_ = false;
     bool didInitialFit_ = false;
+    // Drop feedback: a line where the note will be inserted, or a box around the group it
+    // will join. Recreated on every move, removed on release.
+    QGraphicsItem* dropIndicator_ = nullptr;
+    void clearDropIndicator();
+    void updateDropIndicator(const QPointF& scenePos);
     QGraphicsScene* scene_ = nullptr;
     int nodeItems_ = 0;
     QSet<QString> collapsed_;   // nodeKey() values whose subtree is hidden

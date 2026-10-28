@@ -115,10 +115,12 @@ bool MindMapView::dropTargetAt(const QPointF& scenePos, QString* groupKey,
     if (groupKey) groupKey->clear();
     if (beforeId) beforeId->clear();
 
-    // A note under the cursor: insert before it when dropping in its upper half.
+    // A note under the cursor: insert before it when dropping in its upper half. The note
+    // being dragged follows the cursor and would otherwise be its own drop target.
     for (QGraphicsItem* item : scene_->items(scenePos)) {
         const QVariant id = item->data(1);
         if (!id.isValid()) continue;
+        if (!dragMarkupId_.isEmpty() && id.toString() == dragMarkupId_) continue;
         const QRectF box = item->sceneBoundingRect();
         const bool upperHalf = scenePos.y() < box.center().y();
         if (groupKey) *groupKey = groupKeyAt(scenePos);
@@ -132,8 +134,18 @@ bool MindMapView::dropTargetAt(const QPointF& scenePos, QString* groupKey,
         return true;
     }
 
-    // A group node (or page bucket): append to it.
-    const QString group = groupKeyAt(scenePos);
+    // A group node (or page bucket): append to it. groupKeyAt() must ignore the dragged
+    // card as well, otherwise it reports the note's current group.
+    QString group;
+    for (QGraphicsItem* item : scene_->items(scenePos)) {
+        const QVariant id = item->data(1);
+        if (id.isValid() && !dragMarkupId_.isEmpty() && id.toString() == dragMarkupId_) continue;
+        const QVariant key = item->data(2);
+        if (key.isValid() && !key.toString().isEmpty()) {
+            group = key.toString();
+            break;
+        }
+    }
     if (!group.isEmpty()) {
         if (groupKey) *groupKey = group;
         return true;
@@ -216,6 +228,75 @@ QPointF MindMapView::nodeCenter(const QString& markupId) const
     return {};
 }
 
+void MindMapView::clearDropIndicator()
+{
+    if (dropIndicator_) {
+        if (scene_) scene_->removeItem(dropIndicator_);
+        delete dropIndicator_;
+        dropIndicator_ = nullptr;
+    }
+}
+
+void MindMapView::updateDropIndicator(const QPointF& scenePos)
+{
+    clearDropIndicator();
+    if (!scene_ || dragMarkupId_.isEmpty() || !dragMoved_) return;
+
+    QString group;
+    QString beforeId;
+    const bool hasTarget = dropTargetAt(scenePos, &group, &beforeId);
+    const QColor accent(0x2f, 0x6b, 0xd8);
+
+    if (!hasTarget || group.isEmpty()) {
+        // Empty canvas: the note falls back to its page bucket. Say so instead of drawing
+        // nothing, otherwise the drop looks like it failed.
+        if (dropIndicator_) return;
+        QFont font;
+        font.setPixelSize(11);
+        auto* hint = scene_->addSimpleText(QStringLiteral("放开：回到原页分组"), font);
+        hint->setBrush(QBrush(QColor(0x98, 0xa2, 0xb3)));
+        hint->setPos(scenePos + QPointF(14, 8));
+        hint->setZValue(20);
+        dropIndicator_ = hint;
+        return;
+    }
+
+    if (!beforeId.isEmpty()) {
+        // Insertion line above the note it will go in front of.
+        for (QGraphicsItem* item : scene_->items()) {
+            const QVariant id = item->data(1);
+            if (!id.isValid() || id.toString() != beforeId) continue;
+            const QRectF box = item->sceneBoundingRect();
+            auto* line = scene_->addLine(box.left() - 2, box.top() - 4, box.right() + 2,
+                                         box.top() - 4, QPen(accent, 2.4));
+            line->setZValue(20);
+            dropIndicator_ = line;
+            return;
+        }
+    }
+
+    // Joining a group: outline the card so the destination is unambiguous.
+    const QRectF groupRect = rectForKey(group);
+    if (!groupRect.isNull()) {
+        QPen pen(accent, 1.8, Qt::DashLine);
+        auto* box = scene_->addRect(groupRect.adjusted(-3, -3, 3, 3), pen,
+                                    QBrush(QColor(0x2f, 0x6b, 0xd8, 26)));
+        box->setZValue(20);
+        dropIndicator_ = box;
+    }
+}
+
+void MindMapView::mouseMoveEvent(QMouseEvent* event)
+{
+    if (!dragMarkupId_.isEmpty()) {
+        const QPointF scenePos = mapToScene(event->pos());
+        if (!dragMoved_ && (scenePos - dragStartScene_).manhattanLength() > 6.0)
+            dragMoved_ = true;
+        if (dragMoved_) updateDropIndicator(scenePos);
+    }
+    QGraphicsView::mouseMoveEvent(event);
+}
+
 void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (scene_) {
@@ -232,15 +313,25 @@ void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 {
+    clearDropIndicator();
     if (!dragMarkupId_.isEmpty() && dragMoved_) {
         const QString id = dragMarkupId_;
-        dragMarkupId_.clear();
-        dragMoved_ = false;
         const QPointF scenePos = mapToScene(event->pos());
 
+        // Resolve the target *before* clearing the drag state: dropTargetAt() skips the
+        // card being dragged, and that card sits under the cursor at release time.
         QString group;
         QString before;
-        if (dropTargetAt(scenePos, &group, &before) && !before.isEmpty()) {
+        const bool hasTarget = dropTargetAt(scenePos, &group, &before);
+
+        dragMarkupId_.clear();
+        dragMoved_ = false;
+
+        if (!hasTarget) {
+            emit nodeReparented(id, QString());   // empty canvas -> back to the page bucket
+            return;
+        }
+        if (!before.isEmpty()) {
             emit noteReorderRequested(id, group, before);
             return;
         }
@@ -498,6 +589,7 @@ void MindMapView::setSelectedKey(const QString& key)
 
 void MindMapView::rebuild()
 {
+    dropIndicator_ = nullptr;   // destroyed by clear() below
     scene_->clear();
     nodeItems_ = 0;
     if (root_.text.isEmpty()) return;

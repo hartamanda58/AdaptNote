@@ -71,6 +71,9 @@ public:
     // The mind-map panel (null until the workspace is built); tests use it to assert that
     // the map really shows the same notes the reader sees.
     mind::MindMapView* mindMapView() const { return mindView_; }
+    // Thin hooks so tests can drive the map without opening dialogs.
+    QString createMindGroupForTest(const QString& name) { return createMindGroup(name, QString()); }
+    void rebuildMindMapForTest() { rebuildMindMap(); }
     void showLibrary();
     void showConflicts();
     // Mind map: regroup a note (empty group = back to page grouping). Undoable.

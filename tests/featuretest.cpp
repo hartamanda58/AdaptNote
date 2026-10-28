@@ -6,6 +6,7 @@
 #include "ui/pageview.h"
 
 #include <QApplication>
+#include <QMouseEvent>
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
@@ -894,6 +895,67 @@ int main(int argc, char** argv)
             w.setWorkspaceMode(0);
             settle();
         }
+        // ---- drag to regroup: the drop path must actually run ----
+        {
+            std::printf("\n=== mind map: drag to regroup ===\n");
+            w.setWorkspaceMode(2);
+            settle();
+            auto* mv = w.mindMapView();
+            const QString groupName = QStringLiteral("拖动目标");
+            const QString groupId = w.createMindGroupForTest(groupName);
+            check(!groupId.isEmpty(), QStringLiteral("target group created"));
+            w.rebuildMindMapForTest();
+            settle();
+
+            // pick a note that is not already in that group
+            QString noteId;
+            for (const Markup& m : w.visibleMarkups())
+                if (m.mindGroup != groupId) { noteId = m.id; break; }
+            check(!noteId.isEmpty(), QStringLiteral("found a note outside the group"));
+
+            const QRectF from = mv->rectForKey(QStringLiteral("note:") + noteId);
+            const QRectF to = mv->rectForKey(QStringLiteral("group:") + groupId);
+            check(!from.isNull() && !to.isNull(),
+                  QStringLiteral("both cards have a position (%1 / %2)").arg(from.isNull()).arg(to.isNull()));
+
+            if (!from.isNull() && !to.isNull()) {
+                // QGraphicsView receives mouse input through its viewport, so the events
+                // have to be addressed there (sending them to the view does nothing).
+                QWidget* vp = mv->viewport();
+                const QPoint start = vp->mapFrom(mv, mv->mapFromScene(from.center()));
+                const QPoint mid =
+                    vp->mapFrom(mv, mv->mapFromScene((from.center() + to.center()) / 2.0));
+                const QPoint end = vp->mapFrom(mv, mv->mapFromScene(to.center()));
+
+                QMouseEvent press(QEvent::MouseButtonPress, start, vp->mapToGlobal(start),
+                                  Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &press);
+                QMouseEvent move(QEvent::MouseMove, mid, vp->mapToGlobal(mid),
+                                 Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &move);
+                settle();
+                check(mv->hasDropIndicator(), QStringLiteral("drop indicator appears while dragging"));
+
+                QMouseEvent move2(QEvent::MouseMove, end, vp->mapToGlobal(end),
+                                  Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &move2);
+                QMouseEvent release(QEvent::MouseButtonRelease, end, vp->mapToGlobal(end),
+                                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &release);
+                settle();
+                check(!mv->hasDropIndicator(), QStringLiteral("indicator cleared after the drop"));
+
+                QString landed;
+                for (const Markup& m : w.visibleMarkups())
+                    if (m.id == noteId) landed = m.mindGroup;
+                check(landed == groupId,
+                      QStringLiteral("note moved into the target group (expected %1, got '%2')")
+                          .arg(groupId.left(8), landed.left(8)));
+            }
+            w.setWorkspaceMode(0);
+            settle();
+        }
+
 
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
