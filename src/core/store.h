@@ -58,6 +58,9 @@ public:
 
     // Full text search over excerpt / comment / tags. Empty docPath = whole library.
     QVector<Markup> searchMarkups(const QString& query, const QString& docPathIn = {}) const;
+    // Same search, restricted to a set of documents (a reading topic). An empty set means
+    // "nothing", not "everything": callers pass the topic's documents explicitly.
+    QVector<Markup> searchMarkupsInDocs(const QString& query, const QStringList& docPaths) const;
     QVector<QPair<QString, int>> tagCounts(const QString& docPathIn = {}) const;
     bool fullTextSearchEnabled() const { return fts_; }
 

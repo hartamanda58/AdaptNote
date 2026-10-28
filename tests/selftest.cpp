@@ -437,6 +437,58 @@ int main(int argc, char** argv)
               QStringLiteral("tombstone kept for sync (%1)").arg(store.topicsIncludingDeleted().size()));
     }
 
+
+    // ---- searching inside a reading topic spans its documents ----
+    {
+        std::printf("\n=== store: topic-scoped search ===\n");
+        const QString docA = tmp.filePath("topic-a.pdf");
+        const QString docB = tmp.filePath("topic-b.pdf");
+        const QString docC = tmp.filePath("topic-c.pdf");
+        for (const QString& p : {docA, docB, docC}) {
+            QFile f(p);
+            f.open(QIODevice::WriteOnly);
+            f.write("pdf");
+        }
+
+        auto note = [](const QString& doc, const QString& id, const QString& text) {
+            Markup m;
+            m.id = id;
+            m.docPath = doc;
+            m.page = 0;
+            m.type = MarkupType::Highlight;
+            m.text = text;
+            m.quads = {Quad{QPointF(10, 10), QPointF(90, 10), QPointF(10, 20), QPointF(90, 20)}};
+            return m;
+        };
+        check(store.upsertMarkup(note(docA, QStringLiteral("ts-a"), QStringLiteral("编译器优化策略"))),
+              QStringLiteral("note in A"));
+        check(store.upsertMarkup(note(docB, QStringLiteral("ts-b"), QStringLiteral("编译器后端设计"))),
+              QStringLiteral("note in B"));
+        check(store.upsertMarkup(note(docC, QStringLiteral("ts-c"), QStringLiteral("编译器前端手册"))),
+              QStringLiteral("note in C"));
+
+        QStringList inTopic{docA, docB};
+        const QVector<Markup> hits = store.searchMarkupsInDocs(QStringLiteral("编译器"), inTopic);
+        check(hits.size() == 2,
+              QStringLiteral("topic search returns the two member documents (%1)").arg(hits.size()));
+        bool sawA = false, sawB = false, sawC = false;
+        for (const Markup& m : hits) {
+            if (m.docPath == docA) sawA = true;
+            if (m.docPath == docB) sawB = true;
+            if (m.docPath == docC) sawC = true;
+        }
+        check(sawA && sawB, QStringLiteral("both member documents are represented"));
+        check(!sawC, QStringLiteral("documents outside the topic are excluded"));
+
+        check(store.searchMarkupsInDocs(QStringLiteral("编译器"), {}).isEmpty(),
+              QStringLiteral("an empty document set searches nothing, not everything"));
+
+        const QVector<Markup> narrowed =
+            store.searchMarkupsInDocs(QStringLiteral("后端"), inTopic);
+        check(narrowed.size() == 1 && narrowed.first().docPath == docB,
+              QStringLiteral("the query still narrows inside the topic (%1)").arg(narrowed.size()));
+    }
+
     std::printf("\n=== 4. PDF annotation write-back ===\n");
     const QString copy = tmp.filePath("annotated.pdf");
     check(QFile::copy(pdfPath, copy), QStringLiteral("copy for write-back"));

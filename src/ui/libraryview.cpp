@@ -176,6 +176,8 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
             emit libraryChanged();
         }
     });
+    connect(topics_, &QListWidget::currentRowChanged, this, [this](int) { updateNotes(); });
+    connect(leftTabs_, &QTabWidget::currentChanged, this, [this](int) { updateNotes(); });
     connect(topics_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         if (!item) return;
         const QString id = item->data(Qt::UserRole).toString();
@@ -336,6 +338,11 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     vbox->addWidget(hint);
 
     reload();
+}
+
+void LibraryView::setTopicTabForTest(bool on)
+{
+    if (leftTabs_) leftTabs_->setCurrentIndex(on ? 1 : 0);
 }
 
 void LibraryView::reloadTopics()
@@ -565,6 +572,16 @@ QString LibraryView::scopePath() const
     return rows_.at(row).path;
 }
 
+QStringList LibraryView::topicScopePaths() const
+{
+    if (wholeLibrary_ || !leftTabs_ || leftTabs_->currentIndex() != 1) return {};
+    const QString id = currentTopicId();
+    if (id.isEmpty()) return {};
+    QStringList out;
+    for (const TopicDoc& d : store_.topicDocs(id)) out.append(d.docPath);
+    return out;
+}
+
 void LibraryView::updateNotes()
 {
     if (!notes_) return;
@@ -574,8 +591,12 @@ void LibraryView::updateNotes()
     const QString query = search_ ? search_->text().trimmed() : QString();
     const QString tag = tags_ ? tags_->currentData().toString() : QString();
     const QString scope = scopePath();
+    const QStringList topicDocs = topicScopePaths();
 
-    QVector<Markup> base = store_.searchMarkups(query, scope);
+    // A selected reading topic searches across all of its documents at once; without one
+    // the list stays bound to the single selected document.
+    QVector<Markup> base = topicDocs.isEmpty() ? store_.searchMarkups(query, scope)
+                                               : store_.searchMarkupsInDocs(query, topicDocs);
     int listed = 0;
     for (const Markup& m : base) {
         if (!tag.isEmpty() && !m.tags.contains(tag)) continue;

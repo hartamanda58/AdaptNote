@@ -634,6 +634,23 @@ QVector<Markup> Store::markups(const QString& docPathIn, int page) const
     return out;
 }
 
+QVector<Markup> Store::searchMarkupsInDocs(const QString& query,
+                                         const QStringList& docPaths) const
+{
+    QVector<Markup> out;
+    if (!open_ || docPaths.isEmpty()) return out;
+
+    // Reuse the single-document search (FTS + LIKE fallback, same ranking) and keep only
+    // the requested documents. Searching the whole library and filtering is intentional:
+    // it avoids a second, subtly different query builder.
+    QSet<QString> wanted;
+    for (const QString& p : docPaths) wanted.insert(nonNull(p));
+    for (const Markup& m : searchMarkups(query, QString())) {
+        if (wanted.contains(nonNull(m.docPath))) out.append(m);
+    }
+    return out;
+}
+
 QVector<Markup> Store::searchMarkups(const QString& query, const QString& docPathIn) const
 {
     QVector<Markup> out;

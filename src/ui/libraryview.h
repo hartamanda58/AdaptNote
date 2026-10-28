@@ -67,6 +67,8 @@ public:
     bool selectTopicRow(int row);
     QString currentTopicId() const;
     int topicDocumentCount() const;                    // documents in the selected topic
+    // Test hook: switch between the 文档 and 阅读主题 tabs without a click.
+    void setTopicTabForTest(bool on);
 
 signals:
     void openTopicRequested(const QString& topicId);
@@ -77,6 +79,7 @@ signals:
 
 private:
     QString scopePath() const;          // "" = whole library
+    QStringList topicScopePaths() const;  // documents of the selected topic (empty = none)
     QVector<DocRow> filteredRows() const;
     void updateNotes();
 

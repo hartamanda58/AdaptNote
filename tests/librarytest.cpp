@@ -305,6 +305,54 @@ int main(int argc, char** argv)
         check(view.topicCount() == topicsBefore, QStringLiteral("topic list back to the start"));
     }
 
+
+    // ---- the topic tab scopes the note list to that topic's documents ----
+    {
+        std::printf("\n=== library: topic scope drives the note list ===\n");
+        view.reload();
+        const QString id = view.createTopic(QStringLiteral("搜索范围主题"));
+        check(!id.isEmpty(), QStringLiteral("topic created"));
+
+        // the library already lists one document; attach it
+        view.reload();
+        for (int i = 0; i < view.topicCount(); ++i) {
+            view.selectTopicRow(i);
+            if (view.currentTopicId() == id) break;
+        }
+        const QStringList paths = view.selectedDocumentPaths();
+        if (!paths.isEmpty()) {
+            QString err;
+            check(view.addSelectedDocumentsToTopic(&err), QStringLiteral("attach (%1)").arg(err));
+
+            // give the attached document a note so the scope has something to show
+            Markup scoped;
+            scoped.id = QStringLiteral("scope-note-1");
+            scoped.docPath = paths.first();
+            scoped.page = 0;
+            scoped.type = MarkupType::Highlight;
+            scoped.text = QStringLiteral("主题范围内的摘录");
+            scoped.quads = {Quad{QPointF(10, 10), QPointF(90, 10), QPointF(10, 20), QPointF(90, 20)}};
+            check(store.upsertMarkup(scoped), QStringLiteral("note for the scoped document"));
+
+            view.setTopicTabForTest(true);
+            view.reload();
+            check(view.listedNoteIds().size() == view.noteCount(),
+                  QStringLiteral("note ids and count agree"));
+            check(view.noteCount() > 0,
+                  QStringLiteral("the topic lists its documents' notes (%1)").arg(view.noteCount()));
+            check(view.listedNoteIds().contains(QStringLiteral("scope-note-1")),
+                  QStringLiteral("the scoped note is the one listed"));
+
+            view.setSearchText(QStringLiteral("zzz-no-such-text"));
+            check(view.noteCount() == 0, QStringLiteral("search narrows inside the topic"));
+            view.setSearchText(QString());
+            check(view.noteCount() > 0, QStringLiteral("clearing the search restores the list"));
+            view.setTopicTabForTest(false);
+        } else {
+            std::printf("      (no document row to attach)\n");
+        }
+        view.deleteSelectedTopic();
+    }
     std::printf("\n%s (%d failure(s))\n",
                 g_fail == 0 ? "LIBRARY CHECKS PASSED" : "LIBRARY CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
