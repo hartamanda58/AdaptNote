@@ -34,7 +34,10 @@ namespace an {
 
 class PageView;
 
+class MindGroupCommand;
+
 class MainWindow : public QMainWindow {
+    friend class MindGroupCommand;
     Q_OBJECT
 public:
     enum class CmdKind { Add, Remove, Modify };
@@ -73,7 +76,15 @@ public:
     mind::MindMapView* mindMapView() const { return mindView_; }
     // Thin hooks so tests can drive the map without opening dialogs.
     QString createMindGroupForTest(const QString& name) { return createMindGroup(name, QString()); }
+    bool renameMindGroupForTest(const QString& key, const QString& name)
+    {
+        return renameMindGroup(key, name);
+    }
+    bool deleteMindGroupForTest(const QString& key) { return deleteMindGroup(key); }
     void rebuildMindMapForTest() { rebuildMindMap(); }
+    bool undoForTest();
+    bool redoForTest();
+    QString undoTextForTest() const;
     void showLibrary();
     void showConflicts();
     // Mind map: regroup a note (empty group = back to page grouping). Undoable.

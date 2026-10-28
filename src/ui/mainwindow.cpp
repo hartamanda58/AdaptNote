@@ -348,6 +348,51 @@ private:
     QVector<QPair<Markup, Markup>> pairs_;
 };
 
+// A mind-map group is its own entity, so its own undo command: create, rename, delete and
+// re-parent all restore by writing the stored row back.
+class MindGroupCommand : public QUndoCommand {
+public:
+    enum Kind { Add, Remove, Modify };
+
+    MindGroupCommand(MainWindow* w, Kind kind, const MindGroup& before, const MindGroup& after,
+                     const QString& text)
+        : w_(w), kind_(kind), before_(before), after_(after)
+    {
+        setText(text);
+    }
+
+    void undo() override { apply(before_, true); }
+    void redo() override { apply(after_, false); }
+
+private:
+    void apply(const MindGroup& state, bool undoing)
+    {
+        MindGroup row = state;
+        switch (kind_) {
+        case Add:
+            // redo = create (alive), undo = tombstone it again
+            row.deleted = undoing;
+            w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
+            break;
+        case Remove:
+            // the row we stored is an alive snapshot; undoing brings it back
+            row.deleted = undoing ? false : true;
+            w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
+            break;
+        case Modify:
+            w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
+            break;
+        }
+        w_->refreshFromStore();
+        w_->rebuildMindMapForTest();
+    }
+
+    MainWindow* w_;
+    Kind kind_;
+    MindGroup before_;
+    MindGroup after_;
+};
+
 // ---------------------------------------------------------------- construction
 
 MainWindow::MainWindow(QWidget* parent)
@@ -2367,11 +2412,19 @@ QString groupIdOf(const QString& keyOrId)
 QString MainWindow::createMindGroup(const QString& name, const QString& parentId)
 {
     const QString id = store_.ensureMindGroup(docPath_, name, parentId);
-    if (!id.isEmpty())
-        statusBar()->showMessage(
-            parentId.isEmpty() ? QStringLiteral("已创建分组「%1」").arg(name)
-                               : QStringLiteral("已创建子分组「%1」").arg(name),
-            2500);
+    if (id.isEmpty()) return {};
+    // Undo should remove exactly the row we created, so hand the command a snapshot.
+    for (const MindGroup& g : store_.mindGroups(docPath_)) {
+        if (g.id != id) continue;
+        undo_->push(new MindGroupCommand(this, MindGroupCommand::Add, g, g,
+                                         parentId.isEmpty() ? QStringLiteral("新建分组")
+                                                            : QStringLiteral("新建子分组")));
+        break;
+    }
+    statusBar()->showMessage(
+        parentId.isEmpty() ? QStringLiteral("已创建分组「%1」").arg(name)
+                           : QStringLiteral("已创建子分组「%1」").arg(name),
+        2500);
     return id;
 }
 
@@ -2388,8 +2441,18 @@ bool MainWindow::moveMindGroupUp(const QString& groupKey)
             if (p.id == g.parentId) grandParent = p.parentId;
     }
     if (!found) return false;
+    MindGroup before;
+    for (const MindGroup& g : store_.mindGroups(docPath_))
+        if (g.id == id) before = g;
     const bool ok = store_.setMindGroupParent(id, grandParent);
-    if (ok) statusBar()->showMessage(QStringLiteral("分组已上移一级"), 2500);
+    if (ok) {
+        MindGroup after = before;
+        for (const MindGroup& g : store_.mindGroups(docPath_))
+            if (g.id == id) after = g;
+        undo_->push(new MindGroupCommand(this, MindGroupCommand::Modify, before, after,
+                                         QStringLiteral("分组上移一级")));
+        statusBar()->showMessage(QStringLiteral("分组已上移一级"), 2500);
+    }
     return ok;
 }
 
@@ -2402,8 +2465,13 @@ bool MainWindow::renameMindGroup(const QString& groupKey, const QString& newName
         MindGroup after = g;
         after.name = newName.trimmed();
         after.updated = QDateTime::currentMSecsSinceEpoch();
+        const MindGroup before = g;
         const bool ok = store_.upsertMindGroup(store_.stampGroupForLocalWrite(after));
-        if (ok) statusBar()->showMessage(QStringLiteral("分组已重命名为「%1」").arg(after.name), 2500);
+        if (ok) {
+            undo_->push(new MindGroupCommand(this, MindGroupCommand::Modify, before, after,
+                                             QStringLiteral("重命名分组")));
+            statusBar()->showMessage(QStringLiteral("分组已重命名为「%1」").arg(after.name), 2500);
+        }
         return ok;
     }
     return false;
@@ -2418,7 +2486,13 @@ bool MainWindow::deleteMindGroup(const QString& groupKey)
 {
     const QString id = groupIdOf(groupKey);
     if (id.isEmpty()) return false;
+    MindGroup before;
+    for (const MindGroup& g : store_.mindGroups(docPath_))
+        if (g.id == id) before = g;
     const bool ok = store_.removeMindGroup(id);
+    if (ok && !before.id.isEmpty())
+        undo_->push(new MindGroupCommand(this, MindGroupCommand::Remove, before, before,
+                                         QStringLiteral("删除分组")));
     if (ok) {
         refreshFromStore();   // notes fall back to page buckets
         statusBar()->showMessage(QStringLiteral("分组已删除，组内笔记回到按页分组"), 3000);
@@ -2715,6 +2789,25 @@ void MainWindow::ensureMindPanel()
         view_->gotoPage(page);
         updateStatus();
     });
+}
+
+bool MainWindow::undoForTest()
+{
+    if (!undo_ || !undo_->canUndo()) return false;
+    undo_->undo();
+    return true;
+}
+
+bool MainWindow::redoForTest()
+{
+    if (!undo_ || !undo_->canRedo()) return false;
+    undo_->redo();
+    return true;
+}
+
+QString MainWindow::undoTextForTest() const
+{
+    return undo_ ? undo_->undoText() : QString();
 }
 
 QString MainWindow::noteIdOfKey(const QString& key)

@@ -895,6 +895,53 @@ int main(int argc, char** argv)
             w.setWorkspaceMode(0);
             settle();
         }
+        // ---- mind-map group edits are undoable ----
+        {
+            std::printf("\n=== mind map: undo for group edits ===\n");
+            auto names = [&]() {
+                QStringList out;
+                for (const MindGroup& g : w.mindGroups()) out << g.name;
+                return out;
+            };
+            const int before = names().size();
+
+            const QString id = w.createMindGroupForTest(QStringLiteral("可撤销分组"));
+            check(!id.isEmpty(), QStringLiteral("group created"));
+            check(names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("group is visible after creation"));
+            check(w.undoTextForTest().contains(QStringLiteral("分组")),
+                  QStringLiteral("undo entry describes the change (%1)").arg(w.undoTextForTest()));
+
+            check(w.undoForTest(), QStringLiteral("undo the creation"));
+            check(!names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("group gone after undo"));
+            check(w.redoForTest(), QStringLiteral("redo the creation"));
+            check(names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("group back after redo"));
+
+            // rename
+            check(w.renameMindGroupForTest(QStringLiteral("group:") + id,
+                                           QStringLiteral("改名后")),
+                  QStringLiteral("rename accepted"));
+            check(names().contains(QStringLiteral("改名后")), QStringLiteral("new name visible"));
+            check(w.undoForTest(), QStringLiteral("undo the rename"));
+            check(names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("old name restored (%1)").arg(names().join(QLatin1Char(','))));
+
+            // delete
+            check(w.deleteMindGroupForTest(QStringLiteral("group:") + id),
+                  QStringLiteral("delete accepted"));
+            check(!names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("group hidden after delete"));
+            check(w.undoForTest(), QStringLiteral("undo the delete"));
+            check(names().contains(QStringLiteral("可撤销分组")),
+                  QStringLiteral("group restored after undo"));
+
+            check(names().size() == before + 1,
+                  QStringLiteral("net effect: one group added (%1 vs %2)")
+                      .arg(names().size()).arg(before));
+        }
+
         // ---- drag to regroup: the drop path must actually run ----
         {
             std::printf("\n=== mind map: drag to regroup ===\n");
