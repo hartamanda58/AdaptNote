@@ -419,6 +419,24 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
 {
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
+
+        if (linkMode_) {
+            const QString key = keyAt(scenePos);
+            if (key.isEmpty()) {
+                pendingLinkFrom_.clear();
+                setSelectedKey(QString());
+            } else if (pendingLinkFrom_.isEmpty()) {
+                pendingLinkFrom_ = key;
+                setSelectedKey(key);
+            } else if (pendingLinkFrom_ != key) {
+                const QString from = pendingLinkFrom_;
+                pendingLinkFrom_.clear();
+                emit linkRequested(from, key);
+            }
+            event->accept();
+            return;
+        }
+
         const QString id = markupIdAt(scenePos);
         if (!id.isEmpty()) {
             dragMarkupId_ = id;
@@ -442,6 +460,22 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
 }
 
 void MindMapView::contextMenuEvent(QContextMenuEvent* event)
+{
+    if (scene_) {
+        const QPointF scenePos = mapToScene(event->pos());
+        for (QGraphicsItem* item : scene_->items(scenePos)) {
+            const QVariant id = item->data(5);
+            if (id.isValid() && !id.toString().isEmpty()) {
+                emit linkMenuRequested(id.toString(), event->globalPos());
+                event->accept();
+                return;
+            }
+        }
+    }
+    handleCanvasContextMenu(event);
+}
+
+void MindMapView::handleCanvasContextMenu(QContextMenuEvent* event)
 {
     if (scene_) {
         const QString key = groupKeyAt(mapToScene(event->pos()));
@@ -587,6 +621,70 @@ void MindMapView::setSelectedKey(const QString& key)
     rebuild();
 }
 
+void MindMapView::setLinks(const QVector<MindLink>& links)
+{
+    links_ = links;
+    rebuild();
+}
+
+void MindMapView::setLinkMode(bool on)
+{
+    if (linkMode_ == on) return;
+    linkMode_ = on;
+    pendingLinkFrom_.clear();
+    setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
+    rebuild();   // shows/hides the "pick a card" hint
+}
+
+namespace {
+
+QPointF linkAnchor(const QRectF& from, const QRectF& to)
+{
+    // start on the side facing the target, so arrows do not cut through the cards
+    const QPointF a = from.center();
+    const QPointF b = to.center();
+    if (b.x() >= a.x()) return QPointF(from.right(), a.y());
+    return QPointF(from.left(), a.y());
+}
+
+}  // namespace
+
+void MindMapView::drawFreeLinks(const QHash<QString, QRectF>& rectOf)
+{
+    linkItems_.clear();
+    for (const MindLink& l : links_) {
+        const QRectF from = rectOf.value(l.fromNode);
+        const QRectF to = rectOf.value(l.toNode);
+        if (from.isNull() || to.isNull()) continue;   // one end is collapsed or gone
+
+        const QPointF a = linkAnchor(from, to);
+        const QPointF b = linkAnchor(to, from);
+        const double dx = qMax(40.0, qAbs(b.x() - a.x()) / 2.0);
+        QPainterPath path;
+        path.moveTo(a);
+        path.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b);
+
+        QPen pen(QColor(0x7a, 0x5a, 0xf8), 1.8, Qt::DashLine);
+        auto* item = scene_->addPath(path, pen);
+        item->setZValue(4);
+        item->setToolTip(l.label.isEmpty() ? QStringLiteral("关联线") : l.label);
+        item->setData(5, l.id);   // link id for hit testing
+        if (l.arrow == QStringLiteral("end") || l.arrow == QStringLiteral("both")) {
+            // simple arrow head pointing into the target card
+            const QPointF back = b - QPointF(dx > 0 ? 10 : -10, 0);
+            QPainterPath head;
+            head.moveTo(b);
+            head.lineTo(back + QPointF(0, -5));
+            head.lineTo(back + QPointF(0, 5));
+            head.closeSubpath();
+            auto* arrow = scene_->addPath(head, QPen(Qt::NoPen), QBrush(QColor(0x7a, 0x5a, 0xf8)));
+            arrow->setZValue(4);
+            arrow->setData(5, l.id);
+        }
+        linkItems_.insert(l.id, item);
+    }
+}
+
 void MindMapView::rebuild()
 {
     dropIndicator_ = nullptr;   // destroyed by clear() below
@@ -646,6 +744,7 @@ void MindMapView::rebuild()
         }
     };
     drawLinks(root_);
+    drawFreeLinks(rectOf);
 
     // Cards.
     std::function<void(const Node&, int)> drawCards = [&](const Node& n, int depth) {

@@ -81,6 +81,7 @@ public:
         return renameMindGroup(key, name);
     }
     bool deleteMindGroupForTest(const QString& key) { return deleteMindGroup(key); }
+    bool removeMindLinkForTest(const QString& id) { return store_.removeMindLink(id); }
     void rebuildMindMapForTest() { rebuildMindMap(); }
     bool undoForTest();
     bool redoForTest();
@@ -191,6 +192,7 @@ private:
     QString currentTopic_;   // non-empty = the mind map shows that reading topic
     void ensureMindPanel();
     void rebuildMindMap();
+    QString mindScopeKey() const;   // reading topic id, else the current document path
     static QString noteIdOfKey(const QString& key);
     QString parentGroupOfNote(const QString& key) const;
     QTreeWidget* outlineTree_ = nullptr;

@@ -19,6 +19,12 @@ public:
     explicit MindMapView(QWidget* parent = nullptr);
 
     void setTree(const Node& root);
+    // Free-form links between cards. Keys are nodeKey() values, so they survive rebuilds.
+    void setLinks(const QVector<MindLink>& links);
+    QVector<MindLink> links() const { return links_; }
+    // Link mode: the first click picks the source card, the second emits linkRequested.
+    void setLinkMode(bool on);
+    bool linkMode() const { return linkMode_; }
     const Node& tree() const { return root_; }
     int sceneNodeCount() const;
     void setZoom(double factor);
@@ -59,7 +65,11 @@ signals:
     void renameRequested(const QString& key);
     void deleteRequested(const QString& key);
     void childRequested(const QString& key);
-    void siblingRequested(const QString& key);   // emitted when a node with a page is clicked
+    void siblingRequested(const QString& key);
+    // Two cards picked in link mode.
+    void linkRequested(const QString& fromKey, const QString& toKey);
+    // Right click on an existing link (its id), or on a card while not in link mode.
+    void linkMenuRequested(const QString& linkId, const QPoint& globalPos);   // emitted when a node with a page is clicked
     // A note was dragged onto a group (or onto another note's group) -> regroup it.
     // An empty groupKey means "ungroup" (dropped on empty canvas).
     void nodeReparented(const QString& markupId, const QString& groupKey);
@@ -77,6 +87,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void handleCanvasContextMenu(QContextMenuEvent* event);
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
@@ -91,6 +102,12 @@ private:
     // Drop feedback: a line where the note will be inserted, or a box around the group it
     // will join. Recreated on every move, removed on release.
     QGraphicsItem* dropIndicator_ = nullptr;
+    QVector<MindLink> links_;
+    bool linkMode_ = false;
+    QString pendingLinkFrom_;
+    // drawn link items, keyed by link id, for hit testing and highlight
+    QHash<QString, QGraphicsItem*> linkItems_;
+    void drawFreeLinks(const QHash<QString, QRectF>& rectOf);
     void clearDropIndicator();
     void updateDropIndicator(const QPointF& scenePos);
     QGraphicsScene* scene_ = nullptr;

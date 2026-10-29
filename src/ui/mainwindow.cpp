@@ -2636,17 +2636,24 @@ void MainWindow::ensureMindPanel()
     newGroupBtn->setToolTip(QStringLiteral("在选中节点下新建分组，未选中则建在顶层"));
     row->addWidget(newGroupBtn);
 
-    auto* fitBtn = new QPushButton(QStringLiteral("适配"), bar);
-    fitBtn->setToolTip(QStringLiteral("缩放到能看见整张脑图"));
-    row->addWidget(fitBtn);
+    auto* linkBtn = new QPushButton(QStringLiteral("连线"), bar);
+    linkBtn->setCheckable(true);
+    linkBtn->setToolTip(QStringLiteral("打开后依次点两张卡片，在它们之间画一条关联线"));
+    row->addWidget(linkBtn);
 
-    auto* collapseBtn = new QPushButton(QStringLiteral("折叠/展开"), bar);
-    collapseBtn->setToolTip(QStringLiteral("折叠或展开选中的节点"));
-    row->addWidget(collapseBtn);
-
-    auto* pngBtn = new QPushButton(QStringLiteral("PNG"), bar);
-    pngBtn->setToolTip(QStringLiteral("把脑图导出成图片"));
-    row->addWidget(pngBtn);
+    // Only the frequent actions stay visible; the rest live in a small menu so the panel
+    // cannot demand enough width to squeeze the page area.
+    auto* moreBtn = new QToolButton(bar);
+    moreBtn->setText(QStringLiteral("⋯"));
+    moreBtn->setToolTip(QStringLiteral("适配、折叠、导出"));
+    moreBtn->setPopupMode(QToolButton::InstantPopup);
+    auto* moreMenu = new QMenu(moreBtn);
+    QAction* fitAct = moreMenu->addAction(QStringLiteral("适配全图"));
+    QAction* collapseAct = moreMenu->addAction(QStringLiteral("折叠/展开选中节点"));
+    moreMenu->addSeparator();
+    QAction* pngAct = moreMenu->addAction(QStringLiteral("导出 PNG…"));
+    moreBtn->setMenu(moreMenu);
+    row->addWidget(moreBtn);
     vbox->addWidget(bar);
 
     mindView_ = new mind::MindMapView(mindPanel_);
@@ -2673,16 +2680,21 @@ void MainWindow::ensureMindPanel()
         if (name.trimmed().isEmpty()) return;
         if (!createMindGroup(name.trimmed(), parent).isEmpty()) rebuildMindMap();
     });
-    connect(fitBtn, &QPushButton::clicked, this, [this]() {
+    connect(fitAct, &QAction::triggered, this, [this]() {
         if (mindView_) mindView_->fitToContent();
     });
-    connect(collapseBtn, &QPushButton::clicked, this, [this]() {
+    connect(linkBtn, &QPushButton::toggled, this, [this](bool on) {
+        if (mindView_) mindView_->setLinkMode(on);
+        if (on)
+            statusBar()->showMessage(QStringLiteral("连线模式：先后点击两张卡片（Esc 退出）"), 3000);
+    });
+    connect(collapseAct, &QAction::triggered, this, [this]() {
         if (!mindView_) return;
         const QString key = mindView_->selectedKey();
         if (key.isEmpty()) return;
         mindView_->setCollapsed(key, !mindView_->isCollapsed(key));
     });
-    connect(pngBtn, &QPushButton::clicked, this, [this]() {
+    connect(pngAct, &QAction::triggered, this, [this]() {
         const QString base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
                              QStringLiteral("/mindmap");
         const QString path = QFileDialog::getSaveFileName(mindPanel_, QStringLiteral("导出脑图 PNG"),
@@ -2692,6 +2704,31 @@ void MainWindow::ensureMindPanel()
             inform(mindPanel_, QStringLiteral("导出完成"), path);
     });
 
+    connect(mindView_, &mind::MindMapView::linkRequested, this,
+            [this](const QString& fromKey, const QString& toKey) {
+                const QString scope = mindScopeKey();
+                if (scope.isEmpty() || fromKey == toKey) return;
+                MindLink l;
+                l.id = newId();
+                l.topicId = scope;
+                l.fromNode = fromKey;
+                l.toNode = toKey;
+                l.arrow = QStringLiteral("end");
+                l.updated = QDateTime::currentMSecsSinceEpoch();
+                l.deviceId = store_.deviceId();
+                if (store_.upsertMindLink(l)) {
+                    rebuildMindMap();
+                    statusBar()->showMessage(QStringLiteral("已添加关联线"), 2000);
+                }
+            });
+    connect(mindView_, &mind::MindMapView::linkMenuRequested, this,
+            [this](const QString& linkId, const QPoint& globalPos) {
+                QMenu menu(mindView_);
+                menu.addAction(QStringLiteral("删除这条关联线"), [this, linkId]() {
+                    if (store_.removeMindLink(linkId)) rebuildMindMap();
+                });
+                menu.exec(globalPos);
+            });
     connect(mindView_, &mind::MindMapView::nodeReparented, this,
             [this](const QString& markupId, const QString& groupKey) {
                 if (applyMindReparent(markupId, groupKey)) rebuildMindMap();
@@ -2845,6 +2882,7 @@ void MainWindow::rebuildMindMap()
             in.markups = (d.docPath == docPath_) ? markups_ : store_.markups(d.docPath);
             docs.append(in);
         }
+        mindView_->setLinks(store_.mindLinks(currentTopic_));
         mindView_->setTree(mind::buildFromTopic(topicName, docs,
                                                 store_.mindGroupsForTopic(currentTopic_)));
         return;
@@ -2855,8 +2893,17 @@ void MainWindow::rebuildMindMap()
         mindView_->setTree(empty);
         return;
     }
+    mindView_->setLinks(store_.mindLinks(mindScopeKey()));
     mindView_->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
                                             store_.mindGroups(docPath_)));
+}
+
+QString MainWindow::mindScopeKey() const
+{
+    // Links belong to whatever map is on screen: the reading topic when one is open,
+    // otherwise this document. Stored in MindLink::topicId, which therefore holds a scope
+    // key rather than strictly a topic id.
+    return currentTopic_.isEmpty() ? docPath_ : currentTopic_;
 }
 
 void MainWindow::setWorkspaceMode(int mode)
@@ -2877,7 +2924,8 @@ void MainWindow::setWorkspaceMode(int mode)
         mindPanel_->show();
         if (!mindPanel_->isVisible() || splitter_->sizes().value(0) < 200) {
             const int total = qMax(600, splitter_->width());
-            splitter_->setSizes({total * 55 / 100, total * 45 / 100});
+            // the page keeps the larger share; the map can be widened by dragging
+            splitter_->setSizes({total * 62 / 100, total * 38 / 100});
         }
         rebuildMindMap();
     }

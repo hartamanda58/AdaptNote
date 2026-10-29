@@ -941,6 +941,65 @@ int main(int argc, char** argv)
                   QStringLiteral("net effect: one group added (%1 vs %2)")
                       .arg(names().size()).arg(before));
         }
+        // ---- free-form links between cards ----
+        {
+            std::printf("\n=== mind map: free links ===\n");
+            w.setWorkspaceMode(2);
+            settle();
+            auto* mv = w.mindMapView();
+            const QString g1 = w.createMindGroupForTest(QStringLiteral("连线甲"));
+            const QString g2 = w.createMindGroupForTest(QStringLiteral("连线乙"));
+            w.rebuildMindMapForTest();
+            settle();
+            check(!g1.isEmpty() && !g2.isEmpty(), QStringLiteral("two groups to connect"));
+
+            const QString k1 = QStringLiteral("group:") + g1;
+            const QString k2 = QStringLiteral("group:") + g2;
+            check(!mv->rectForKey(k1).isNull() && !mv->rectForKey(k2).isNull(),
+                  QStringLiteral("both cards are placed"));
+
+            // link mode: two clicks create the link
+            mv->setLinkMode(true);
+            check(mv->linkMode(), QStringLiteral("link mode on"));
+            QWidget* vp = mv->viewport();
+            auto click = [&](const QRectF& r) {
+                const QPoint p = vp->mapFrom(mv, mv->mapFromScene(r.center()));
+                QMouseEvent press(QEvent::MouseButtonPress, p, vp->mapToGlobal(p),
+                                  Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &press);
+                QMouseEvent release(QEvent::MouseButtonRelease, p, vp->mapToGlobal(p),
+                                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &release);
+                settle();
+            };
+            click(mv->rectForKey(k1));
+            check(mv->links().isEmpty(), QStringLiteral("one click arms the link, does not create it"));
+            click(mv->rectForKey(k2));
+
+            const QVector<MindLink> links = mv->links();
+            check(links.size() == 1, QStringLiteral("a link was created (%1)").arg(links.size()));
+            if (!links.isEmpty()) {
+                check(links.first().fromNode == k1 && links.first().toNode == k2,
+                      QStringLiteral("the link connects the two cards"));
+                check(links.first().arrow == QStringLiteral("end"),
+                      QStringLiteral("arrow points at the target"));
+
+                // it survives a rebuild (i.e. it was persisted, not just drawn)
+                w.rebuildMindMapForTest();
+                settle();
+                check(mv->links().size() == 1, QStringLiteral("link survives a rebuild"));
+
+                // and can be deleted again through the store path the menu uses
+                check(w.removeMindLinkForTest(links.first().id), QStringLiteral("link removed"));
+                w.rebuildMindMapForTest();
+                settle();
+                check(mv->links().isEmpty(), QStringLiteral("no links left"));
+            }
+            mv->setLinkMode(false);
+            w.setWorkspaceMode(0);
+            settle();
+        }
+
 
         // ---- drag to regroup: the drop path must actually run ----
         {
