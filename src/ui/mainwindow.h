@@ -82,6 +82,22 @@ public:
     }
     bool deleteMindGroupForTest(const QString& key) { return deleteMindGroup(key); }
     bool removeMindLinkForTest(const QString& id) { return store_.removeMindLink(id); }
+    // Test hooks for the topic-aware search path.
+    void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); }
+    void setFindScopeForTest(int scope);
+    int notesPanelCountForTest() const;
+    QString notesPanelTextForTest(int row) const;
+    bool storeUpsertForTest(const Markup& m) { return store_.upsertMarkup(m); }
+    QString createTopicForTest(const QString& name)
+    {
+        Topic t = store_.stampTopicForLocalWrite(Topic{});
+        t.name = name;
+        return store_.upsertTopic(t) ? t.id : QString();
+    }
+    bool addTopicDocForTest(const QString& topicId, const QString& path)
+    {
+        return store_.addTopicDoc(topicId, path);
+    }
     void rebuildMindMapForTest() { rebuildMindMap(); }
     bool undoForTest();
     bool redoForTest();
@@ -192,6 +208,7 @@ private:
     QString currentTopic_;   // non-empty = the mind map shows that reading topic
     void ensureMindPanel();
     void rebuildMindMap();
+    QStringList currentTopicDocPaths() const;   // documents of the open topic (empty = none)
     QString mindScopeKey() const;   // reading topic id, else the current document path
     static QString noteIdOfKey(const QString& key);
     QString parentGroupOfNote(const QString& key) const;
@@ -203,6 +220,8 @@ private:
     QToolButton* colorButtons_[5] = {};
     QLineEdit* findEdit_ = nullptr;
     QLabel* findLabel_ = nullptr;
+    QToolButton* allDocsBtn_ = nullptr;
+    QComboBox* findScope_ = nullptr;   // 0 = page text, 1 = notes of the open topic
     class LibraryView* library_ = nullptr;
     QComboBox* zoomBox_ = nullptr;
     QComboBox* modeBox_ = nullptr;

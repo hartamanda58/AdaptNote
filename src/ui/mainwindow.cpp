@@ -822,8 +822,17 @@ void MainWindow::buildFindBar()
     findEdit_ = new QLineEdit;
     findEdit_->setPlaceholderText(QStringLiteral("在本书中查找…（Ctrl+F）"));
     findEdit_->setClearButtonEnabled(true);
-    findEdit_->setFixedWidth(240);
+    findEdit_->setFixedWidth(220);
     tb->addWidget(findEdit_);
+
+    // Scope: this page's text, or the notes of the whole reading topic. Page search
+    // highlights inside the document; topic search fills the notes panel so results can
+    // come from several books.
+    findScope_ = new QComboBox;
+    findScope_->addItem(QStringLiteral("本书"));
+    findScope_->addItem(QStringLiteral("主题笔记"));
+    findScope_->setToolTip(QStringLiteral("「主题笔记」需要先打开一个阅读主题"));
+    tb->addWidget(findScope_);
     findLabel_ = new QLabel(QStringLiteral("0/0"));
     findLabel_->setMinimumWidth(64);
     findLabel_->setAlignment(Qt::AlignCenter);
@@ -846,6 +855,9 @@ void MainWindow::buildFindBar()
     });
     connect(findDebounce_, &QTimer::timeout, this,
             [this]() { findText(findEdit_->text()); });
+    connect(findScope_, &QComboBox::currentIndexChanged, this, [this](int) {
+        findText(findEdit_ ? findEdit_->text() : QString());
+    });
     connect(findEdit_, &QLineEdit::returnPressed, this, [this]() { nextHit(1); });
 
     auto* findAction = new QAction(this);
@@ -960,8 +972,13 @@ void MainWindow::buildDocks()
     connect(tagFilter_, &QComboBox::currentIndexChanged, this, [this](int) { updateNotesPanel(); });
     connect(allDocsBtn, &QToolButton::toggled, this, [this](bool on) {
         searchAllDocs_ = on;
+        if (allDocsBtn_)
+            allDocsBtn_->setToolTip(on && !currentTopic_.isEmpty()
+                                        ? QStringLiteral("搜索范围：当前阅读主题")
+                                        : QStringLiteral("搜索范围：全部文档"));
         updateNotesPanel();
     });
+    allDocsBtn_ = allDocsBtn;
 
     connect(notesList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
         if (!item) return;
@@ -1187,6 +1204,30 @@ QStringList MainWindow::availableTags() const
     return out;
 }
 
+void MainWindow::setFindScopeForTest(int scope)
+{
+    if (findScope_) findScope_->setCurrentIndex(scope);
+}
+
+int MainWindow::notesPanelCountForTest() const
+{
+    return notesList_ ? notesList_->count() : 0;
+}
+
+QString MainWindow::notesPanelTextForTest(int row) const
+{
+    if (!notesList_ || row < 0 || row >= notesList_->count()) return {};
+    return notesList_->item(row)->text();
+}
+
+QStringList MainWindow::currentTopicDocPaths() const
+{
+    QStringList out;
+    if (currentTopic_.isEmpty()) return out;
+    for (const TopicDoc& d : store_.topicDocs(currentTopic_)) out.append(d.docPath);
+    return out;
+}
+
 void MainWindow::updateNotesPanel()
 {
     if (!notesList_) return;
@@ -1198,10 +1239,17 @@ void MainWindow::updateNotesPanel()
 
     const QString query = noteSearchEdit_ ? noteSearchEdit_->text().trimmed() : QString();
     QVector<Markup> base;
-    if (query.isEmpty())
-        base = searchAllDocs_ ? store_.searchMarkups(QString(), QString()) : markups_;
-    else
-        base = store_.searchMarkups(query, searchAllDocs_ ? QString() : docPath_);
+    if (searchAllDocs_) {
+        // "All documents" means the reading topic when one is open: searching every book on
+        // the machine is rarely what the reader wants, and it hides the topic boundary.
+        const QStringList topicPaths = currentTopicDocPaths();
+        if (!topicPaths.isEmpty())
+            base = store_.searchMarkupsInDocs(query, topicPaths);
+        else
+            base = store_.searchMarkups(query, QString());
+    } else {
+        base = query.isEmpty() ? markups_ : store_.searchMarkups(query, docPath_);
+    }
 
     int row = -1, keepRow = -1;
     for (const Markup& m : base) {
@@ -1847,6 +1895,31 @@ void MainWindow::findText(const QString& needle)
         view_->setSearchHits({}, -1);
         if (findLabel_) findLabel_->setText(QStringLiteral("0/0"));
         updateStatus();
+        return;
+    }
+
+    if (findScope_ && findScope_->currentIndex() == 1) {
+        // Topic scope: search the notes of every document in the topic and show them in the
+        // notes panel. Page highlights stay empty because the hits may live in other books.
+        const QStringList topicPaths = currentTopicDocPaths();
+        if (topicPaths.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("先打开一个阅读主题再按主题搜索"), 3000);
+            view_->setSearchHits({}, -1);
+            if (findLabel_) findLabel_->setText(QStringLiteral("0/0"));
+            return;
+        }
+        if (noteSearchEdit_) {
+            QSignalBlocker block(noteSearchEdit_);
+            noteSearchEdit_->setText(n);
+        }
+        if (allDocsBtn_ && !allDocsBtn_->isChecked()) allDocsBtn_->setChecked(true);
+        updateNotesPanel();
+        view_->setSearchHits({}, -1);
+        const int found = notesList_ ? notesList_->count() : 0;
+        if (findLabel_) findLabel_->setText(QStringLiteral("%1 条").arg(found));
+        statusBar()->showMessage(
+            QStringLiteral("主题内命中 %1 条笔记（%2 本资料）").arg(found).arg(topicPaths.size()),
+            3000);
         return;
     }
 

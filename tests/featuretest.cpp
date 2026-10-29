@@ -999,6 +999,48 @@ int main(int argc, char** argv)
             w.setWorkspaceMode(0);
             settle();
         }
+        // ---- Ctrl+F can search the notes of the whole topic ----
+        {
+            std::printf("\n=== reader: topic-wide note search ===\n");
+            QTemporaryDir topicTmp;
+            const QString second = topicTmp.filePath("topic-second.pdf");
+            { QFile f(second); f.open(QIODevice::WriteOnly); f.write("pdf"); }
+
+            // a note in a second document, then both documents in one topic
+            Markup other;
+            other.id = QStringLiteral("topic-other-note");
+            other.docPath = second;
+            other.page = 1;
+            other.type = MarkupType::Highlight;
+            other.text = QStringLiteral("另一本书里的独特短语 zebra");
+            other.quads = {Quad{QPointF(10, 10), QPointF(90, 10), QPointF(10, 20), QPointF(90, 20)}};
+            check(w.storeUpsertForTest(other), QStringLiteral("note in the second document"));
+
+            const QString topicId = w.createTopicForTest(QStringLiteral("搜索主题"));
+            check(!topicId.isEmpty(), QStringLiteral("topic created"));
+            check(w.addTopicDocForTest(topicId, pdf), QStringLiteral("first document attached"));
+            check(w.addTopicDocForTest(topicId, second), QStringLiteral("second document attached"));
+
+            w.openTopicForTest(topicId);
+            w.setFindScopeForTest(1);
+            w.findText(QStringLiteral("zebra"));
+
+            int found = w.notesPanelCountForTest();
+            check(found >= 1, QStringLiteral("topic search lists the hit (%1)").arg(found));
+            bool fromOtherDoc = false;
+            for (int i = 0; i < found; ++i)
+                if (w.notesPanelTextForTest(i).contains(QStringLiteral("topic-second")))
+                    fromOtherDoc = true;
+            check(fromOtherDoc, QStringLiteral("the hit comes from the other document"));
+
+            w.findText(QStringLiteral("zzz-definitely-absent"));
+            check(w.notesPanelCountForTest() == 0,
+                  QStringLiteral("a missing term empties the topic result list"));
+
+            w.setFindScopeForTest(0);
+            w.openTopicForTest(QString());
+        }
+
 
 
         // ---- drag to regroup: the drop path must actually run ----
