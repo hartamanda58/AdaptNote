@@ -536,6 +536,57 @@ int main(int argc, char** argv)
               QStringLiteral("B no longer lists the group (%1)").arg(storeB.mindGroups(pdfB).size()));
     }
 
+
+    // ---- topic sync wire/merge core (network integration follows after path resolution) ----
+    {
+        std::printf("\n=== topic sync wire core ===\n");
+        Topic local;
+        local.id = QStringLiteral("topic-wire");
+        local.name = QStringLiteral("本地主题");
+        local.vv = QStringLiteral("A:2");
+        local.deviceId = QStringLiteral("A");
+        local.updated = 20;
+        Topic remote = local;
+        remote.name = QStringLiteral("远端主题");
+        remote.vv = QStringLiteral("B:3");
+        remote.deviceId = QStringLiteral("B");
+        remote.updated = 30;
+
+        const auto merged = SyncManager::mergeTopics({local}, {remote}, QStringLiteral("A"), 40);
+        check(merged.topics.size() == 1, QStringLiteral("topic merge keeps one identity"));
+        check(merged.conflicts == 1, QStringLiteral("concurrent topic edit is counted"));
+        check(merged.topics.first().name == QStringLiteral("远端主题"),
+              QStringLiteral("newer concurrent topic name is retained"));
+        check(!merged.topics.first().vv.isEmpty(), QStringLiteral("merged topic has a joined vv"));
+
+        TopicDoc td;
+        td.topicId = local.id;
+        td.docPath = QStringLiteral("/home/user/books/a.pdf");
+        td.order = 2;
+        td.updated = 10;
+        td.vv = QStringLiteral("A:1");
+        MindLink link;
+        link.id = QStringLiteral("wire-link");
+        link.topicId = local.id;
+        link.fromNode = QStringLiteral("group:a");
+        link.toNode = QStringLiteral("note:b");
+        link.arrow = QStringLiteral("end");
+        link.points = QStringLiteral("[[1,2],[3,4]]");
+        const QByteArray wire = SyncManager::topicsJson({local}, {td}, {link});
+        check(!wire.contains("/home/user"), QStringLiteral("wire omits absolute local paths"));
+        QVector<Topic> parsedTopics;
+        QVector<TopicDoc> parsedDocs;
+        QVector<MindLink> parsedLinks;
+        QString parseError;
+        SyncManager::parseTopics(wire, &parsedTopics, &parsedDocs, &parsedLinks, &parseError);
+        check(parseError.isEmpty() && parsedTopics.size() == 1 && parsedDocs.size() == 1 &&
+                  parsedLinks.size() == 1,
+              QStringLiteral("topic bundle round-trips (%1/%2/%3): %4")
+                  .arg(parsedTopics.size()).arg(parsedDocs.size()).arg(parsedLinks.size()).arg(parseError));
+        check(parsedDocs.first().docPath == QStringLiteral("a.pdf"),
+              QStringLiteral("wire topic doc carries only the safe filename"));
+    }
+
     // ---- idempotency over the wire ----
     rep = syncA.syncAll();
     const int pushedAgain = rep.pushed;

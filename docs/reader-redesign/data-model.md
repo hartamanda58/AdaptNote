@@ -118,7 +118,16 @@ create table mind_links (
 - 不把标注和节点合成一张表：我们已有大量标注数据与同步逻辑，合并的迁移风险远大于收益。
 - 不引入 md5 作为主身份：先用 `docPath` 为主、`size+mtime` 做修订判断，后续再加内容哈希做跨机迁移。
 
-## 7. 待办
+## 7. 当前状态（2026-）
+
+- [x] Topic / TopicDoc / MindLink 本地 CRUD 与 tombstone
+- [x] 主题脑图与跨文档笔记搜索
+- [x] 主题同步 wire JSON：不发送绝对本地路径；文档使用安全文件名/稳定 key
+- [x] Topic 实体的版本向量合并核心（并发编辑有 joined VV）
+- [ ] 把 topics/topic_docs/mind_links 接入 WebDAV `syncAll()` 的独立 bundle（当前仍未宣称完成）
+- [ ] 为远端 docKey 到本地文档路径建立确定性解析；同名文件必须用 hash 解决歧义
+
+## 8. 待办
 
 - [ ] 读取 `create-manifest.js` / `create-storage.js` / `create-sync.js` 的同步协议字段
 - [ ] 定位脑图渲染库（`assets/board-renders.js`）确认布局算法

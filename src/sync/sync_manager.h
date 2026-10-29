@@ -77,6 +77,28 @@ public:
     static QVector<Markup> parseDocument(const QByteArray& json, QString* error);
     static QVector<MindGroup> parseGroups(const QByteArray& json, QString* error);
 
+    // Topic bundle sync is separate from per-document JSON because a topic may reference
+    // several books. TopicDoc.docPath is encoded as a stable document key on the wire and
+    // resolved back to the local path on apply.
+    struct TopicMergeResult {
+        QVector<Topic> topics;
+        QVector<TopicDoc> docs;
+        QVector<MindLink> links;
+        int conflicts = 0;
+        int pulled = 0;
+        int pushed = 0;
+    };
+    static QByteArray topicsJson(const QVector<Topic>& topics,
+                                 const QVector<TopicDoc>& docs,
+                                 const QVector<MindLink>& links);
+    static void parseTopics(const QByteArray& json, QVector<Topic>* topics,
+                            QVector<TopicDoc>* docs, QVector<MindLink>* links,
+                            QString* error);
+    static TopicMergeResult mergeTopics(const QVector<Topic>& local,
+                                        const QVector<Topic>& remote,
+                                        const QString& deviceId, qint64 nowMs);
+
+
 private:
     Store& store_;
 };

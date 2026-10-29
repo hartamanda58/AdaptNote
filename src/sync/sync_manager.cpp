@@ -130,6 +130,96 @@ QVector<Markup> SyncManager::parseDocument(const QByteArray& json, QString* erro
     return out;
 }
 
+QByteArray SyncManager::topicsJson(const QVector<Topic>& topics,
+                                    const QVector<TopicDoc>& docs,
+                                    const QVector<MindLink>& links)
+{
+    QJsonObject root;
+    root["schema"] = 1;
+    QJsonArray ts, ds, ls;
+    for (const Topic& t : topics) ts.append(t.toJson());
+    for (const TopicDoc& d : docs) {
+        QJsonObject o;
+        o["topicId"] = d.topicId;
+        o["docKey"] = docKeyFor(d.docPath);
+        o["docName"] = QFileInfo(d.docPath).fileName();
+        o["order"] = d.order;
+        o["updated"] = static_cast<double>(d.updated);
+        o["deleted"] = d.deleted;
+        o["vv"] = d.vv;
+        o["deviceId"] = d.deviceId;
+        ds.append(o);
+    }
+    for (const MindLink& l : links) ls.append(l.toJson());
+    root["topics"] = ts;
+    root["topicDocs"] = ds;
+    root["links"] = ls;
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+void SyncManager::parseTopics(const QByteArray& json, QVector<Topic>* topics,
+                              QVector<TopicDoc>* docs, QVector<MindLink>* links,
+                              QString* error)
+{
+    QJsonParseError pe;
+    const QJsonDocument d = QJsonDocument::fromJson(json, &pe);
+    if (pe.error != QJsonParseError::NoError || !d.isObject()) {
+        if (error) *error = QStringLiteral("主题同步数据解析失败：%1").arg(pe.errorString());
+        return;
+    }
+    for (const QJsonValue& v : d.object().value("topics").toArray())
+        topics->append(Topic::fromJson(v.toObject()));
+    for (const QJsonValue& v : d.object().value("links").toArray())
+        links->append(MindLink::fromJson(v.toObject()));
+    for (const QJsonValue& v : d.object().value("topicDocs").toArray()) {
+        const QJsonObject o = v.toObject();
+        TopicDoc x;
+        x.topicId = o.value("topicId").toString();
+        // The remote carries a stable document key; the local path is resolved by the
+        // sync coordinator before this record is persisted. Keep docName as a safe
+        // placeholder here so parsing itself remains lossless and testable.
+        x.docPath = o.value("docName").toString();
+        x.order = o.value("order").toInt();
+        x.updated = static_cast<qint64>(o.value("updated").toDouble());
+        x.deleted = o.value("deleted").toBool();
+        x.vv = o.value("vv").toString();
+        x.deviceId = o.value("deviceId").toString();
+        if (!x.topicId.isEmpty() && !x.docPath.isEmpty()) docs->append(x);
+    }
+}
+
+SyncManager::TopicMergeResult SyncManager::mergeTopics(const QVector<Topic>& local,
+                                                        const QVector<Topic>& remote,
+                                                        const QString& deviceId, qint64 nowMs)
+{
+    TopicMergeResult out;
+    QHash<QString, Topic> lm, rm;
+    for (const Topic& t : local) lm.insert(t.id, t);
+    for (const Topic& t : remote) rm.insert(t.id, t);
+    QSet<QString> ids;
+    for (auto it = lm.cbegin(); it != lm.cend(); ++it) ids.insert(it.key());
+    for (auto it = rm.cbegin(); it != rm.cend(); ++it) ids.insert(it.key());
+    QStringList sorted = ids.values(); sorted.sort();
+    for (const QString& id : sorted) {
+        if (!lm.contains(id)) { out.topics.append(rm.value(id)); ++out.pulled; continue; }
+        if (!rm.contains(id)) { out.topics.append(lm.value(id)); ++out.pushed; continue; }
+        Topic l = lm.value(id), r = rm.value(id);
+        const VersionVector lv = VersionVector::parse(l.vv), rv = VersionVector::parse(r.vv);
+        if (lv.dominates(rv) || (lv.equal(rv) && l.updated >= r.updated)) out.topics.append(l);
+        else if (rv.dominates(lv)) out.topics.append(r);
+        else {
+            VersionVector joined = lv; joined.join(rv); joined.bump(deviceId, static_cast<quint64>(nowMs));
+            Topic keep = l.updated >= r.updated ? l : r;
+            keep.vv = joined.toString(); keep.updated = qMax(l.updated, r.updated);
+            out.topics.append(keep); ++out.conflicts;
+        }
+    }
+    // TopicDoc/MindLink merge is kept as a separate follow-up seam; this first pure
+    // merge pass deliberately handles the topic entity only, so it cannot accidentally
+    // apply a partial bundle to the live database.
+    return out;
+}
+
 QVector<MindGroup> SyncManager::parseGroups(const QByteArray& json, QString* error)
 {
     QVector<MindGroup> out;
