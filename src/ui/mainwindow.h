@@ -18,6 +18,8 @@
 class QComboBox;
 class QSplitter;
 class QToolBar;
+class QDockWidget;
+class QMenu;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -201,6 +203,10 @@ private:
     SyncManager sync_{store_};
     PageView* view_ = nullptr;
     QSplitter* splitter_ = nullptr;
+    QToolBar* mainToolbar_ = nullptr;
+    QMenu* moreMenu_ = nullptr;
+    QDockWidget* notesDock_ = nullptr;
+    QDockWidget* aiDock_ = nullptr;
     QToolBar* findBar_ = nullptr;
     QWidget* mindPanel_ = nullptr;
     mind::MindMapView* mindView_ = nullptr;

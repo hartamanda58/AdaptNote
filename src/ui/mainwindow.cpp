@@ -457,6 +457,8 @@ void MainWindow::buildUi()
     buildDocks();
     buildAiDock();
     buildStatusBar();
+    // Reading is the default: keep the page and notes visible, hide optional panels.
+    setWorkspaceMode(0);
 
     // ---- P5: handwriting + read aloud ----
     connect(view_, &PageView::inkStrokeReady, this, &MainWindow::onInkStroke);
@@ -474,6 +476,7 @@ void MainWindow::buildUi()
 void MainWindow::buildToolbar()
 {
     auto* tb = addToolBar(QStringLiteral("主工具栏"));
+    mainToolbar_ = tb;
     tb->setObjectName("mainToolbar");
     tb->setMovable(false);
     tb->setIconSize(QSize(18, 18));
@@ -804,6 +807,7 @@ void MainWindow::buildToolbar()
         tb->removeAction(a);
         more->addAction(a);
     }
+    moreMenu_ = more;
     moreBtn->setMenu(more);
     tb->addWidget(moreBtn);
 }
@@ -890,6 +894,7 @@ void MainWindow::buildFindBar()
 void MainWindow::buildDocks()
 {
     auto* dock = new QDockWidget(QStringLiteral("笔记"), this);
+    notesDock_ = dock;
     dock->setObjectName("notesDock");
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -2029,6 +2034,7 @@ void MainWindow::onRegionSelected(int page, const QRectF& pageRect)
 void MainWindow::buildAiDock()
 {
     auto* dock = new QDockWidget(QStringLiteral("AI 助手"), this);
+    aiDock_ = dock;
     dock->setObjectName("aiDock");
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -2102,6 +2108,7 @@ void MainWindow::buildAiDock()
     dock->setWidget(panel);
     dock->setMinimumWidth(300);
     addDockWidget(Qt::RightDockWidgetArea, dock);
+    if (moreMenu_) moreMenu_->addAction(dock->toggleViewAction());
 
     ai::AiClient::Settings s;
     s.baseUrl = store_.setting(QStringLiteral("ai.url"), QStringLiteral("https://api.deepseek.com"));
@@ -2984,6 +2991,10 @@ void MainWindow::setWorkspaceMode(int mode)
     ensureMindPanel();
     workspaceMode_ = qBound(0, mode, 2);
     if (!splitter_ || !mindPanel_) return;
+
+    // Space policy: reading is page-first; arranging is page+map; map mode is map-first.
+    if (notesDock_) notesDock_->setVisible(workspaceMode_ == 0);
+    if (aiDock_) aiDock_->setVisible(false); // open explicitly from 更多 when needed
 
     if (workspaceMode_ == 0) {
         mindPanel_->hide();
