@@ -1227,13 +1227,14 @@ const char* kLinkSelect =
     " from mind_links";
 }  // namespace
 
-QVector<Topic> Store::topics() const
+QVector<Topic> Store::topics(bool includeDeleted) const
 {
     QVector<Topic> out;
     if (!open_) return out;
     QSqlQuery q(QSqlDatabase::database(conn_));
-    if (!q.exec(QString::fromLatin1(kTopicSelect) + " where deleted=0 order by updated desc, name"))
-        return out;
+    q.prepare(QString::fromLatin1(kTopicSelect) + " where (? = 1 or deleted = 0) order by updated desc, name");
+    q.addBindValue(includeDeleted ? 1 : 0);
+    if (!q.exec()) return out;
     while (q.next()) out.append(readTopicRow(q));
     return out;
 }
@@ -1295,14 +1296,16 @@ bool Store::removeTopic(const QString& id)
     return upsertTopic(stampTopicForLocalWrite(t));
 }
 
-QVector<TopicDoc> Store::topicDocs(const QString& topicId) const
+QVector<TopicDoc> Store::topicDocs(const QString& topicId, bool includeDeleted) const
 {
     QVector<TopicDoc> out;
     if (!open_) return out;
     QSqlQuery q(QSqlDatabase::database(conn_));
     q.prepare("select topicId,docPath,[order],deleted,vv,deviceId,updated from topic_docs"
-              " where topicId=? and deleted=0 order by [order], docPath");
+              " where (? = '' or topicId = ?) and (? = 1 or deleted = 0) order by [order], docPath");
     q.addBindValue(nonNull(topicId));
+    q.addBindValue(nonNull(topicId));
+    q.addBindValue(includeDeleted ? 1 : 0);
     if (!q.exec()) return out;
     while (q.next()) {
         TopicDoc d;
@@ -1316,6 +1319,19 @@ QVector<TopicDoc> Store::topicDocs(const QString& topicId) const
         out.append(d);
     }
     return out;
+}
+
+bool Store::upsertTopicDoc(const TopicDoc& d, QString* error)
+{
+    if (!open_ || d.topicId.isEmpty() || d.docPath.isEmpty()) return false;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("insert into topic_docs(topicId,docPath,[order],deleted,vv,deviceId,updated) values(?,?,?,?,?,?,?)"
+              " on conflict(topicId,docPath) do update set [order]=excluded.[order], deleted=excluded.deleted,"
+              " vv=excluded.vv, deviceId=excluded.deviceId, updated=excluded.updated");
+    q.addBindValue(d.topicId); q.addBindValue(d.docPath); q.addBindValue(d.order); q.addBindValue(d.deleted ? 1 : 0);
+    q.addBindValue(nonNull(d.vv)); q.addBindValue(nonNull(d.deviceId)); q.addBindValue(d.updated);
+    if (!q.exec()) { if (error) *error = q.lastError().text(); return false; }
+    return true;
 }
 
 bool Store::addTopicDoc(const QString& topicId, const QString& docPath, QString* error)
@@ -1401,14 +1417,16 @@ QVector<MindGroup> Store::mindGroupsForTopic(const QString& topicId) const
     return out;
 }
 
-QVector<MindLink> Store::mindLinks(const QString& topicId) const
+QVector<MindLink> Store::mindLinks(const QString& topicId, bool includeDeleted) const
 {
     QVector<MindLink> out;
-    if (!open_ || topicId.isEmpty()) return out;
+    if (!open_) return out;
     QSqlQuery q(QSqlDatabase::database(conn_));
     q.prepare(QString::fromLatin1(kLinkSelect) +
-              " where topicId=? and deleted=0 order by updated desc");
-    q.addBindValue(topicId);
+              " where (? = '' or topicId = ?) and (? = 1 or deleted = 0) order by updated desc");
+    q.addBindValue(nonNull(topicId));
+    q.addBindValue(nonNull(topicId));
+    q.addBindValue(includeDeleted ? 1 : 0);
     if (!q.exec()) return out;
     while (q.next()) out.append(readLinkRow(q));
     return out;

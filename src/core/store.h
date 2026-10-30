@@ -100,15 +100,16 @@ public:
     bool setMindGroupParent(const QString& id, const QString& parentId);
 
     // ---- reading topics (cross-document organisation) ----
-    QVector<Topic> topics() const;                       // live only
+    QVector<Topic> topics(bool includeDeleted = false) const;
     QVector<Topic> topicsIncludingDeleted() const;
     bool upsertTopic(const Topic& t, QString* error = nullptr, bool writeMirror = false);
     bool removeTopic(const QString& id);                  // tombstone
     Topic stampTopicForLocalWrite(const Topic& t);
 
-    QVector<TopicDoc> topicDocs(const QString& topicId) const;   // live only
+    QVector<TopicDoc> topicDocs(const QString& topicId = QString(), bool includeDeleted = false) const;
     // Links a document into a topic. A document may belong to several topics.
     bool addTopicDoc(const QString& topicId, const QString& docPath, QString* error = nullptr);
+    bool upsertTopicDoc(const TopicDoc& d, QString* error = nullptr);
     bool removeTopicDoc(const QString& topicId, const QString& docPath);
     QVector<QString> topicsForDoc(const QString& docPath) const;
 
@@ -118,7 +119,7 @@ public:
     QVector<MindGroup> mindGroupsForTopic(const QString& topicId) const;   // live only
 
     // ---- free-form links between nodes ----
-    QVector<MindLink> mindLinks(const QString& topicId) const;   // live only
+    QVector<MindLink> mindLinks(const QString& topicId = QString(), bool includeDeleted = false) const;
     bool upsertMindLink(const MindLink& l, QString* error = nullptr);
     bool removeMindLink(const QString& id);
     bool purgeMarkup(const QString& id);

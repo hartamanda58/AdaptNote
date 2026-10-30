@@ -66,11 +66,12 @@ void SyncManager::setSettings(const SyncSettings& s)
 
 QString SyncManager::docKeyFor(const QString& docPath)
 {
-    const QFileInfo fi(docPath);
-    const QString seed =
-        fi.fileName().toLower() + QLatin1Char(':') + QString::number(fi.size());
-    return QString::fromLatin1(
-        QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
+    // Identity is content, not name or size: two different books can share both.
+    QFile f(docPath);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    if (!hash.addData(&f)) return {};
+    return QString::fromLatin1(hash.result().toHex().left(16));
 }
 
 QByteArray SyncManager::documentJson(const QString& docPath, const QString& docKey,
@@ -188,22 +189,27 @@ void SyncManager::parseTopics(const QByteArray& json, QVector<Topic>* topics,
     }
 }
 
-SyncManager::TopicMergeResult SyncManager::mergeTopics(const QVector<Topic>& local,
-                                                        const QVector<Topic>& remote,
+SyncManager::TopicMergeResult SyncManager::mergeTopics(const QVector<Topic>& localTopics,
+                                                        const QVector<Topic>& remoteTopics,
+                                                        const QVector<TopicDoc>& localDocs,
+                                                        const QVector<TopicDoc>& remoteDocs,
+                                                        const QVector<MindLink>& localLinks,
+                                                        const QVector<MindLink>& remoteLinks,
                                                         const QString& deviceId, qint64 nowMs)
 {
     TopicMergeResult out;
-    QHash<QString, Topic> lm, rm;
-    for (const Topic& t : local) lm.insert(t.id, t);
-    for (const Topic& t : remote) rm.insert(t.id, t);
-    QSet<QString> ids;
-    for (auto it = lm.cbegin(); it != lm.cend(); ++it) ids.insert(it.key());
-    for (auto it = rm.cbegin(); it != rm.cend(); ++it) ids.insert(it.key());
-    QStringList sorted = ids.values(); sorted.sort();
-    for (const QString& id : sorted) {
-        if (!lm.contains(id)) { out.topics.append(rm.value(id)); ++out.pulled; continue; }
-        if (!rm.contains(id)) { out.topics.append(lm.value(id)); ++out.pushed; continue; }
-        Topic l = lm.value(id), r = rm.value(id);
+
+    QHash<QString, Topic> lt, rt;
+    for (const Topic& t : localTopics) lt.insert(t.id, t);
+    for (const Topic& t : remoteTopics) rt.insert(t.id, t);
+    QSet<QString> topicIds;
+    for (auto it = lt.cbegin(); it != lt.cend(); ++it) topicIds.insert(it.key());
+    for (auto it = rt.cbegin(); it != rt.cend(); ++it) topicIds.insert(it.key());
+    QStringList sortedTopics = topicIds.values(); sortedTopics.sort();
+    for (const QString& id : sortedTopics) {
+        if (!lt.contains(id)) { out.topics.append(rt.value(id)); ++out.pulled; continue; }
+        if (!rt.contains(id)) { out.topics.append(lt.value(id)); ++out.pushed; continue; }
+        Topic l = lt.value(id), r = rt.value(id);
         const VersionVector lv = VersionVector::parse(l.vv), rv = VersionVector::parse(r.vv);
         if (lv.dominates(rv) || (lv.equal(rv) && l.updated >= r.updated)) out.topics.append(l);
         else if (rv.dominates(lv)) out.topics.append(r);
@@ -214,9 +220,51 @@ SyncManager::TopicMergeResult SyncManager::mergeTopics(const QVector<Topic>& loc
             out.topics.append(keep); ++out.conflicts;
         }
     }
-    // TopicDoc/MindLink merge is kept as a separate follow-up seam; this first pure
-    // merge pass deliberately handles the topic entity only, so it cannot accidentally
-    // apply a partial bundle to the live database.
+
+    auto docKey = [](const TopicDoc& d) { return d.topicId + QLatin1Char('|') + d.docPath; };
+    QHash<QString, TopicDoc> ld, rd;
+    for (const TopicDoc& d : localDocs) ld.insert(docKey(d), d);
+    for (const TopicDoc& d : remoteDocs) rd.insert(docKey(d), d);
+    QSet<QString> docIds;
+    for (auto it = ld.cbegin(); it != ld.cend(); ++it) docIds.insert(it.key());
+    for (auto it = rd.cbegin(); it != rd.cend(); ++it) docIds.insert(it.key());
+    QStringList sortedDocs = docIds.values(); sortedDocs.sort();
+    for (const QString& id : sortedDocs) {
+        if (!ld.contains(id)) { out.docs.append(rd.value(id)); ++out.pulled; continue; }
+        if (!rd.contains(id)) { out.docs.append(ld.value(id)); ++out.pushed; continue; }
+        TopicDoc l = ld.value(id), r = rd.value(id);
+        const VersionVector lv = VersionVector::parse(l.vv), rv = VersionVector::parse(r.vv);
+        if (lv.dominates(rv) || (lv.equal(rv) && l.updated >= r.updated)) out.docs.append(l);
+        else if (rv.dominates(lv)) out.docs.append(r);
+        else {
+            VersionVector joined = lv; joined.join(rv); joined.bump(deviceId, static_cast<quint64>(nowMs));
+            TopicDoc keep = l.updated >= r.updated ? l : r;
+            keep.vv = joined.toString(); keep.updated = qMax(l.updated, r.updated);
+            out.docs.append(keep); ++out.conflicts;
+        }
+    }
+
+    QHash<QString, MindLink> ll, rl;
+    for (const MindLink& l : localLinks) ll.insert(l.id, l);
+    for (const MindLink& l : remoteLinks) rl.insert(l.id, l);
+    QSet<QString> linkIds;
+    for (auto it = ll.cbegin(); it != ll.cend(); ++it) linkIds.insert(it.key());
+    for (auto it = rl.cbegin(); it != rl.cend(); ++it) linkIds.insert(it.key());
+    QStringList sortedLinks = linkIds.values(); sortedLinks.sort();
+    for (const QString& id : sortedLinks) {
+        if (!ll.contains(id)) { out.links.append(rl.value(id)); ++out.pulled; continue; }
+        if (!rl.contains(id)) { out.links.append(ll.value(id)); ++out.pushed; continue; }
+        MindLink l = ll.value(id), r = rl.value(id);
+        const VersionVector lv = VersionVector::parse(l.vv), rv = VersionVector::parse(r.vv);
+        if (lv.dominates(rv) || (lv.equal(rv) && l.updated >= r.updated)) out.links.append(l);
+        else if (rv.dominates(lv)) out.links.append(r);
+        else {
+            VersionVector joined = lv; joined.join(rv); joined.bump(deviceId, static_cast<quint64>(nowMs));
+            MindLink keep = l.updated >= r.updated ? l : r;
+            keep.vv = joined.toString(); keep.updated = qMax(l.updated, r.updated);
+            out.links.append(keep); ++out.conflicts;
+        }
+    }
     return out;
 }
 
@@ -540,12 +588,6 @@ SyncReport SyncManager::syncAll()
 {
     SyncReport total;
     const QVector<QString> docs = store_.documentPaths();
-    if (docs.isEmpty()) {
-        total.ok = true;
-        total.error.clear();
-        return total;
-    }
-
     for (const QString& doc : docs) {
         const SyncReport one = syncDocument(doc);
         if (!one.ok) {
@@ -559,7 +601,80 @@ SyncReport SyncManager::syncAll()
         total.conflicts += one.conflicts;
         total.messages += one.messages;
     }
-    total.ok = true;
+
+    const SyncSettings cfg = settings();
+    if (!cfg.configured()) {
+        total.ok = !docs.isEmpty();
+        return total;
+    }
+    const QString deviceId = store_.deviceId();
+    const QString rel = cfg.remotePath + QStringLiteral("/topics.json");
+    WebDavClient dav; dav.setBaseUrl(cfg.url); dav.setCredentials(cfg.user, cfg.password);
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        QString err, etag;
+        QByteArray remoteBytes;
+        const bool got = dav.get(rel, &remoteBytes, &etag, &err);
+        if (!got && !err.contains(QStringLiteral("404"))) {
+            total.ok = false; total.error = err; return total;
+        }
+        QVector<Topic> remoteTopics; QVector<TopicDoc> remoteDocs; QVector<MindLink> remoteLinks;
+        if (got) {
+            parseTopics(remoteBytes, &remoteTopics, &remoteDocs, &remoteLinks, &err);
+            if (!err.isEmpty()) { total.ok = false; total.error = err; return total; }
+        }
+
+        QHash<QString, QString> keyToPath;
+        for (const QString& path : store_.documentPaths()) {
+            const QString key = docKeyFor(path);
+            if (!key.isEmpty()) keyToPath.insert(key, path);
+        }
+        for (TopicDoc& d : remoteDocs) {
+            const QString key = d.docPath; // parseTopics currently stores docName; recover from raw below
+            Q_UNUSED(key);
+        }
+        // Re-parse topic docs directly so unresolved identities stay as unresolved:key.
+        remoteDocs.clear();
+        if (got) {
+            const QJsonArray arr = QJsonDocument::fromJson(remoteBytes).object().value("topicDocs").toArray();
+            for (const QJsonValue& v : arr) {
+                const QJsonObject o = v.toObject();
+                TopicDoc d;
+                d.topicId = o.value("topicId").toString();
+                const QString key = o.value("docKey").toString();
+                d.docPath = keyToPath.value(key, QStringLiteral("unresolved:") + key);
+                d.order = o.value("order").toInt();
+                d.updated = static_cast<qint64>(o.value("updated").toDouble());
+                d.deleted = o.value("deleted").toBool();
+                d.vv = o.value("vv").toString();
+                d.deviceId = o.value("deviceId").toString();
+                if (!d.topicId.isEmpty() && !key.isEmpty()) remoteDocs.append(d);
+            }
+        }
+
+        const auto merged = mergeTopics(store_.topics(true), remoteTopics,
+                                         store_.topicDocs(QString(), true), remoteDocs,
+                                         store_.mindLinks(QString(), true), remoteLinks,
+                                         deviceId, QDateTime::currentMSecsSinceEpoch());
+        for (const Topic& t : merged.topics) store_.upsertTopic(t);
+        for (const TopicDoc& d : merged.docs) store_.upsertTopicDoc(d);
+        for (const MindLink& l : merged.links) store_.upsertMindLink(l);
+
+        const QByteArray payload = topicsJson(store_.topics(true), store_.topicDocs(QString(), true),
+                                               store_.mindLinks(QString(), true));
+        bool precond = false;
+        if (dav.put(rel, payload, got ? etag : QString(), &err, &precond)) {
+            total.ok = true;
+            total.pulled += merged.pulled;
+            total.pushed += merged.pushed;
+            total.conflicts += merged.conflicts;
+            return total;
+        }
+        if (precond && attempt == 0) continue;
+        total.ok = false; total.error = err; return total;
+    }
+    total.ok = false;
+    total.error = QStringLiteral("主题同步重试后仍然冲突");
     return total;
 }
 

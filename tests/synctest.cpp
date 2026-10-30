@@ -215,6 +215,20 @@ int main(int argc, char** argv)
     check(QFile::copy(pdf, pdfA) && QFile::copy(pdf, pdfB), QStringLiteral("copy the book to both devices"));
     check(SyncManager::docKeyFor(pdfA) == SyncManager::docKeyFor(pdfB),
           QStringLiteral("same book -> same remote key (%1)").arg(SyncManager::docKeyFor(pdfA)));
+    {
+        const QString twin = tmp.path() + "/A/book-twin.pdf";
+        QFile out(twin);
+        check(out.open(QIODevice::WriteOnly), QStringLiteral("create a same-size different book"));
+        QFile in(pdfA);
+        check(in.open(QIODevice::ReadOnly), QStringLiteral("read the original book"));
+        QByteArray bytes = in.readAll();
+        if (!bytes.isEmpty()) bytes[bytes.size() / 2] = static_cast<char>(bytes.at(bytes.size() / 2) ^ 0x5A);
+        out.write(bytes);
+        out.close();
+        check(QFileInfo(twin).size() == QFileInfo(pdfA).size(), QStringLiteral("twin keeps the same size"));
+        check(SyncManager::docKeyFor(twin) != SyncManager::docKeyFor(pdfA),
+              QStringLiteral("same name and size but different content stay separate"));
+    }
 
     Store storeA;
     Store storeB;
@@ -552,7 +566,7 @@ int main(int argc, char** argv)
         remote.deviceId = QStringLiteral("B");
         remote.updated = 30;
 
-        const auto merged = SyncManager::mergeTopics({local}, {remote}, QStringLiteral("A"), 40);
+        const auto merged = SyncManager::mergeTopics({local}, {remote}, {}, {}, {}, {}, QStringLiteral("A"), 40);
         check(merged.topics.size() == 1, QStringLiteral("topic merge keeps one identity"));
         check(merged.conflicts == 1, QStringLiteral("concurrent topic edit is counted"));
         check(merged.topics.first().name == QStringLiteral("远端主题"),
@@ -585,6 +599,41 @@ int main(int argc, char** argv)
                   .arg(parsedTopics.size()).arg(parsedDocs.size()).arg(parsedLinks.size()).arg(parseError));
         check(parsedDocs.first().docPath == QStringLiteral("a.pdf"),
               QStringLiteral("wire topic doc carries only the safe filename"));
+    }
+
+    // ---- topic bundle over HTTP ----
+    {
+        std::printf("\n=== topic bundle sync ===\n");
+        Topic topic;
+        topic.id = QStringLiteral("topic-sync");
+        topic.name = QStringLiteral("同步主题");
+        topic.vv = QStringLiteral("A:1");
+        topic.deviceId = QStringLiteral("A");
+        topic.updated = QDateTime::currentMSecsSinceEpoch();
+        check(storeA.upsertTopic(topic), QStringLiteral("A creates a topic"));
+        check(storeA.addTopicDoc(topic.id, pdfA), QStringLiteral("A attaches the book"));
+        MindLink link;
+        link.id = QStringLiteral("sync-link");
+        link.topicId = topic.id;
+        link.fromNode = QStringLiteral("group:a");
+        link.toNode = QStringLiteral("note:b");
+        link.arrow = QStringLiteral("end");
+        check(storeA.upsertMindLink(link), QStringLiteral("A creates a free-form link"));
+
+        const SyncReport topicPush = syncA.syncAll();
+        check(topicPush.ok, QStringLiteral("A pushes the topic bundle: %1").arg(topicPush.error));
+        const SyncReport topicPull = syncB.syncAll();
+        check(topicPull.ok, QStringLiteral("B pulls the topic bundle: %1").arg(topicPull.error));
+        const QVector<Topic> topicsB = storeB.topics();
+        bool foundTopic = false;
+        for (const Topic& t : topicsB) if (t.id == topic.id && t.name == topic.name) foundTopic = true;
+        check(foundTopic, QStringLiteral("B received the topic"));
+        bool foundDoc = false;
+        for (const TopicDoc& d : storeB.topicDocs(topic.id)) if (d.docPath == pdfB) foundDoc = true;
+        check(foundDoc, QStringLiteral("B resolves the synced book by content, not by absolute path"));
+        bool foundLink = false;
+        for (const MindLink& l : storeB.mindLinks(topic.id)) if (l.id == link.id) foundLink = true;
+        check(foundLink, QStringLiteral("B received the free-form link"));
     }
 
     // ---- idempotency over the wire ----

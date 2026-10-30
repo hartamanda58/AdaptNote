@@ -94,8 +94,12 @@ public:
     static void parseTopics(const QByteArray& json, QVector<Topic>* topics,
                             QVector<TopicDoc>* docs, QVector<MindLink>* links,
                             QString* error);
-    static TopicMergeResult mergeTopics(const QVector<Topic>& local,
-                                        const QVector<Topic>& remote,
+    static TopicMergeResult mergeTopics(const QVector<Topic>& localTopics,
+                                        const QVector<Topic>& remoteTopics,
+                                        const QVector<TopicDoc>& localDocs,
+                                        const QVector<TopicDoc>& remoteDocs,
+                                        const QVector<MindLink>& localLinks,
+                                        const QVector<MindLink>& remoteLinks,
                                         const QString& deviceId, qint64 nowMs);
 
 
