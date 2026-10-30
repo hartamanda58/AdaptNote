@@ -989,11 +989,23 @@ int main(int argc, char** argv)
                 settle();
                 check(mv->links().size() == 1, QStringLiteral("link survives a rebuild"));
 
-                // and can be deleted again through the store path the menu uses
-                check(w.removeMindLinkForTest(links.first().id), QStringLiteral("link removed"));
-                w.rebuildMindMapForTest();
-                settle();
-                check(mv->links().isEmpty(), QStringLiteral("no links left"));
+                const MindLink original = links.first();
+                MindLink edited = original;
+                edited.label = QStringLiteral("相关");
+                edited.arrow = QStringLiteral("both");
+                check(w.modifyMindLinkForTest(edited), QStringLiteral("link edited"));
+                check(!w.mindLinksForTest().isEmpty() && w.mindLinksForTest().first().label == QStringLiteral("相关"),
+                      QStringLiteral("edited label persisted"));
+                w.undoCommand();
+                check(!w.mindLinksForTest().isEmpty() && w.mindLinksForTest().first().label == original.label,
+                      QStringLiteral("link edit undo restores the old link"));
+                w.redoCommand();
+                check(!w.mindLinksForTest().isEmpty() && w.mindLinksForTest().first().arrow == QStringLiteral("both"),
+                      QStringLiteral("link edit redo restores the new arrow"));
+                check(w.removeMindLinkForTest(original.id), QStringLiteral("link removed"));
+                check(w.mindLinksForTest().isEmpty(), QStringLiteral("no links left"));
+                w.undoCommand();
+                check(!w.mindLinksForTest().isEmpty(), QStringLiteral("link delete undo restores the link"));
             }
             mv->setLinkMode(false);
             w.setWorkspaceMode(0);

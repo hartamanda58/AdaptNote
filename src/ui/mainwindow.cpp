@@ -393,6 +393,36 @@ private:
     MindGroup after_;
 };
 
+class MindLinkCommand : public QUndoCommand {
+public:
+    enum Kind { Add, Remove, Modify };
+
+    MindLinkCommand(MainWindow* w, Kind kind, const MindLink& before, const MindLink& after,
+                    const QString& text)
+        : w_(w), kind_(kind), before_(before), after_(after)
+    {
+        setText(text);
+    }
+
+    void undo() override { apply(before_, true); }
+    void redo() override { apply(after_, false); }
+
+private:
+    void apply(const MindLink& state, bool undoing)
+    {
+        MindLink row = (kind_ == Add) ? after_ : state;
+        if (kind_ == Add) row.deleted = undoing;
+        else if (kind_ == Remove) row.deleted = !undoing;
+        w_->store_.upsertMindLink(row);
+        w_->rebuildMindMap();
+    }
+
+    MainWindow* w_;
+    Kind kind_;
+    MindLink before_;
+    MindLink after_;
+};
+
 // ---------------------------------------------------------------- construction
 
 MainWindow::MainWindow(QWidget* parent)
@@ -2797,6 +2827,8 @@ void MainWindow::ensureMindPanel()
                 l.updated = QDateTime::currentMSecsSinceEpoch();
                 l.deviceId = store_.deviceId();
                 if (store_.upsertMindLink(l)) {
+                    undo_->push(new MindLinkCommand(this, MindLinkCommand::Add, MindLink(), l,
+                                                     QStringLiteral("添加关联线")));
                     rebuildMindMap();
                     statusBar()->showMessage(QStringLiteral("已添加关联线"), 2000);
                 }
@@ -2804,8 +2836,50 @@ void MainWindow::ensureMindPanel()
     connect(mindView_, &mind::MindMapView::linkMenuRequested, this,
             [this](const QString& linkId, const QPoint& globalPos) {
                 QMenu menu(mindView_);
+                menu.addAction(QStringLiteral("编辑标签…"), [this, linkId]() {
+                    for (const MindLink& current : store_.mindLinks(mindScopeKey())) {
+                        if (current.id != linkId) continue;
+                        const QString label = askText(mindView_, QStringLiteral("编辑关联线"),
+                                                      QStringLiteral("标签："), current.label);
+                        if (label == current.label) return;
+                        MindLink after = current;
+                        after.label = label;
+                        after.updated = QDateTime::currentMSecsSinceEpoch();
+                        after.deviceId = store_.deviceId();
+                        undo_->push(new MindLinkCommand(this, MindLinkCommand::Modify, current, after,
+                                                         QStringLiteral("编辑关联线标签")));
+                        return;
+                    }
+                });
+                menu.addSeparator();
+                QMenu* arrows = menu.addMenu(QStringLiteral("箭头方向"));
+                for (const QString& arrow : {QString(), QStringLiteral("start"),
+                                              QStringLiteral("end"), QStringLiteral("both")}) {
+                    QAction* a = arrows->addAction(arrow.isEmpty() ? QStringLiteral("无") : arrow);
+                    connect(a, &QAction::triggered, this, [this, linkId, arrow]() {
+                        for (const MindLink& current : store_.mindLinks(mindScopeKey())) {
+                            if (current.id != linkId || current.arrow == arrow) continue;
+                            MindLink after = current;
+                            after.arrow = arrow;
+                            after.updated = QDateTime::currentMSecsSinceEpoch();
+                            after.deviceId = store_.deviceId();
+                            undo_->push(new MindLinkCommand(this, MindLinkCommand::Modify, current, after,
+                                                             QStringLiteral("修改关联线箭头")));
+                            return;
+                        }
+                    });
+                }
                 menu.addAction(QStringLiteral("删除这条关联线"), [this, linkId]() {
-                    if (store_.removeMindLink(linkId)) rebuildMindMap();
+                    for (const MindLink& current : store_.mindLinks(mindScopeKey())) {
+                        if (current.id != linkId) continue;
+                        MindLink deleted = current;
+                        deleted.deleted = true;
+                        deleted.updated = QDateTime::currentMSecsSinceEpoch();
+                        deleted.deviceId = store_.deviceId();
+                        undo_->push(new MindLinkCommand(this, MindLinkCommand::Remove, current, deleted,
+                                                         QStringLiteral("删除关联线")));
+                        return;
+                    }
                 });
                 menu.exec(globalPos);
             });
@@ -2986,6 +3060,32 @@ void MainWindow::rebuildMindMap()
     mindView_->setLinks(store_.mindLinks(mindScopeKey()));
     mindView_->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
                                             store_.mindGroups(docPath_)));
+}
+
+bool MainWindow::removeMindLinkForTest(const QString& id)
+{
+    for (const MindLink& current : store_.mindLinks(mindScopeKey())) {
+        if (current.id != id) continue;
+        MindLink deleted = current;
+        deleted.deleted = true;
+        deleted.updated = QDateTime::currentMSecsSinceEpoch();
+        deleted.deviceId = store_.deviceId();
+        undo_->push(new MindLinkCommand(this, MindLinkCommand::Remove, current, deleted,
+                                        QStringLiteral("删除关联线")));
+        return true;
+    }
+    return false;
+}
+
+bool MainWindow::modifyMindLinkForTest(const MindLink& link)
+{
+    for (const MindLink& current : store_.mindLinks(mindScopeKey())) {
+        if (current.id != link.id) continue;
+        undo_->push(new MindLinkCommand(this, MindLinkCommand::Modify, current, link,
+                                        QStringLiteral("编辑关联线")));
+        return true;
+    }
+    return false;
 }
 
 QString MainWindow::mindScopeKey() const

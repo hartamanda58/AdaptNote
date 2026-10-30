@@ -37,9 +37,11 @@ namespace an {
 class PageView;
 
 class MindGroupCommand;
+class MindLinkCommand;
 
 class MainWindow : public QMainWindow {
     friend class MindGroupCommand;
+    friend class MindLinkCommand;
     Q_OBJECT
 public:
     enum class CmdKind { Add, Remove, Modify };
@@ -56,6 +58,7 @@ public:
     void storeUpsertStampedMarkup(const Markup& m);   // stamps a local version first
     void storeRemoveMarkup(const QString& id);
     void refreshFromStore();
+    void applyMindLinkCommand(int kind, const MindLink& before, const MindLink& after, bool undo);
 
     QVector<Markup> visibleMarkups() const { return markups_; }
     QVector<Markup> notesShown() const;
@@ -85,7 +88,9 @@ public:
         return renameMindGroup(key, name);
     }
     bool deleteMindGroupForTest(const QString& key) { return deleteMindGroup(key); }
-    bool removeMindLinkForTest(const QString& id) { return store_.removeMindLink(id); }
+    bool removeMindLinkForTest(const QString& id);
+    bool modifyMindLinkForTest(const MindLink& link);
+    QVector<MindLink> mindLinksForTest() const { return store_.mindLinks(mindScopeKey()); }
     // Test hooks for the topic-aware search path.
     void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); }
     void setFindScopeForTest(int scope);
