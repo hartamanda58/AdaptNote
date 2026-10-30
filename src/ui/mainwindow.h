@@ -73,6 +73,8 @@ public:
     // 0 = reading only, 1 = reading + mind map, 2 = mind map only
     void setWorkspaceMode(int mode);
     int workspaceMode() const { return workspaceMode_; }
+    bool notesDockVisibleForTest() const;
+    bool aiDockVisibleForTest() const;
     // The mind-map panel (null until the workspace is built); tests use it to assert that
     // the map really shows the same notes the reader sees.
     mind::MindMapView* mindMapView() const { return mindView_; }

@@ -2908,6 +2908,16 @@ void MainWindow::ensureMindPanel()
     });
 }
 
+bool MainWindow::notesDockVisibleForTest() const
+{
+    return notesDock_ && notesDock_->isVisible();
+}
+
+bool MainWindow::aiDockVisibleForTest() const
+{
+    return aiDock_ && aiDock_->isVisible();
+}
+
 bool MainWindow::undoForTest()
 {
     if (!undo_ || !undo_->canUndo()) return false;

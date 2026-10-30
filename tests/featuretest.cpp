@@ -1106,6 +1106,24 @@ int main(int argc, char** argv)
 
 
 
+        // panel visibility is part of the workspace contract, not just a screenshot detail
+        {
+            check(w.workspaceMode() == 0, QStringLiteral("workspace starts in reading mode"));
+            check(w.notesDockVisibleForTest(), QStringLiteral("reading mode shows notes dock"));
+            check(!w.aiDockVisibleForTest(), QStringLiteral("reading mode hides AI dock"));
+            w.setWorkspaceMode(1);
+            settle();
+            check(!w.notesDockVisibleForTest(), QStringLiteral("organize mode hides notes dock"));
+            check(!w.aiDockVisibleForTest(), QStringLiteral("organize mode hides AI dock"));
+            w.setWorkspaceMode(2);
+            settle();
+            check(!w.view()->isVisible(), QStringLiteral("mind mode hides reader"));
+            check(!w.notesDockVisibleForTest(), QStringLiteral("mind mode hides notes dock"));
+            check(!w.aiDockVisibleForTest(), QStringLiteral("mind mode hides AI dock"));
+            w.setWorkspaceMode(0);
+            settle();
+        }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
