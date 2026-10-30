@@ -129,6 +129,7 @@ public:
 
 private:
     bool ensureSchema(QString* error);
+    bool migrateLegacyTopics(QString* error);
     void ensureColumn(const QString& table, const QString& column, const QString& type);
     bool indexMarkup(const Markup& m);
     bool upsertMarkupRow(const Markup& m, QString* error = nullptr,

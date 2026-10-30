@@ -275,6 +275,37 @@ int main(int argc, char** argv)
               QStringLiteral("missing text reported as lost (%1)").arg(report.summary()));
     }
 
+    // ---- legacy database topic migration ----
+    {
+        const QString db = tmp.path() + "/legacy.db";
+        Store legacy;
+        check(legacy.open(db, &err), QStringLiteral("open legacy database: %1").arg(err));
+        const QString legacyDoc = tmp.path() + "/legacy-book.pdf";
+        QFile::copy(oldPdf, legacyDoc);
+        legacy.touchDocument(legacyDoc, QStringLiteral("legacy-book"), 3);
+        Markup note;
+        note.id = newId(); note.docPath = legacyDoc; note.page = 0;
+        note.text = QStringLiteral("legacy note"); note.type = MarkupType::Highlight;
+        legacy.upsertMarkup(note);
+        legacy.ensureMindGroup(legacyDoc, QStringLiteral("Legacy group"));
+        legacy.close();
+
+        Store reopened;
+        check(reopened.open(db, &err), QStringLiteral("reopen migrates legacy database: %1").arg(err));
+        const QVector<Topic> topics = reopened.topics();
+        check(topics.size() == 1 && topics.first().name == QStringLiteral("legacy-book"),
+              QStringLiteral("legacy document gets one deterministic topic"));
+        check(reopened.topicDocs(topics.first().id).size() == 1,
+              QStringLiteral("legacy topic contains its document"));
+        check(!reopened.mindGroupsForTopic(topics.first().id).isEmpty(),
+              QStringLiteral("legacy groups receive the topic id"));
+        reopened.close();
+
+        Store again;
+        check(again.open(db, &err), QStringLiteral("reopen is idempotent: %1").arg(err));
+        check(again.topics().size() == 1, QStringLiteral("migration does not duplicate topics"));
+    }
+
     std::printf("\n%s (%d failure(s))\n",
                 g_fail == 0 ? "MIGRATION CHECKS PASSED" : "MIGRATION CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;

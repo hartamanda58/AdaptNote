@@ -250,6 +250,54 @@ bool Store::open(const QString& dbPath, QString* error)
     return true;
 }
 
+bool Store::migrateLegacyTopics(QString* error)
+{
+    QSqlDatabase db = QSqlDatabase::database(conn_);
+    QSqlQuery q(db);
+    if (!q.exec("begin immediate")) { if (error) *error = q.lastError().text(); return false; }
+    auto fail = [&]() { q.exec("rollback"); if (error) *error = q.lastError().text(); return false; };
+
+    QSet<QString> paths;
+    if (q.exec("select distinct docPath from markups where deleted=0 and docPath<>''"))
+        while (q.next()) paths.insert(q.value(0).toString());
+    if (q.exec("select distinct docPath from mind_groups where deleted=0 and docPath<>''"))
+        while (q.next()) paths.insert(q.value(0).toString());
+
+    for (const QString& path : paths) {
+        QSqlQuery existing(db);
+        existing.prepare("select topicId from topic_docs where docPath=? and deleted=0 limit 1");
+        existing.addBindValue(path);
+        QString topicId;
+        if (existing.exec() && existing.next()) topicId = existing.value(0).toString();
+        if (topicId.isEmpty()) {
+            topicId = QString::fromLatin1(QCryptographicHash::hash(
+                (QStringLiteral("legacy-topic|") + path).toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            QSqlQuery topic(db);
+            topic.prepare("insert or ignore into topics(id,name,description,updated,deleted,vv,deviceId) values(?,?,?,?,0,?,?)");
+            topic.addBindValue(topicId);
+            topic.addBindValue(QFileInfo(path).completeBaseName());
+            topic.addBindValue(QStringLiteral("由旧版本自动迁移"));
+            topic.addBindValue(now);
+            topic.addBindValue(QStringLiteral("1:%1").arg(now));
+            topic.addBindValue(deviceId());
+            if (!topic.exec()) return fail();
+
+            QSqlQuery td(db);
+            td.prepare("insert or ignore into topic_docs(topicId,docPath,[order],updated,deleted,vv,deviceId) values(?,?,0,?,0,?,?)");
+            td.addBindValue(topicId); td.addBindValue(path); td.addBindValue(now);
+            td.addBindValue(QStringLiteral("1:%1").arg(now)); td.addBindValue(deviceId());
+            if (!td.exec()) return fail();
+        }
+        QSqlQuery groups(db);
+        groups.prepare("update mind_groups set topicId=? where docPath=? and coalesce(topicId,'')=''");
+        groups.addBindValue(topicId); groups.addBindValue(path);
+        if (!groups.exec()) return fail();
+    }
+    if (!q.exec("commit")) return fail();
+    return true;
+}
+
 void Store::ensureColumn(const QString& table, const QString& column, const QString& type)
 {
     QSqlDatabase db = QSqlDatabase::database(conn_);
@@ -386,6 +434,7 @@ bool Store::ensureSchema(QString* error)
     // Repair a missing or stale index. Without this, a database that predates the FTS table
     // keeps its notes invisible to search: queries of 3+ characters take the FTS path and
     // silently return nothing for them (the LIKE fallback is not consulted).
+    if (!migrateLegacyTopics(error)) return false;
     repairSearchIndex();
     return true;
 }
