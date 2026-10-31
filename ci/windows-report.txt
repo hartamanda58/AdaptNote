@@ -1,0 +1,103 @@
+artifact zip: test.epub.zip  40.9 MB
+package root: AdaptNote-0.22-windows-x64
+--- top level ---
+  AdaptNote.bat  1 KB
+  bin/
+  README.txt  1 KB
+  samples/
+--- bin ---
+  adaptnote.exe  39002 KB
+  msvcp140.dll  628 KB
+  Qt6Core.dll  6015 KB
+  Qt6Gui.dll  9068 KB
+  Qt6Network.dll  1715 KB
+  Qt6Sql.dll  301 KB
+  Qt6Svg.dll  516 KB
+  Qt6Widgets.dll  6348 KB
+  vcruntime140_1.dll  49 KB
+  vcruntime140.dll  174 KB
+--- directories anywhere in the package ---
+  bin/  (10 file(s))
+  samples/  (2 file(s))
+  bin\generic/  (1 file(s))
+  bin\iconengines/  (1 file(s))
+  bin\imageformats/  (4 file(s))
+  bin\networkinformation/  (1 file(s))
+  bin\platforms/  (1 file(s))
+  bin\sqldrivers/  (4 file(s))
+  bin\styles/  (1 file(s))
+  bin\tls/  (2 file(s))
+--- plugins ---
+  platforms/qwindows.dll
+  imageformats/qgif.dll
+  imageformats/qico.dll
+  imageformats/qjpeg.dll
+  imageformats/qsvg.dll
+  tls/qcertonlybackend.dll
+  tls/qschannelbackend.dll
+  styles/qmodernwindowsstyle.dll
+  iconengines/qsvgicon.dll
+  (no fonts dir)
+  (no resources dir)
+  sqldrivers/qsqlite.dll
+  sqldrivers/qsqlmimer.dll
+  sqldrivers/qsqlodbc.dll
+  sqldrivers/qsqlpsql.dll
+--- launcher ---
+  AdaptNote.bat:
+    @echo off
+    rem Portable launcher: keeps every byte of data inside this folder.
+    setlocal
+    set "HERE=%~dp0"
+    rem Qt ignores XDG_* on Windows, so point the app at the folder explicitly.
+    set "ADAPT_DATA_DIR=%HERE%data"
+    set "XDG_DATA_HOME=%HERE%data"
+    set "XDG_CONFIG_HOME=%HERE%data\config"
+    set "XDG_CACHE_HOME=%HERE%data\cache"
+    if not exist "%ADAPT_DATA_DIR%" mkdir "%ADAPT_DATA_DIR%"
+    if not exist "%XDG_CONFIG_HOME%" mkdir "%XDG_CONFIG_HOME%"
+    if not exist "%XDG_CACHE_HOME%" mkdir "%XDG_CACHE_HOME%"
+    start "" "%HERE%bin\adaptnote.exe" %*
+--- samples ---
+  test.epub  3 KB
+  test.pdf  48 KB
+TOTAL FILES: 29
+--- PE imports (dumpbin /dependents) ---
+  adaptnote.exe:
+    [system]  api-ms-win-crt-convert-l1-1-0.dll
+    [system]  api-ms-win-crt-environment-l1-1-0.dll
+    [system]  api-ms-win-crt-filesystem-l1-1-0.dll
+    [system]  api-ms-win-crt-heap-l1-1-0.dll
+    [system]  api-ms-win-crt-locale-l1-1-0.dll
+    [system]  api-ms-win-crt-math-l1-1-0.dll
+    [system]  api-ms-win-crt-runtime-l1-1-0.dll
+    [system]  api-ms-win-crt-stdio-l1-1-0.dll
+    [system]  api-ms-win-crt-string-l1-1-0.dll
+    [system]  api-ms-win-crt-time-l1-1-0.dll
+    [system]  api-ms-win-crt-utility-l1-1-0.dll
+    [system]  kernel32.dll
+    [bundled] msvcp140.dll
+    [bundled] qt6core.dll
+    [bundled] qt6gui.dll
+    [bundled] qt6network.dll
+    [bundled] qt6sql.dll
+    [bundled] qt6widgets.dll
+    [bundled] vcruntime140_1.dll
+    [bundled] vcruntime140.dll
+--- required files ---
+  present bin\adaptnote.exe
+  present bin\Qt6Core.dll
+  present bin\Qt6Gui.dll
+  present bin\Qt6Widgets.dll
+  present bin\Qt6Network.dll
+  present bin\Qt6Sql.dll
+  present bin\Qt6Svg.dll
+  present bin\platforms\qwindows.dll
+  present bin\sqldrivers\qsqlite.dll
+RESULT: PACKAGE CHECKS PASSED
+--- runtime smoke ---
+PDF CLI export: PASS (md/html/opml/xmind/apkg)
+EPUB CLI open/export: PASS
+Portable data dir: PASS
+PDF/EPUB window screenshots: PASS (qwindows)
+High-DPI render ratio at 200% scaling: 2
