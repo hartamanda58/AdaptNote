@@ -1038,6 +1038,21 @@ int main(int argc, char** argv)
             };
             if (outline) for (int i = 0; i < outline->topLevelItemCount(); ++i) inspect(outline->topLevelItem(i));
             check(foundGroup, QStringLiteral("new notebook group appears in outline with explicit source identity"));
+            const auto priorNotes = w.visibleMarkups();
+            if (!priorNotes.isEmpty()) {
+                const auto original = priorNotes.first();
+                check(w.moveNotebookNote(original.id, original.docPath, QStringLiteral("group:") + outlineGroup),
+                      QStringLiteral("outline drop moves note into a group"));
+                bool moved = false;
+                for (const auto& note : w.visibleMarkups()) if (note.id == original.id) moved = note.mindGroup == outlineGroup;
+                check(moved, QStringLiteral("outline move persisted in the shared tree model"));
+                w.undoCommand();
+                bool restored = false;
+                for (const auto& note : w.visibleMarkups()) if (note.id == original.id) restored = note.mindGroup == original.mindGroup;
+                check(restored, QStringLiteral("outline move is undoable"));
+                check(!w.moveNotebookNote(original.id, QStringLiteral("/different/book.pdf"), QStringLiteral("group:") + outlineGroup),
+                      QStringLiteral("outline rejects cross-document drops"));
+            }
             check(w.addNotebookDocument(pdf) && w.notebookDocumentCountForTest() == 1,
                   QStringLiteral("adding the same document does not duplicate tabs"));
             w.openTopicForTest(QString());

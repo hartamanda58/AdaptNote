@@ -97,6 +97,8 @@ public:
     bool openNotebook(const QString& topicId);
     QString createNotebook(const QString& name);
     bool addNotebookDocument(const QString& path);
+    bool moveNotebookNote(const QString& id, const QString& targetPath,
+                          const QString& groupKey, const QString& beforeId = {});
     void refreshNotebookWorkspace();
     int notebookDocumentCountForTest() const;
     QStringList notebookNoteIdsForTest() const;

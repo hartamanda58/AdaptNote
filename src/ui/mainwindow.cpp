@@ -54,6 +54,10 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QDrag>
+#include <QMimeData>
+#include <QDropEvent>
+#include <QDragMoveEvent>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -63,6 +67,43 @@
 
 namespace an {
 namespace {
+
+// Never use QTreeWidget's internal move: SQLite and the undo stack own the structure.
+class NotebookOutlineTree : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+    std::function<bool(const QString&, QTreeWidgetItem*)> moveNote;
+protected:
+    void startDrag(Qt::DropActions) override
+    {
+        if (!currentItem()) return;
+        const QString id = currentItem()->data(0, Qt::UserRole).toString();
+        if (id.isEmpty()) return;
+        QDrag drag(this);
+        auto* mime = new QMimeData;
+        mime->setData("application/x-adaptnote-note", id.toUtf8());
+        drag.setMimeData(mime);
+        drag.exec(Qt::MoveAction);
+    }
+    void dragEnterEvent(QDragEnterEvent* event) override
+    {
+        if (event->source() == this && event->mimeData()->hasFormat("application/x-adaptnote-note"))
+            event->acceptProposedAction();
+        else event->ignore();
+    }
+    void dragMoveEvent(QDragMoveEvent* event) override
+    {
+        if (event->source() == this && itemAt(event->position().toPoint())) event->acceptProposedAction();
+        else event->ignore();
+    }
+    void dropEvent(QDropEvent* event) override
+    {
+        if (event->source() != this || !moveNote) { event->ignore(); return; }
+        const QString id = QString::fromUtf8(event->mimeData()->data("application/x-adaptnote-note"));
+        if (moveNote(id, itemAt(event->position().toPoint()))) event->acceptProposedAction();
+        else event->ignore();
+    }
+};
 
 // Unattended runs (CI, scripts) set ADAPT_HEADLESS=1: modal dialogs would block the
 // event loop forever under QT_QPA_PLATFORM=offscreen.
@@ -980,7 +1021,17 @@ void MainWindow::buildDocks()
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
     leftTabs_ = new QTabWidget(dock);
-    notebookOutline_ = new QTreeWidget(leftTabs_);
+    auto* notebookTree = new NotebookOutlineTree(leftTabs_);
+    notebookOutline_ = notebookTree;
+    notebookTree->setDragEnabled(true);
+    notebookTree->setAcceptDrops(true);
+    notebookTree->setDropIndicatorShown(true);
+    notebookTree->setDragDropMode(QAbstractItemView::DragDrop);
+    notebookTree->moveNote = [this](const QString& id, QTreeWidgetItem* target) {
+        return target && moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
+                                         target->data(0, Qt::UserRole + 4).toString(),
+                                         target->data(0, Qt::UserRole).toString());
+    };
     notebookOutline_->setObjectName("notebookOutline");
     notebookOutline_->setHeaderHidden(true);
     notebookOutline_->setIndentation(18);
@@ -1231,6 +1282,35 @@ QStringList MainWindow::notebookNoteIdsForTest() const
     return ids;
 }
 
+bool MainWindow::moveNotebookNote(const QString& id, const QString& targetPath,
+                                  const QString& groupKey, const QString& beforeId)
+{
+    if (id.isEmpty() || id == beforeId || targetPath.isEmpty()) return false;
+    // Page buckets are views of source locations, not movable destinations.
+    if (!groupKey.startsWith(QStringLiteral("group:"))) return false;
+    QString sourcePath;
+    const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths();
+    for (const QString& path : paths)
+        for (const Markup& note : store_.markups(path)) if (note.id == id) sourcePath = path;
+    if (sourcePath.isEmpty() || QFileInfo(sourcePath).absoluteFilePath() != QFileInfo(targetPath).absoluteFilePath()) {
+        statusBar()->showMessage(QStringLiteral("不能跨资料移动原文笔记；请在所属资料内整理"), 3500);
+        return false;
+    }
+    bool validGroup = false;
+    for (const MindGroup& group : store_.mindGroups(sourcePath))
+        if (QStringLiteral("group:") + group.id == groupKey) validGroup = true;
+    if (!validGroup) return false;
+    if (!beforeId.isEmpty()) {
+        bool validSibling = false;
+        for (const Markup& note : store_.markups(sourcePath))
+            if (note.id == beforeId && QStringLiteral("group:") + note.mindGroup == groupKey)
+                validSibling = true;
+        if (!validSibling) return false;
+    }
+    if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return false; }
+    return applyMindReorder(id, groupKey, beforeId);
+}
+
 bool MainWindow::activateNotebookNote(const QString& id)
 {
     if (id.isEmpty()) return false;
@@ -1351,7 +1431,8 @@ void MainWindow::refreshNotebookWorkspace()
             auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(notebookOutline_);
             item->setText(0, node.text);
             item->setData(0, Qt::UserRole, node.markupId);
-            if (groupPaths.contains(node.groupKey)) {
+            item->setData(0, Qt::UserRole + 4, node.groupKey);
+            if (node.markupId.isEmpty() && groupPaths.contains(node.groupKey)) {
                 item->setData(0, Qt::UserRole + 2, node.groupKey.mid(6));
                 item->setData(0, Qt::UserRole + 3, groupPaths.value(node.groupKey));
             } else if (parent) {
