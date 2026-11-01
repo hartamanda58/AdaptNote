@@ -986,6 +986,50 @@ void MainWindow::buildDocks()
     notebookOutline_->setIndentation(18);
     notebookOutline_->setWordWrap(true);
     leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记大纲"));
+    notebookOutline_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(notebookOutline_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        auto* item = notebookOutline_->itemAt(pos);
+        if (!item) return;
+        const QString noteId = item->data(0, Qt::UserRole).toString();
+        const QString groupId = item->data(0, Qt::UserRole + 2).toString();
+        const QString sourcePath = item->data(0, Qt::UserRole + 3).toString();
+        const QString groupName = item->text(0);
+        QMenu menu(notebookOutline_);
+        if (!noteId.isEmpty()) {
+            menu.addAction(QStringLiteral("定位原文"), [this, noteId]() { activateNotebookNote(noteId); });
+            menu.addAction(QStringLiteral("编辑摘录批注…"), [this, noteId]() {
+                if (activateNotebookNote(noteId)) editMarkupComment(noteId);
+            });
+            menu.addAction(QStringLiteral("删除笔记与标注"), [this, noteId]() {
+                if (!activateNotebookNote(noteId)) return;
+                if (confirm(this, QStringLiteral("删除笔记"), QStringLiteral("同时删除原文标注，可通过撤销恢复。是否继续？")))
+                    deleteMarkupById(noteId);
+            });
+        } else if (!sourcePath.isEmpty()) {
+            menu.addAction(groupId.isEmpty() ? QStringLiteral("新建分组…") : QStringLiteral("新建子分组…"),
+                           [this, sourcePath, groupId]() {
+                const QString name = askText(this, QStringLiteral("新建分组"), QStringLiteral("名称："));
+                if (name.trimmed().isEmpty()) return;
+                if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
+                createMindGroup(name.trimmed(), groupId);
+            });
+            if (!groupId.isEmpty()) {
+                menu.addAction(QStringLiteral("重命名分组…"), [this, sourcePath, groupId, groupName]() {
+                    const QString name = askText(this, QStringLiteral("重命名分组"), QStringLiteral("名称："), groupName);
+                    if (name.trimmed().isEmpty()) return;
+                    if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
+                    renameMindGroup(groupId, name);
+                });
+                menu.addAction(QStringLiteral("删除分组（保留笔记）"), [this, sourcePath, groupId]() {
+                    if (!confirm(this, QStringLiteral("删除分组"),
+                                 QStringLiteral("删除此分组，笔记保留并回到按页分组；子分组会提升一级。可通过撤销恢复分组。是否继续？"))) return;
+                    if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
+                    deleteMindGroup(groupId);
+                });
+            }
+        }
+        if (!menu.isEmpty()) menu.exec(notebookOutline_->viewport()->mapToGlobal(pos));
+    });
     connect(notebookOutline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
         if (item) activateNotebookNote(item->data(0, Qt::UserRole).toString());
     });
@@ -1300,13 +1344,23 @@ void MainWindow::refreshNotebookWorkspace()
         remember(notebookOutline_->topLevelItem(i));
     notebookOutline_->clear();
     const mind::Node root = mind::buildFromTopic(title, inputs, groups);
+    QHash<QString, QString> groupPaths;
+    for (const MindGroup& group : groups) groupPaths.insert(QStringLiteral("group:") + group.id, group.docPath);
     std::function<void(QTreeWidgetItem*, const mind::Node&)> fill =
         [&](QTreeWidgetItem* parent, const mind::Node& node) {
             auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(notebookOutline_);
             item->setText(0, node.text);
             item->setData(0, Qt::UserRole, node.markupId);
+            if (groupPaths.contains(node.groupKey)) {
+                item->setData(0, Qt::UserRole + 2, node.groupKey.mid(6));
+                item->setData(0, Qt::UserRole + 3, groupPaths.value(node.groupKey));
+            } else if (parent) {
+                const QString source = node.docPath.isEmpty()
+                                           ? parent->data(0, Qt::UserRole + 3).toString() : node.docPath;
+                item->setData(0, Qt::UserRole + 3, source);
+            }
             const QString key = parent ? parent->data(0, Qt::UserRole + 1).toString() + QLatin1Char('/') +
-                                           (node.markupId.isEmpty() ? node.groupKey + node.text : node.markupId)
+                                           (node.markupId.isEmpty() ? (node.docPath.isEmpty() ? node.groupKey + node.text : node.docPath) : node.markupId)
                                        : mindScopeKey();
             item->setData(0, Qt::UserRole + 1, key);
             item->setExpanded(!hadTree || !collapsedKeys.contains(key));
@@ -2775,8 +2829,11 @@ QString groupIdOf(const QString& keyOrId)
 
 QString MainWindow::createMindGroup(const QString& name, const QString& parentId)
 {
+    if (docPath_.isEmpty() || name.trimmed().isEmpty()) return {};
     const QString id = store_.ensureMindGroup(docPath_, name, parentId);
     if (id.isEmpty()) return {};
+    // New groups must be visible to the notebook-wide tree immediately.
+    if (!currentTopic_.isEmpty()) store_.setMindGroupTopic(docPath_, currentTopic_);
     // Undo should remove exactly the row we created, so hand the command a snapshot.
     for (const MindGroup& g : store_.mindGroups(docPath_)) {
         if (g.id != id) continue;

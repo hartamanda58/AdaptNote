@@ -1027,6 +1027,17 @@ int main(int argc, char** argv)
             check(w.addNotebookDocument(pdf), QStringLiteral("add first notebook document"));
             check(w.notebookDocumentCountForTest() == 1 && w.view()->isVisible(),
                   QStringLiteral("adding a document opens its reader and tab"));
+            const QString outlineGroup = w.createMindGroupForTest(QStringLiteral("工作区分组"));
+            auto* outline = w.findChild<QTreeWidget*>(QStringLiteral("notebookOutline"));
+            bool foundGroup = false;
+            std::function<void(QTreeWidgetItem*)> inspect = [&](QTreeWidgetItem* item) {
+                if (item->data(0, Qt::UserRole + 2).toString() == outlineGroup) {
+                    foundGroup = !item->data(0, Qt::UserRole + 3).toString().isEmpty();
+                }
+                for (int i = 0; i < item->childCount(); ++i) inspect(item->child(i));
+            };
+            if (outline) for (int i = 0; i < outline->topLevelItemCount(); ++i) inspect(outline->topLevelItem(i));
+            check(foundGroup, QStringLiteral("new notebook group appears in outline with explicit source identity"));
             check(w.addNotebookDocument(pdf) && w.notebookDocumentCountForTest() == 1,
                   QStringLiteral("adding the same document does not duplicate tabs"));
             w.openTopicForTest(QString());

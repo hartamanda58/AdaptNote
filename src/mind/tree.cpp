@@ -232,6 +232,7 @@ Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs
         if (branch.children.isEmpty()) continue;   // nothing to show for that document
         branch.text = doc.title.isEmpty() ? QFileInfo(doc.docPath).completeBaseName() : doc.title;
         branch.isGroup = true;
+        branch.docPath = doc.docPath;
         branch.markupId.clear();
         branch.page = -1;
         root.children.append(branch);
