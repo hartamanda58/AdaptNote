@@ -1,6 +1,7 @@
 #include "ui/mainwindow.h"
 
 #include "core/paths.h"
+#include "sync/vv.h"
 #include "core/textselect.h"
 #include "import/import.h"
 
@@ -469,8 +470,16 @@ private:
         MindLink row = (kind_ == Add) ? after_ : state;
         if (kind_ == Add) row.deleted = undoing;
         else if (kind_ == Remove) row.deleted = !undoing;
+        VersionVector vv = VersionVector::parse(row.vv);
+        for (const MindLink& current : w_->store_.mindLinks(row.topicId, true))
+            if (current.id == row.id) vv.join(VersionVector::parse(current.vv));
+        vv.bump(w_->store_.deviceId(), static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+        row.vv = vv.toString();
+        row.deviceId = w_->store_.deviceId();
+        row.updated = QDateTime::currentMSecsSinceEpoch();
         w_->store_.upsertMindLink(row);
         w_->rebuildMindMap();
+        w_->refreshNotebookWorkspace();
     }
 
     MainWindow* w_;
@@ -3651,12 +3660,40 @@ void MainWindow::showNotebookMindMap()
         auto* fit = new QPushButton(QStringLiteral("适配全图"), notebookMindWindow_);
         auto* undo = new QPushButton(QStringLiteral("撤销"), notebookMindWindow_);
         auto* redo = new QPushButton(QStringLiteral("重做"), notebookMindWindow_);
-        actions->addWidget(fit); actions->addWidget(undo); actions->addWidget(redo); actions->addStretch();
+        auto* link = new QPushButton(QStringLiteral("连线"), notebookMindWindow_);
+        link->setCheckable(true);
+        auto* exportImage = new QPushButton(QStringLiteral("导出 PNG"), notebookMindWindow_);
+        actions->addWidget(fit); actions->addWidget(undo); actions->addWidget(redo);
+        actions->addWidget(link); actions->addWidget(exportImage); actions->addStretch();
         layout->addLayout(actions);
         notebookMindView_ = new mind::MindMapView(notebookMindWindow_);
         notebookMindView_->setObjectName("notebookMindCanvas");
         layout->addWidget(notebookMindView_, 1);
         connect(fit, &QPushButton::clicked, notebookMindView_, &mind::MindMapView::fitToContent);
+        connect(link, &QPushButton::toggled, notebookMindView_, &mind::MindMapView::setLinkMode);
+        connect(exportImage, &QPushButton::clicked, this, [this]() {
+            if (kHeadless) return;
+            const QString path = QFileDialog::getSaveFileName(notebookMindWindow_, QStringLiteral("导出脑图"),
+                                                              QString(), QStringLiteral("PNG (*.png)"));
+            if (!path.isEmpty()) notebookMindView_->exportPng(path);
+        });
+        connect(notebookMindView_, &mind::MindMapView::linkRequested, this, [this](const QString& from, const QString& to) {
+            if (from == to || mindScopeKey().isEmpty()) return;
+            MindLink row;
+            row.id = newId(); row.topicId = mindScopeKey(); row.fromNode = from; row.toNode = to;
+            row.arrow = QStringLiteral("end");
+            undo_->push(new MindLinkCommand(this, MindLinkCommand::Add, row, row, QStringLiteral("添加关联线")));
+            refreshNotebookWorkspace();
+        });
+        connect(notebookMindView_, &mind::MindMapView::linkMenuRequested, this,
+                [this](const QString& id, const QPoint& pos) {
+            QMenu menu(notebookMindWindow_);
+            menu.addAction(QStringLiteral("删除关联线"), [this, id]() { removeMindLinkForTest(id); refreshNotebookWorkspace(); });
+            menu.exec(pos);
+        });
+        connect(notebookMindView_, &mind::MindMapView::deleteRequested, this, [this](const QString& key) {
+            if (key.startsWith(QStringLiteral("note:")) && activateNotebookNote(key.mid(5))) deleteMarkupById(key.mid(5));
+        });
         connect(undo, &QPushButton::clicked, this, &MainWindow::undoCommand);
         connect(redo, &QPushButton::clicked, this, &MainWindow::redoCommand);
         connect(notebookMindView_, &mind::MindMapView::nodeActivated, this, [this](int) {
