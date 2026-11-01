@@ -99,6 +99,8 @@ public:
     bool addNotebookDocument(const QString& path);
     bool moveNotebookNote(const QString& id, const QString& targetPath,
                           const QString& groupKey, const QString& beforeId = {});
+    bool moveNotebookGroup(const QString& id, const QString& targetPath, const QString& parentId);
+    void showNotebookMindMap();
     void refreshNotebookWorkspace();
     int notebookDocumentCountForTest() const;
     QStringList notebookNoteIdsForTest() const;
@@ -222,12 +224,15 @@ private:
     QSplitter* splitter_ = nullptr;
     QToolBar* mainToolbar_ = nullptr;
     QMenu* moreMenu_ = nullptr;
+    QTabBar* notebookTabs_ = nullptr;
     QLabel* notebookTitle_ = nullptr;
     QTabBar* notebookDocuments_ = nullptr;
     QTreeWidget* notebookOutline_ = nullptr;
     QDockWidget* notesDock_ = nullptr;
     QDockWidget* aiDock_ = nullptr;
     QToolBar* findBar_ = nullptr;
+    QDialog* notebookMindWindow_ = nullptr;
+    mind::MindMapView* notebookMindView_ = nullptr;
     QWidget* mindPanel_ = nullptr;
     mind::MindMapView* mindView_ = nullptr;
     int workspaceMode_ = 0;

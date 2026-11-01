@@ -19,6 +19,7 @@
 #include <QDialogButtonBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabBar>
 
 #include <cstdio>
 #include <functional>
@@ -56,7 +57,9 @@ int main(int argc, char** argv)
     QCoreApplication::setApplicationName(QStringLiteral("AdaptNoteFeatureTest"));
     app.setStyle(QStringLiteral("Fusion"));
     QFile qss(QStringLiteral(":/app.qss"));
-    if (qss.open(QIODevice::ReadOnly)) app.setStyleSheet(QString::fromUtf8(qss.readAll()));
+    const bool themeLoaded = qss.open(QIODevice::ReadOnly);
+    check(themeLoaded, QStringLiteral("packaged application theme is available at its runtime path"));
+    if (themeLoaded) app.setStyleSheet(QString::fromUtf8(qss.readAll()));
 
     const QString pdf = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("test.pdf");
     const QString epub = argc > 2 ? QString::fromLocal8Bit(argv[2]) : QStringLiteral("test.epub");
@@ -630,7 +633,9 @@ int main(int argc, char** argv)
         w.view()->setZoomMode(ZoomMode::FitPage);
         settle();
 
-        const qint64 budget = 3ll * 1024 * 1024;   // room for a couple of pages only
+        const QImage cacheFixture = w.view()->cachedImageForTest(0);
+        // Budget follows actual rendered size, which changes with workspace chrome/DPI.
+        const qint64 budget = cacheFixture.sizeInBytes() * 2 + 1024;
         w.view()->setCacheBudgetBytes(budget);
         settle();
 
@@ -1020,6 +1025,9 @@ int main(int argc, char** argv)
         {
             const QString notebook = w.createNotebook(QStringLiteral("新的阅读笔记本"));
             check(!notebook.isEmpty(), QStringLiteral("create notebook from workspace"));
+            auto* notebookTabs = w.findChild<QTabBar*>(QStringLiteral("notebookTabs"));
+            check(notebookTabs && notebookTabs->count() >= 2 && notebookTabs->currentIndex() > 0,
+                  QStringLiteral("opened notebook receives an application workspace tab"));
             check(w.notebookDocumentCountForTest() == 0 && !w.view()->isVisible(),
                   QStringLiteral("empty notebook does not show the previous document"));
             check(!w.addNotebookDocument(QStringLiteral("/missing/book.pdf")),
@@ -1038,6 +1046,21 @@ int main(int argc, char** argv)
             };
             if (outline) for (int i = 0; i < outline->topLevelItemCount(); ++i) inspect(outline->topLevelItem(i));
             check(foundGroup, QStringLiteral("new notebook group appears in outline with explicit source identity"));
+            const QString childGroup = w.createMindGroupForTest(QStringLiteral("层级拖动"));
+            const QString sourcePath = w.visibleMarkups().first().docPath;
+            check(w.moveNotebookGroup(childGroup, sourcePath, outlineGroup), QStringLiteral("outline can nest a group"));
+            check(!w.moveNotebookGroup(outlineGroup, sourcePath, childGroup), QStringLiteral("outline rejects group cycles"));
+            w.undoCommand();
+            bool parentRestored = false;
+            for (const auto& group : w.mindGroups()) if (group.id == childGroup) parentRestored = group.parentId.isEmpty();
+            check(parentRestored, QStringLiteral("group nesting undo restores original parent"));
+            w.showNotebookMindMap();
+            auto* independentMap = w.findChild<mind::MindMapView*>(QStringLiteral("notebookMindCanvas"));
+            check(independentMap && independentMap->sceneNodeCount() > 1,
+                  QStringLiteral("independent mind window renders notebook structure"));
+            auto* independentWindow = w.findChild<QDialog*>(QStringLiteral("notebookMindWindow"));
+            if (independentWindow) independentWindow->close();
+            check(w.view()->isVisible(), QStringLiteral("closing independent mind map leaves reader visible"));
             const auto priorNotes = w.visibleMarkups();
             if (!priorNotes.isEmpty()) {
                 const auto original = priorNotes.first();
@@ -1103,9 +1126,19 @@ int main(int argc, char** argv)
                 locate(outline->topLevelItem(0));
                 if (noteItem) outline->itemDoubleClicked(noteItem, 0);
                 settle();
+                const QString shotDir = qEnvironmentVariable("ADAPT_REVIEW_SHOTS");
+                if (!shotDir.isEmpty()) {
+                    QDir().mkpath(shotDir);
+                    w.grab().save(shotDir + QStringLiteral("/notebook-two-documents.png"));
+                    w.showNotebookMindMap();
+                    settle();
+                    auto* window = w.findChild<QDialog*>(QStringLiteral("notebookMindWindow"));
+                    if (window) { window->grab().save(shotDir + QStringLiteral("/notebook-mindmap.png")); window->close(); }
+                }
                 auto* editor = w.findChild<QDialog*>(QStringLiteral("captureEditor"));
                 check(editor != nullptr, QStringLiteral("outline opens the capture editor"));
                 if (editor) {
+                    if (!shotDir.isEmpty()) editor->grab().save(shotDir + QStringLiteral("/capture-editor.png"));
                     auto* quote = editor->findChild<QPlainTextEdit*>(QStringLiteral("captureQuote"));
                     auto* comment = editor->findChild<QPlainTextEdit*>(QStringLiteral("captureComment"));
                     check(quote && quote->isReadOnly() && quote->toPlainText() == other.text,

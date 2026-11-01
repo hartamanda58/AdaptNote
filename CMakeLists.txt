@@ -145,6 +145,7 @@ add_library(adapt_ui STATIC
   src/mind/mindmap.cpp
 )
 target_link_libraries(adapt_ui PUBLIC adapt_core Qt6::Widgets Qt6::Gui)
+set_source_files_properties(resources/app.qss PROPERTIES QT_RESOURCE_ALIAS "app.qss")
 qt_add_resources(adapt_ui "appres"
   PREFIX "/"
   FILES resources/app.qss

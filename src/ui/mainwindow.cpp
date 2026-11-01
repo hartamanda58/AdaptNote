@@ -9,6 +9,7 @@
 #include "export/exporter.h"
 #include "ink/ink.h"
 #include "mind/mindmap.h"
+#include "mind/layout.h"
 #include "read/reader.h"
 #include "ui/conflictdialog.h"
 #include "ui/libraryview.h"
@@ -73,12 +74,15 @@ class NotebookOutlineTree : public QTreeWidget {
 public:
     using QTreeWidget::QTreeWidget;
     std::function<bool(const QString&, QTreeWidgetItem*)> moveNote;
+    std::function<bool(const QString&, QTreeWidgetItem*)> moveGroup;
 protected:
     void startDrag(Qt::DropActions) override
     {
         if (!currentItem()) return;
-        const QString id = currentItem()->data(0, Qt::UserRole).toString();
-        if (id.isEmpty()) return;
+        const QString note = currentItem()->data(0, Qt::UserRole).toString();
+        const QString group = currentItem()->data(0, Qt::UserRole + 2).toString();
+        const QString id = note.isEmpty() ? QStringLiteral("group:") + group : note;
+        if (note.isEmpty() && group.isEmpty()) return;
         QDrag drag(this);
         auto* mime = new QMimeData;
         mime->setData("application/x-adaptnote-note", id.toUtf8());
@@ -93,14 +97,22 @@ protected:
     }
     void dragMoveEvent(QDragMoveEvent* event) override
     {
-        if (event->source() == this && itemAt(event->position().toPoint())) event->acceptProposedAction();
+        auto* target = itemAt(event->position().toPoint());
+        if (event->source() == this && target) {
+            setCurrentItem(target);
+            viewport()->setToolTip(QStringLiteral("放开：移入分组；笔记落到笔记上则插入其前方（仅同资料）"));
+            event->acceptProposedAction();
+        }
         else event->ignore();
     }
     void dropEvent(QDropEvent* event) override
     {
         if (event->source() != this || !moveNote) { event->ignore(); return; }
         const QString id = QString::fromUtf8(event->mimeData()->data("application/x-adaptnote-note"));
-        if (moveNote(id, itemAt(event->position().toPoint()))) event->acceptProposedAction();
+        const bool moved = id.startsWith(QStringLiteral("group:"))
+                               ? (moveGroup && moveGroup(id.mid(6), itemAt(event->position().toPoint())))
+                               : moveNote(id, itemAt(event->position().toPoint()));
+        if (moved) event->acceptProposedAction();
         else event->ignore();
     }
 };
@@ -505,6 +517,32 @@ void MainWindow::buildUi()
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
     workspaceLayout->setSpacing(0);
+    notebookTabs_ = new QTabBar(workspace);
+    notebookTabs_->setObjectName("notebookTabs");
+    notebookTabs_->setExpanding(false);
+    notebookTabs_->setTabsClosable(true);
+    notebookTabs_->addTab(QStringLiteral("资料库"));
+    notebookTabs_->setTabButton(0, QTabBar::RightSide, nullptr);
+    workspaceLayout->addWidget(notebookTabs_);
+    connect(notebookTabs_, &QTabBar::currentChanged, this, [this](int index) {
+        if (index == 0) { showLibrary(); return; }
+        const QString id = notebookTabs_->tabData(index).toString();
+        if (!id.isEmpty() && id != currentTopic_) openNotebook(id);
+    });
+    connect(notebookTabs_, &QTabBar::tabCloseRequested, this, [this](int index) {
+        if (index <= 0) return;
+        const QSignalBlocker block(notebookTabs_);
+        notebookTabs_->removeTab(index);
+        // Closing a tab only closes its UI entry, never deletes the notebook.
+        if (notebookTabs_->count() > 1) {
+            const QString id = notebookTabs_->tabData(notebookTabs_->currentIndex()).toString();
+            if (!id.isEmpty()) openNotebook(id);
+        } else {
+            currentTopic_.clear();
+            refreshNotebookWorkspace();
+            showLibrary();
+        }
+    });
     notebookTitle_ = new QLabel(QStringLiteral("AdaptNote · 文档阅读"), workspace);
     notebookTitle_->setObjectName("notebookHeader");
     notebookTitle_->setStyleSheet("padding:12px 18px;background:#ffffff;color:#1d2939;font-size:16px;font-weight:600;border-bottom:1px solid #e4e7ec;");
@@ -518,6 +556,9 @@ void MainWindow::buildUi()
     headerLayout->addWidget(libraryButton);
     headerLayout->addWidget(newNotebookButton);
     headerLayout->addWidget(addDocumentButton);
+    auto* mindWindowButton = new QPushButton(QStringLiteral("笔记脑图 ↗"), header);
+    headerLayout->addWidget(mindWindowButton);
+    connect(mindWindowButton, &QPushButton::clicked, this, &MainWindow::showNotebookMindMap);
     connect(libraryButton, &QPushButton::clicked, this, &MainWindow::showLibrary);
     connect(newNotebookButton, &QPushButton::clicked, this, [this]() {
         const QString name = askText(this, QStringLiteral("新建笔记本"), QStringLiteral("名称："));
@@ -1015,7 +1056,7 @@ void MainWindow::buildFindBar()
 
 void MainWindow::buildDocks()
 {
-    auto* dock = new QDockWidget(QStringLiteral("笔记"), this);
+    auto* dock = new QDockWidget(QStringLiteral("笔记本大纲与目录"), this);
     notesDock_ = dock;
     dock->setObjectName("notesDock");
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
@@ -1027,6 +1068,10 @@ void MainWindow::buildDocks()
     notebookTree->setAcceptDrops(true);
     notebookTree->setDropIndicatorShown(true);
     notebookTree->setDragDropMode(QAbstractItemView::DragDrop);
+    notebookTree->moveGroup = [this](const QString& id, QTreeWidgetItem* target) {
+        return target && moveNotebookGroup(id, target->data(0, Qt::UserRole + 3).toString(),
+                                           target->data(0, Qt::UserRole + 2).toString());
+    };
     notebookTree->moveNote = [this](const QString& id, QTreeWidgetItem* target) {
         return target && moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
                                          target->data(0, Qt::UserRole + 4).toString(),
@@ -1101,7 +1146,7 @@ void MainWindow::buildDocks()
             updateStatus();
         }
     });
-    leftTabs_->addTab(outlineTree_, QStringLiteral("大纲"));
+    leftTabs_->addTab(outlineTree_, QStringLiteral("文档目录"));
 
     // ---- notes tab: search + tag filter + colour filter + list ----
     auto* notesTab = new QWidget(leftTabs_);
@@ -1282,6 +1327,29 @@ QStringList MainWindow::notebookNoteIdsForTest() const
     return ids;
 }
 
+bool MainWindow::moveNotebookGroup(const QString& id, const QString& targetPath, const QString& parentId)
+{
+    if (id.isEmpty() || targetPath.isEmpty() || id == parentId) return false;
+    const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths();
+    if (!paths.contains(targetPath) && QFileInfo(targetPath).absoluteFilePath() != docPath_) return false;
+    MindGroup before;
+    bool validParent = parentId.isEmpty();
+    for (const MindGroup& group : store_.mindGroups(targetPath)) {
+        if (group.id == id) before = group;
+        if (group.id == parentId) validParent = true;
+    }
+    if (before.id.isEmpty() || !validParent || store_.wouldCycle(id, parentId)) return false;
+    if (before.parentId == parentId) return false;
+    if (!store_.setMindGroupParent(id, parentId)) return false;
+    for (const MindGroup& after : store_.mindGroups(targetPath)) {
+        if (after.id != id) continue;
+        undo_->push(new MindGroupCommand(this, MindGroupCommand::Modify, before, after,
+                                         QStringLiteral("调整大纲层级")));
+        return true;
+    }
+    return false;
+}
+
 bool MainWindow::moveNotebookNote(const QString& id, const QString& targetPath,
                                   const QString& groupKey, const QString& beforeId)
 {
@@ -1382,6 +1450,17 @@ void MainWindow::refreshNotebookWorkspace()
 {
     if (!notebookDocuments_ || !notebookOutline_) return;
     const QSignalBlocker tabsBlocked(notebookDocuments_);
+    if (!currentTopic_.isEmpty() && notebookTabs_) {
+        const QSignalBlocker block(notebookTabs_);
+        int index = -1;
+        for (int i = 1; i < notebookTabs_->count(); ++i)
+            if (notebookTabs_->tabData(i).toString() == currentTopic_) index = i;
+        QString name;
+        for (const Topic& topic : store_.topics()) if (topic.id == currentTopic_) name = topic.name;
+        if (index < 0) { index = notebookTabs_->addTab(name); notebookTabs_->setTabData(index, currentTopic_); }
+        notebookTabs_->setTabText(index, name);
+        notebookTabs_->setCurrentIndex(index);
+    }
     while (notebookDocuments_->count()) notebookDocuments_->removeTab(0);
     QString title = QStringLiteral("文档阅读");
     QVector<mind::TopicDocInput> inputs;
@@ -1450,6 +1529,10 @@ void MainWindow::refreshNotebookWorkspace()
             for (const auto& child : node.children) fill(item, child);
         };
     fill(nullptr, root);
+    if (notebookMindView_) {
+        notebookMindView_->setLinks(store_.mindLinks(mindScopeKey()));
+        notebookMindView_->setTree(root);
+    }
 }
 
 void MainWindow::restoreReadingState()
@@ -3515,6 +3598,65 @@ void MainWindow::setWorkspaceMode(int mode)
         }
         rebuildMindMap();
     }
+}
+
+void MainWindow::showNotebookMindMap()
+{
+    if (!notebookMindWindow_) {
+        notebookMindWindow_ = new QDialog(this);
+        notebookMindWindow_->setObjectName("notebookMindWindow");
+        notebookMindWindow_->resize(1100, 760);
+        auto* layout = new QVBoxLayout(notebookMindWindow_);
+        auto* actions = new QHBoxLayout;
+        auto* fit = new QPushButton(QStringLiteral("适配全图"), notebookMindWindow_);
+        auto* undo = new QPushButton(QStringLiteral("撤销"), notebookMindWindow_);
+        auto* redo = new QPushButton(QStringLiteral("重做"), notebookMindWindow_);
+        actions->addWidget(fit); actions->addWidget(undo); actions->addWidget(redo); actions->addStretch();
+        layout->addLayout(actions);
+        notebookMindView_ = new mind::MindMapView(notebookMindWindow_);
+        notebookMindView_->setObjectName("notebookMindCanvas");
+        layout->addWidget(notebookMindView_, 1);
+        connect(fit, &QPushButton::clicked, notebookMindView_, &mind::MindMapView::fitToContent);
+        connect(undo, &QPushButton::clicked, this, &MainWindow::undoCommand);
+        connect(redo, &QPushButton::clicked, this, &MainWindow::redoCommand);
+        connect(notebookMindView_, &mind::MindMapView::nodeActivated, this, [this](int) {
+            const QString key = notebookMindView_->selectedKey();
+            if (key.startsWith(QStringLiteral("note:"))) activateNotebookNote(key.mid(5));
+        });
+        connect(notebookMindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
+            if (key.startsWith(QStringLiteral("note:")) && activateNotebookNote(key.mid(5))) editMarkupComment(key.mid(5));
+            if (key.startsWith(QStringLiteral("group:"))) {
+                const auto groups = currentTopic_.isEmpty() ? store_.mindGroups(docPath_) : store_.mindGroupsForTopic(currentTopic_);
+                for (const MindGroup& group : groups) {
+                    if (key != QStringLiteral("group:") + group.id) continue;
+                    const QString name = askText(this, QStringLiteral("重命名分组"), QStringLiteral("名称："), group.name);
+                    if (name.trimmed().isEmpty()) return;
+                    if (group.docPath != docPath_) { saveReadingState(); if (!openDocument(group.docPath)) return; }
+                    renameMindGroup(group.id, name);
+                    return;
+                }
+            }
+        });
+        connect(notebookMindView_, &mind::MindMapView::noteReorderRequested, this,
+                [this](const QString& id, const QString& group, const QString& before) {
+            for (const QString& path : (currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths()))
+                for (const Markup& note : store_.markups(path))
+                    if (note.id == id) { moveNotebookNote(id, path, group, before); return; }
+        });
+    }
+    notebookMindWindow_->setWindowTitle(notebookTitle_->text() + QStringLiteral(" · 脑图"));
+    refreshNotebookWorkspace();
+    notebookMindWindow_->show();
+    notebookMindWindow_->raise();
+    // First paint happens after layout; keep the root in view rather than centering
+    // the full (potentially very tall) tree off-screen.
+    QTimer::singleShot(0, notebookMindView_, [this]() {
+        if (!notebookMindView_) return;
+        notebookMindView_->fitToContent();
+        const QString rootKey = mind::nodeKey(notebookMindView_->tree());
+        const QRectF root = notebookMindView_->rectForKey(rootKey);
+        if (!root.isEmpty()) notebookMindView_->centerOn(root.center().x() + 240, root.center().y());
+    });
 }
 
 void MainWindow::showMindMap()
