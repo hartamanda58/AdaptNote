@@ -22,6 +22,8 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -622,6 +624,23 @@ void MainWindow::buildUi()
     buildStatusBar();
     // Reading is the default: keep the page and notes visible, hide optional panels.
     setWorkspaceMode(0);
+    const auto restoredTabs = QJsonDocument::fromJson(store_.setting(QStringLiteral("workspace.openNotebooks")).toUtf8()).array();
+    {
+        const QSignalBlocker block(notebookTabs_);
+        for (const auto& value : restoredTabs) {
+            for (const auto& topic : store_.topics()) {
+                if (topic.id != value.toString()) continue;
+                const int index = notebookTabs_->addTab(topic.name);
+                notebookTabs_->setTabData(index, topic.id);
+            }
+        }
+    }
+    if (!kHeadless) {
+        const QString active = store_.setting(QStringLiteral("workspace.activeNotebook"));
+        if (!active.isEmpty()) QTimer::singleShot(0, this, [this, active]() {
+            if (docPath_.isEmpty()) openNotebook(active);
+        });
+    }
 
     // ---- P5: handwriting + read aloud ----
     connect(view_, &PageView::inkStrokeReady, this, &MainWindow::onInkStroke);
@@ -973,6 +992,9 @@ void MainWindow::buildToolbar()
     moreMenu_ = more;
     moreBtn->setMenu(more);
     tb->addWidget(moreBtn);
+    // Compact labelled controls retain discoverability while keeping low-frequency
+    // mode/export controls reachable without the native overflow extension.
+    tb->setStyleSheet(QStringLiteral("QToolButton{padding:3px 2px;font-size:12px;} QToolBar{spacing:1px;}"));
 }
 
 void MainWindow::buildFindBar()
@@ -1561,6 +1583,12 @@ void MainWindow::saveReadingState()
 void MainWindow::closeEvent(QCloseEvent* e)
 {
     saveReadingState();
+    QJsonArray tabs;
+    for (int i = 1; notebookTabs_ && i < notebookTabs_->count(); ++i)
+        tabs.append(notebookTabs_->tabData(i).toString());
+    store_.setSetting(QStringLiteral("workspace.openNotebooks"),
+                      QString::fromUtf8(QJsonDocument(tabs).toJson(QJsonDocument::Compact)));
+    store_.setSetting(QStringLiteral("workspace.activeNotebook"), currentTopic_);
     QMainWindow::closeEvent(e);
 }
 
@@ -3649,13 +3677,15 @@ void MainWindow::showNotebookMindMap()
                     if (note.id == id) { moveNotebookNote(id, path, group, before); return; }
         });
     }
+    const bool scopeChanged = notebookMindWindow_->property("scope").toString() != mindScopeKey();
+    notebookMindWindow_->setProperty("scope", mindScopeKey());
     notebookMindWindow_->setWindowTitle(notebookTitle_->text() + QStringLiteral(" · 脑图"));
     refreshNotebookWorkspace();
     notebookMindWindow_->show();
     notebookMindWindow_->raise();
     // First paint happens after layout; keep the root in view rather than centering
     // the full (potentially very tall) tree off-screen.
-    QTimer::singleShot(0, notebookMindView_, [this]() {
+    if (scopeChanged) QTimer::singleShot(0, notebookMindView_, [this]() {
         if (!notebookMindView_) return;
         notebookMindView_->fitToContent();
         const QString rootKey = mind::nodeKey(notebookMindView_->tree());

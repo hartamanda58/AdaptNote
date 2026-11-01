@@ -22,9 +22,9 @@ Do not describe this checkpoint as full visual/behavioral equivalence.
 - No separate persistent note-title field or free-standing rich text notes yet.
 - Group sibling-order drop gestures, complete drop preview and keyboard accessibility need further work.
 - Independent map does not expose all embedded-map actions (create/delete/free links).
-- Opening independent map currently refocuses/fits the root rather than preserving a per-notebook camera.
-- Notebook tabs are not restored across process restart. Home still opens the existing library window.
-- Toolbars retain existing text/emoji actions; narrow-window overflow and final icon redesign remain.
+- Independent map retains camera when reopened in the same scope; switching notebook refocuses root.
+- Open notebook tabs and active notebook are persisted; interactive startup restores the active notebook. Home still opens the existing library window.
+- Toolbar labels were compacted and reviewed at 1360px without overflow; a final icon redesign and narrow/high-DPI combinations remain.
 - Export uses existing exporters; notebook-specific selection UI and source-link interoperability require review.
 - Real tablet, dual-device WebDAV and third-party Anki/XMind clients remain unverified.
 
