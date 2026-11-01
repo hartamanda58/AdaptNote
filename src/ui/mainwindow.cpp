@@ -1537,6 +1537,10 @@ void MainWindow::refreshNotebookWorkspace()
 
 void MainWindow::restoreReadingState()
 {
+    const QString key = QStringLiteral("reader.zoom.") + docPath_;
+    bool validZoom = false;
+    const float savedZoom = store_.setting(key).toFloat(&validZoom);
+    if (validZoom && savedZoom > 0) view_->setZoom(savedZoom);
     const int page = store_.lastPage(docPath_);
     const double frac = store_.lastOffset(docPath_);
     view_->gotoPage(page);
@@ -1551,6 +1555,7 @@ void MainWindow::saveReadingState()
     if (!engine_.isOpen() || docPath_.isEmpty()) return;
     const int page = view_->currentPage();
     store_.setReadingState(docPath_, page, view_->pageOffsetFraction(page));
+    store_.setSetting(QStringLiteral("reader.zoom.") + docPath_, QString::number(view_->zoom()));
 }
 
 void MainWindow::closeEvent(QCloseEvent* e)
@@ -3583,7 +3588,7 @@ void MainWindow::setWorkspaceMode(int mode)
 
     if (workspaceMode_ == 0) {
         mindPanel_->hide();
-        view_->show();
+        view_->setVisible(currentTopic_.isEmpty() || !store_.topicDocs(currentTopic_).isEmpty());
     } else if (workspaceMode_ == 2) {
         view_->hide();
         mindPanel_->show();

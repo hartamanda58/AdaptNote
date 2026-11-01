@@ -1030,6 +1030,8 @@ int main(int argc, char** argv)
                   QStringLiteral("opened notebook receives an application workspace tab"));
             check(w.notebookDocumentCountForTest() == 0 && !w.view()->isVisible(),
                   QStringLiteral("empty notebook does not show the previous document"));
+            w.setWorkspaceMode(0);
+            check(!w.view()->isVisible(), QStringLiteral("returning to reading mode keeps empty notebook source hidden"));
             check(!w.addNotebookDocument(QStringLiteral("/missing/book.pdf")),
                   QStringLiteral("missing document is rejected"));
             check(w.addNotebookDocument(pdf), QStringLiteral("add first notebook document"));
