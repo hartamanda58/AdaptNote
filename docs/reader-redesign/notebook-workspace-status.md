@@ -19,9 +19,9 @@ Do not describe this checkpoint as full visual/behavioral equivalence.
 
 ## Known incomplete behavior
 - Groups remain per-document. Arbitrary note-under-note nesting is NOT implemented.
-- No separate persistent note-title field or free-standing rich text notes yet.
+- Editable note headings are persisted separately and travel in note JSON. Free-standing rich text notes are not implemented.
 - Group sibling-order drop gestures, complete drop preview and keyboard accessibility need further work.
-- Independent map does not expose all embedded-map actions (create/delete/free links).
+- Independent map supports link creation/deletion, note deletion and PNG export. Full group creation menus and link label/arrow menus still need parity.
 - Independent map retains camera when reopened in the same scope; switching notebook refocuses root.
 - Open notebook tabs and active notebook are persisted; interactive startup restores the active notebook. Home still opens the existing library window.
 - Toolbar labels were compacted and reviewed at 1360px without overflow; a final icon redesign and narrow/high-DPI combinations remain.
@@ -31,7 +31,9 @@ Do not describe this checkpoint as full visual/behavioral equivalence.
 ## Validation evidence
 Full local build plus all 11 suites passed after the final local changes. Syntax checks and
 modal-dialog guard passed. LSP probe was inconclusive (not evidence of clean).
-Windows CI must be associated with the exact final commit before claiming package acceptance.
+Commit 8c358f1: Windows build 41327460385 succeeded; packaged runtime smoke 41329232907 succeeded.
+Pre-release: https://github.com/hartamanda58/AdaptNote/releases/tag/notebook-preview-8c358f1
+Group deletion undo now restores original note memberships and child-group hierarchy.
 
 ## Safety boundaries
 Do not automatically replace the database with a new universal node table.
