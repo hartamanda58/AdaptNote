@@ -231,6 +231,13 @@ Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs
         Node branch = buildFromNotes(doc.title, doc.markups, own);
         if (branch.children.isEmpty()) continue;   // nothing to show for that document
         branch.text = doc.title.isEmpty() ? QFileInfo(doc.docPath).completeBaseName() : doc.title;
+        // Page buckets from different books must not share layout/collapse keys.
+        std::function<void(Node&)> scopePages = [&](Node& node) {
+            if (node.groupKey.startsWith(QStringLiteral("page:")))
+                node.groupKey = QStringLiteral("docpage:") + doc.docPath + QLatin1Char(':') + node.groupKey;
+            for (Node& child : node.children) scopePages(child);
+        };
+        scopePages(branch);
         branch.isGroup = true;
         branch.docPath = doc.docPath;
         branch.markupId.clear();

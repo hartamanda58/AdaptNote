@@ -2,6 +2,7 @@
 // fine grained reading position. Runs headless (offscreen).
 #include "core/textselect.h"
 #include "mind/mindmap.h"
+#include "mind/layout.h"
 #include "ui/mainwindow.h"
 #include "ui/pageview.h"
 
@@ -1061,6 +1062,17 @@ int main(int argc, char** argv)
             check(independentMap && independentMap->sceneNodeCount() > 1,
                   QStringLiteral("independent mind window renders notebook structure"));
             auto* independentWindow = w.findChild<QDialog*>(QStringLiteral("notebookMindWindow"));
+            if (independentMap) {
+                independentMap->linkRequested(QStringLiteral("group:") + outlineGroup, QStringLiteral("group:") + childGroup);
+                const auto independentLinks = w.mindLinksForTest();
+                bool linked = false;
+                for (const auto& link : independentLinks)
+                    if (link.fromNode == QStringLiteral("group:") + outlineGroup && !link.vv.isEmpty()) linked = true;
+                check(linked, QStringLiteral("independent map creates versioned persistent links"));
+                w.undoCommand();
+                check(w.mindLinksForTest().size() + 1 == independentLinks.size(),
+                      QStringLiteral("independent map link creation is undoable"));
+            }
             if (independentWindow) independentWindow->close();
             check(w.view()->isVisible(), QStringLiteral("closing independent mind map leaves reader visible"));
             const auto priorNotes = w.visibleMarkups();
@@ -1106,6 +1118,23 @@ int main(int argc, char** argv)
 
             w.openTopicForTest(topicId);
             check(w.notebookDocumentCountForTest() == 2, QStringLiteral("notebook shows two document tabs"));
+            {
+                mind::TopicDocInput a, b;
+                a.title = QStringLiteral("同名资料"); a.docPath = QStringLiteral("/a/book.pdf"); a.markups = w.visibleMarkups();
+                b = a; b.docPath = QStringLiteral("/b/book.pdf");
+                for (auto& note : b.markups) note.id += QStringLiteral("-second");
+                const auto tree = mind::buildFromTopic(QStringLiteral("键唯一性"), {a, b}, {});
+                QSet<QString> keys;
+                bool unique = true;
+                std::function<void(const mind::Node&)> visit = [&](const mind::Node& node) {
+                    const QString key = mind::nodeKey(node);
+                    if (keys.contains(key)) unique = false;
+                    keys.insert(key);
+                    for (const auto& child : node.children) visit(child);
+                };
+                visit(tree);
+                check(unique, QStringLiteral("same-title books and page buckets have unique map keys"));
+            }
             check(w.notebookNoteIdsForTest().contains(other.id), QStringLiteral("outline includes the other document note"));
             check(w.activateNotebookNote(other.id), QStringLiteral("outline opens the other document source"));
             check(w.visibleMarkups().size() == 1 && w.visibleMarkups().first().id == other.id,
