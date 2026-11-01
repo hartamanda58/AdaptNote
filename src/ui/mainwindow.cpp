@@ -416,6 +416,12 @@ public:
         : w_(w), kind_(kind), before_(before), after_(after)
     {
         setText(text);
+        if (kind_ == Remove) {
+            for (const auto& note : w_->store_.markups(before_.docPath))
+                if (note.mindGroup == before_.id) removedNotes_.append(note);
+            for (const auto& group : w_->store_.mindGroups(before_.docPath))
+                if (group.parentId == before_.id) removedChildren_.append(group);
+        }
     }
 
     void undo() override { apply(before_, true); }
@@ -433,8 +439,15 @@ private:
             break;
         case Remove:
             // the row we stored is an alive snapshot; undoing brings it back
-            row.deleted = undoing ? false : true;
-            w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
+            if (!undoing) {
+                w_->store_.removeMindGroup(row.id);
+            } else {
+                row.deleted = false;
+                w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
+                for (const auto& note : removedNotes_) w_->storeUpsertStampedMarkup(note);
+                for (const auto& child : removedChildren_)
+                    w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(child));
+            }
             break;
         case Modify:
             w_->store_.upsertMindGroup(w_->store_.stampGroupForLocalWrite(row));
@@ -448,6 +461,8 @@ private:
     Kind kind_;
     MindGroup before_;
     MindGroup after_;
+    QVector<Markup> removedNotes_;
+    QVector<MindGroup> removedChildren_;
 };
 
 class MindLinkCommand : public QUndoCommand {
@@ -3123,8 +3138,8 @@ bool MainWindow::deleteMindGroup(const QString& groupKey)
     MindGroup before;
     for (const MindGroup& g : store_.mindGroups(docPath_))
         if (g.id == id) before = g;
-    const bool ok = store_.removeMindGroup(id);
-    if (ok && !before.id.isEmpty())
+    const bool ok = !before.id.isEmpty();
+    if (ok)
         undo_->push(new MindGroupCommand(this, MindGroupCommand::Remove, before, before,
                                          QStringLiteral("删除分组")));
     if (ok) {

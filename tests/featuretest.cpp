@@ -1083,6 +1083,11 @@ int main(int argc, char** argv)
                 bool moved = false;
                 for (const auto& note : w.visibleMarkups()) if (note.id == original.id) moved = note.mindGroup == outlineGroup;
                 check(moved, QStringLiteral("outline move persisted in the shared tree model"));
+                check(w.deleteMindGroupForTest(outlineGroup), QStringLiteral("delete populated outline group"));
+                w.undoCommand();
+                bool membershipRestored = false;
+                for (const auto& note : w.visibleMarkups()) if (note.id == original.id) membershipRestored = note.mindGroup == outlineGroup;
+                check(membershipRestored, QStringLiteral("group delete undo restores note membership, not just group row"));
                 w.undoCommand();
                 bool restored = false;
                 for (const auto& note : w.visibleMarkups()) if (note.id == original.id) restored = note.mindGroup == original.mindGroup;
