@@ -49,6 +49,7 @@
 #include <QTextBrowser>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTabBar>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -459,7 +460,27 @@ void MainWindow::buildUi()
     // the source must not throw away the map the user is working in.
     splitter_ = new QSplitter(Qt::Horizontal, this);
     splitter_->addWidget(view_);
-    setCentralWidget(splitter_);
+    auto* workspace = new QWidget(this);
+    auto* workspaceLayout = new QVBoxLayout(workspace);
+    workspaceLayout->setContentsMargins(0, 0, 0, 0);
+    workspaceLayout->setSpacing(0);
+    notebookTitle_ = new QLabel(QStringLiteral("AdaptNote · 文档阅读"), workspace);
+    notebookTitle_->setObjectName("notebookHeader");
+    notebookTitle_->setStyleSheet("padding:12px 18px;background:#ffffff;color:#1d2939;font-size:16px;font-weight:600;border-bottom:1px solid #e4e7ec;");
+    workspaceLayout->addWidget(notebookTitle_);
+    notebookDocuments_ = new QTabBar(workspace);
+    notebookDocuments_->setObjectName("notebookDocuments");
+    notebookDocuments_->setExpanding(false);
+    notebookDocuments_->setUsesScrollButtons(true);
+    workspaceLayout->addWidget(notebookDocuments_);
+    workspaceLayout->addWidget(splitter_, 1);
+    setCentralWidget(workspace);
+    connect(notebookDocuments_, &QTabBar::currentChanged, this, [this](int index) {
+        const QString path = notebookDocuments_->tabData(index).toString();
+        if (path.isEmpty() || path == docPath_) return;
+        saveReadingState();
+        if (!openDocument(path)) refreshNotebookWorkspace();
+    });
     ensureMindPanel();
 
     view_->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -929,6 +950,20 @@ void MainWindow::buildDocks()
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
     leftTabs_ = new QTabWidget(dock);
+    notebookOutline_ = new QTreeWidget(leftTabs_);
+    notebookOutline_->setObjectName("notebookOutline");
+    notebookOutline_->setHeaderHidden(true);
+    notebookOutline_->setIndentation(18);
+    notebookOutline_->setWordWrap(true);
+    leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记大纲"));
+    connect(notebookOutline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
+        if (item) activateNotebookNote(item->data(0, Qt::UserRole).toString());
+    });
+    connect(notebookOutline_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int) {
+        if (!item) return;
+        const QString id = item->data(0, Qt::UserRole).toString();
+        if (activateNotebookNote(id)) editMarkupComment(id);
+    });
 
     outlineTree_ = new QTreeWidget(leftTabs_);
     outlineTree_->setHeaderHidden(true);
@@ -1042,8 +1077,9 @@ void MainWindow::buildDocks()
     leftTabs_->addTab(notesTab, QStringLiteral("笔记 (0)"));
 
     dock->setWidget(leftTabs_);
-    dock->setMinimumWidth(320);
-    addDockWidget(Qt::LeftDockWidgetArea, dock);
+    dock->setMinimumWidth(280);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    resizeDocks({dock}, {330}, Qt::Horizontal);
 }
 
 void MainWindow::buildStatusBar()
@@ -1098,7 +1134,125 @@ bool MainWindow::openDocument(const QString& path)
             importEmbeddedAnnotations();
     }
     updateStatus();
+    refreshNotebookWorkspace();
     return true;
+}
+
+int MainWindow::notebookDocumentCountForTest() const
+{
+    return notebookDocuments_ ? notebookDocuments_->count() : 0;
+}
+
+QStringList MainWindow::notebookNoteIdsForTest() const
+{
+    QStringList ids;
+    if (!notebookOutline_) return ids;
+    std::function<void(QTreeWidgetItem*)> visit = [&](QTreeWidgetItem* item) {
+        const QString id = item->data(0, Qt::UserRole).toString();
+        if (!id.isEmpty()) ids.append(id);
+        for (int i = 0; i < item->childCount(); ++i) visit(item->child(i));
+    };
+    for (int i = 0; i < notebookOutline_->topLevelItemCount(); ++i)
+        visit(notebookOutline_->topLevelItem(i));
+    return ids;
+}
+
+bool MainWindow::activateNotebookNote(const QString& id)
+{
+    if (id.isEmpty()) return false;
+    const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths();
+    for (const QString& path : paths) {
+        for (const Markup& m : store_.markups(path)) {
+            if (m.id != id) continue;
+            if (path != docPath_) {
+                saveReadingState();
+                if (!openDocument(path)) return false;
+            }
+            jumpToMarkup(id);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MainWindow::openNotebook(const QString& topicId)
+{
+    const auto docs = store_.topicDocs(topicId);
+    if (docs.isEmpty()) return false;
+    saveReadingState();
+    const QString previous = currentTopic_;
+    currentTopic_ = topicId;
+    if (!openDocument(docs.first().docPath)) {
+        currentTopic_ = previous;
+        refreshNotebookWorkspace();
+        return false;
+    }
+    setWorkspaceMode(0);
+    refreshNotebookWorkspace();
+    return true;
+}
+
+void MainWindow::refreshNotebookWorkspace()
+{
+    if (!notebookDocuments_ || !notebookOutline_) return;
+    const QSignalBlocker tabsBlocked(notebookDocuments_);
+    while (notebookDocuments_->count()) notebookDocuments_->removeTab(0);
+    QString title = QStringLiteral("文档阅读");
+    QVector<mind::TopicDocInput> inputs;
+    QVector<MindGroup> groups;
+    QStringList paths;
+    if (!currentTopic_.isEmpty()) {
+        for (const Topic& t : store_.topics()) if (t.id == currentTopic_) title = t.name;
+        for (const TopicDoc& d : store_.topicDocs(currentTopic_)) paths.append(d.docPath);
+        groups = store_.mindGroupsForTopic(currentTopic_);
+    } else if (!docPath_.isEmpty()) {
+        paths.append(docPath_);
+        title = QFileInfo(docPath_).completeBaseName();
+        groups = store_.mindGroups(docPath_);
+    }
+    for (const QString& storedPath : paths) {
+        const QString path = storedPath.startsWith(QStringLiteral("unresolved:"))
+                                 ? storedPath : QFileInfo(storedPath).absoluteFilePath();
+        const int tab = notebookDocuments_->addTab(QFileInfo(path).fileName());
+        notebookDocuments_->setTabData(tab, path);
+        notebookDocuments_->setTabToolTip(tab, path);
+        if (path == docPath_) notebookDocuments_->setCurrentIndex(tab);
+        mind::TopicDocInput input;
+        input.title = QFileInfo(path).completeBaseName();
+        input.docPath = path;
+        input.markups = store_.markups(path);
+        inputs.append(input);
+    }
+    notebookTitle_->setText(currentTopic_.isEmpty() ? QStringLiteral("文档 · %1").arg(title)
+                           : QStringLiteral("笔记本 · %1    ·    %2 份资料").arg(title).arg(paths.size()));
+    QSet<QString> collapsedKeys;
+    QString selectedKey;
+    const bool hadTree = notebookOutline_->topLevelItemCount() > 0;
+    std::function<void(QTreeWidgetItem*)> remember = [&](QTreeWidgetItem* item) {
+        const QString key = item->data(0, Qt::UserRole + 1).toString();
+        if (!item->isExpanded()) collapsedKeys.insert(key);
+        if (item == notebookOutline_->currentItem()) selectedKey = key;
+        for (int i = 0; i < item->childCount(); ++i) remember(item->child(i));
+    };
+    for (int i = 0; i < notebookOutline_->topLevelItemCount(); ++i)
+        remember(notebookOutline_->topLevelItem(i));
+    notebookOutline_->clear();
+    const mind::Node root = mind::buildFromTopic(title, inputs, groups);
+    std::function<void(QTreeWidgetItem*, const mind::Node&)> fill =
+        [&](QTreeWidgetItem* parent, const mind::Node& node) {
+            auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(notebookOutline_);
+            item->setText(0, node.text);
+            item->setData(0, Qt::UserRole, node.markupId);
+            const QString key = parent ? parent->data(0, Qt::UserRole + 1).toString() + QLatin1Char('/') +
+                                           (node.markupId.isEmpty() ? node.groupKey + node.text : node.markupId)
+                                       : mindScopeKey();
+            item->setData(0, Qt::UserRole + 1, key);
+            item->setExpanded(!hadTree || !collapsedKeys.contains(key));
+            if (key == selectedKey) notebookOutline_->setCurrentItem(item);
+            item->setToolTip(0, node.excerpt + QStringLiteral("\n") + node.comment);
+            for (const auto& child : node.children) fill(item, child);
+        };
+    fill(nullptr, root);
 }
 
 void MainWindow::restoreReadingState()
@@ -1156,6 +1310,7 @@ void MainWindow::reloadMarkups()
     updateFilterWidgets();
     updateNotesPanel();
     updateStatus();
+    refreshNotebookWorkspace();
     // The panel shows the same notes the list shows, so it has to follow every change.
     if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
 }
@@ -1312,7 +1467,7 @@ void MainWindow::updateNotesPanel()
         if (m.id == keepId) keepRow = row;
     }
 
-    leftTabs_->setTabText(1, QStringLiteral("笔记 (%1)").arg(shown_.size()));
+    leftTabs_->setTabText(2, QStringLiteral("笔记 (%1)").arg(shown_.size()));
     if (keepRow >= 0) notesList_->setCurrentRow(keepRow);
 }
 
@@ -1416,13 +1571,50 @@ void MainWindow::editMarkupComment(const QString& id)
         return;
     }
     if (!m) return;
-    const QString text = askMultiline(this, QStringLiteral("批注"), QStringLiteral("批注内容："),
-                                      m->comment);
-    if (text.isNull()) return;
-    Markup after = *m;
-    after.comment = text;
-    after.updated = QDateTime::currentMSecsSinceEpoch();
-    undo_->push(new MarkupCommand(this, CmdKind::Modify, *m, after, QStringLiteral("编辑批注")));
+    // Modeless: never block headless runs, and keep the source visible while editing.
+    auto* editor = new QDialog(this);
+    editor->setAttribute(Qt::WA_DeleteOnClose);
+    editor->setObjectName("captureEditor");
+    editor->setWindowTitle(QStringLiteral("摘录与个人批注"));
+    editor->resize(580, 520);
+    auto* layout = new QVBoxLayout(editor);
+    auto* source = new QLabel(QStringLiteral("%1 · 第 %2 页")
+                                  .arg(QFileInfo(m->docPath).fileName()).arg(m->page + 1), editor);
+    source->setWordWrap(true);
+    layout->addWidget(source);
+    layout->addWidget(new QLabel(QStringLiteral("来源原文（只读）"), editor));
+    auto* quote = new QPlainTextEdit(m->text, editor);
+    quote->setObjectName("captureQuote");
+    quote->setReadOnly(true);
+    layout->addWidget(quote, 1);
+    layout->addWidget(new QLabel(QStringLiteral("我的批注"), editor));
+    auto* comment = new QPlainTextEdit(m->comment, editor);
+    comment->setObjectName("captureComment");
+    comment->setPlaceholderText(QStringLiteral("写下你的理解、疑问或联系……"));
+    layout->addWidget(comment, 2);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, editor);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, editor, &QDialog::reject);
+    const QString sourcePath = m->docPath;
+    const QString originalComment = m->comment;
+    connect(buttons, &QDialogButtonBox::accepted, editor,
+            [this, editor, comment, id, sourcePath, originalComment]() {
+        // Do not write a snapshot over edits made while this modeless editor was open.
+        Markup* current = findMarkup(id);
+        if (!current || current->docPath != sourcePath || current->comment != originalComment) {
+            statusBar()->showMessage(QStringLiteral("资料或笔记已变化，请关闭编辑器后重新打开；未覆盖原内容"), 5000);
+            return;
+        }
+        if (current->comment != comment->toPlainText()) {
+            Markup before = *current;
+            Markup after = before;
+            after.comment = comment->toPlainText();
+            after.updated = QDateTime::currentMSecsSinceEpoch();
+            undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after, QStringLiteral("编辑批注")));
+        }
+        editor->accept();
+    });
+    editor->show();
 }
 
 void MainWindow::editMarkupTags(const QString& id)
@@ -3236,10 +3428,7 @@ void MainWindow::showLibrary()
                 4000);
             return;
         }
-        if (!openDocument(docs.first().docPath)) return;
-        currentTopic_ = topicId;
-        setWorkspaceMode(1);
-        rebuildMindMap();
+        if (!openNotebook(topicId)) return;
         statusBar()->showMessage(QStringLiteral("主题「%1」· %2 份资料").arg(name).arg(docs.size()),
                                  3500);
         if (library_) library_->reload();

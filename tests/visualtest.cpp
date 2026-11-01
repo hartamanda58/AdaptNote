@@ -152,10 +152,14 @@ int main(int argc, char** argv)
 
     // Every markup overlay must (a) be visible as coloured pixels and (b) cover text.
     for (const Markup& m : markups) {
+        // Workspace headers reduce the viewport height. Scroll to the annotation before
+        // checking its pixels instead of assuming every fixture is initially on screen.
+        if (!m.quads.isEmpty()) v->scrollToPageFraction(m.page, qMax(0.0, m.quads.first().ul.y() / 842.0 - 0.15));
+        img = grabView(w);
         const QRect r = markupRect(v, m);
         const int sat = saturatedPixels(img, r);
         const int dark = darkPixels(img, r);
-        check(r.isValid() && page0.intersects(r),
+        check(r.isValid() && v->pageRectInViewport(m.page).intersects(r),
               QStringLiteral("%1 on page %2 maps into the page rect %3,%4 %5x%6")
                   .arg(markupTypeName(m.type)).arg(m.page + 1).arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height()));
         if (m.type == MarkupType::Ink)
@@ -176,6 +180,7 @@ int main(int argc, char** argv)
         }
         w.addInkStroke(0, stroke);
         settle();
+        v->scrollToPageFraction(0, 0.2);
         img = grabView(w);
         QVector<Quad> inkQuads;
         for (const Markup& m : v->markups())

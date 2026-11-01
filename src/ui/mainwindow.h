@@ -28,6 +28,7 @@ class QTimer;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QTabBar;
 class QUndoStack;
 class QTextBrowser;
 class QPushButton;
@@ -92,7 +93,12 @@ public:
     bool modifyMindLinkForTest(const MindLink& link);
     QVector<MindLink> mindLinksForTest() const { return store_.mindLinks(mindScopeKey()); }
     // Test hooks for the topic-aware search path.
-    void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); }
+    void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); refreshNotebookWorkspace(); }
+    bool openNotebook(const QString& topicId);
+    void refreshNotebookWorkspace();
+    int notebookDocumentCountForTest() const;
+    QStringList notebookNoteIdsForTest() const;
+    bool activateNotebookNote(const QString& id);
     void setFindScopeForTest(int scope);
     int notesPanelCountForTest() const;
     QString notesPanelTextForTest(int row) const;
@@ -212,6 +218,9 @@ private:
     QSplitter* splitter_ = nullptr;
     QToolBar* mainToolbar_ = nullptr;
     QMenu* moreMenu_ = nullptr;
+    QLabel* notebookTitle_ = nullptr;
+    QTabBar* notebookDocuments_ = nullptr;
+    QTreeWidget* notebookOutline_ = nullptr;
     QDockWidget* notesDock_ = nullptr;
     QDockWidget* aiDock_ = nullptr;
     QToolBar* findBar_ = nullptr;

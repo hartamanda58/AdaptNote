@@ -14,6 +14,11 @@
 #include <QLineEdit>
 #include <QTemporaryDir>
 #include <QListWidget>
+#include <QTreeWidget>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
 
 #include <cstdio>
 #include <functional>
@@ -1016,7 +1021,7 @@ int main(int argc, char** argv)
             std::printf("\n=== reader: topic-wide note search ===\n");
             QTemporaryDir topicTmp;
             const QString second = topicTmp.filePath("topic-second.pdf");
-            { QFile f(second); f.open(QIODevice::WriteOnly); f.write("pdf"); }
+            check(QFile::copy(pdf, second), QStringLiteral("second document is a readable PDF"));
 
             // a note in a second document, then both documents in one topic
             Markup other;
@@ -1034,6 +1039,48 @@ int main(int argc, char** argv)
             check(w.addTopicDocForTest(topicId, second), QStringLiteral("second document attached"));
 
             w.openTopicForTest(topicId);
+            check(w.notebookDocumentCountForTest() == 2, QStringLiteral("notebook shows two document tabs"));
+            check(w.notebookNoteIdsForTest().contains(other.id), QStringLiteral("outline includes the other document note"));
+            check(w.activateNotebookNote(other.id), QStringLiteral("outline opens the other document source"));
+            check(w.visibleMarkups().size() == 1 && w.visibleMarkups().first().id == other.id,
+                  QStringLiteral("source navigation switches the actual reader document"));
+            check(w.notebookDocumentCountForTest() == 2 && w.notebookNoteIdsForTest().size() > 1,
+                  QStringLiteral("switching documents preserves the whole notebook outline"));
+            auto* outline = w.findChild<QTreeWidget*>(QStringLiteral("notebookOutline"));
+            check(outline && outline->topLevelItemCount() == 1, QStringLiteral("notebook has one outline root"));
+            if (outline && outline->topLevelItemCount()) {
+                auto* root = outline->topLevelItem(0);
+                root->setExpanded(false);
+                w.refreshNotebookWorkspace();
+                check(!outline->topLevelItem(0)->isExpanded(), QStringLiteral("outline refresh preserves collapsed state"));
+                outline->topLevelItem(0)->setExpanded(true);
+                QTreeWidgetItem* noteItem = nullptr;
+                std::function<void(QTreeWidgetItem*)> locate = [&](QTreeWidgetItem* item) {
+                    if (item->data(0, Qt::UserRole).toString() == other.id) noteItem = item;
+                    for (int i = 0; i < item->childCount(); ++i) locate(item->child(i));
+                };
+                locate(outline->topLevelItem(0));
+                if (noteItem) outline->itemDoubleClicked(noteItem, 0);
+                settle();
+                auto* editor = w.findChild<QDialog*>(QStringLiteral("captureEditor"));
+                check(editor != nullptr, QStringLiteral("outline opens the capture editor"));
+                if (editor) {
+                    auto* quote = editor->findChild<QPlainTextEdit*>(QStringLiteral("captureQuote"));
+                    auto* comment = editor->findChild<QPlainTextEdit*>(QStringLiteral("captureComment"));
+                    check(quote && quote->isReadOnly() && quote->toPlainText() == other.text,
+                          QStringLiteral("editor keeps the source excerpt read-only"));
+                    if (comment) comment->setPlainText(QStringLiteral("我的理解"));
+                    auto* buttons = editor->findChild<QDialogButtonBox*>();
+                    if (buttons) buttons->button(QDialogButtonBox::Save)->click();
+                    check(w.visibleMarkups().first().comment == QStringLiteral("我的理解") &&
+                          w.visibleMarkups().first().text == other.text,
+                          QStringLiteral("saving personal comments preserves source text"));
+                    w.undoCommand();
+                    check(w.visibleMarkups().first().comment == other.comment,
+                          QStringLiteral("capture editor save is undoable"));
+                }
+            }
+            check(w.openDocument(pdf), QStringLiteral("return to the first document"));
             w.setFindScopeForTest(1);
             w.findText(QStringLiteral("zebra"));
 
