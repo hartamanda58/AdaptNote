@@ -1146,13 +1146,19 @@ int main(int argc, char** argv)
                     check(quote && quote->isReadOnly() && quote->toPlainText() == other.text,
                           QStringLiteral("editor keeps the source excerpt read-only"));
                     if (comment) comment->setPlainText(QStringLiteral("我的理解"));
+                    auto* heading = editor->findChild<QLineEdit*>(QStringLiteral("captureTitle"));
+                    if (heading) heading->setText(QStringLiteral("自定义标题"));
                     auto* buttons = editor->findChild<QDialogButtonBox*>();
                     if (buttons) buttons->button(QDialogButtonBox::Save)->click();
                     check(w.visibleMarkups().first().comment == QStringLiteral("我的理解") &&
                           w.visibleMarkups().first().text == other.text,
                           QStringLiteral("saving personal comments preserves source text"));
+                    check(w.visibleMarkups().first().title == QStringLiteral("自定义标题"),
+                          QStringLiteral("capture title persists separately from original excerpt"));
+                    const Markup roundTrip = Markup::fromJson(w.visibleMarkups().first().toJson());
+                    check(roundTrip.title == QStringLiteral("自定义标题"), QStringLiteral("note title survives sync JSON round trip"));
                     w.undoCommand();
-                    check(w.visibleMarkups().first().comment == other.comment,
+                    check(w.visibleMarkups().first().comment == other.comment && w.visibleMarkups().first().title == other.title,
                           QStringLiteral("capture editor save is undoable"));
                 }
             }

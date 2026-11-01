@@ -53,6 +53,7 @@ struct Markup {
     QColor color{255, 213, 0};
     QVector<Quad> quads;      // page space
     QString text;             // excerpt text
+    QString title;            // user's heading, distinct from the source excerpt
     QString comment;          // user note
     QStringList tags;         // free-form tags
     QString imagePath;        // absolute path for MarkupType::Image

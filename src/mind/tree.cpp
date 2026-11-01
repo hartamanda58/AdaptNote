@@ -47,7 +47,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
             if (!head.isEmpty()) text = head;
         }
         if (text.size() > 60) text = text.left(60) + QStringLiteral("…");
-        leaf.text = text;
+        leaf.text = m.title.trimmed().isEmpty() ? text : m.title.trimmed();
         leaf.page = m.page;
         leaf.markupId = m.id;
         leaf.groupKey = m.mindGroup.isEmpty() ? QString()

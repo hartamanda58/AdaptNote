@@ -1895,6 +1895,11 @@ void MainWindow::editMarkupComment(const QString& id)
                                   .arg(QFileInfo(m->docPath).fileName()).arg(m->page + 1), editor);
     source->setWordWrap(true);
     layout->addWidget(source);
+    layout->addWidget(new QLabel(QStringLiteral("我的标题"), editor));
+    auto* heading = new QLineEdit(m->title, editor);
+    heading->setObjectName("captureTitle");
+    heading->setPlaceholderText(QStringLiteral("可选，用自己的话概括这条笔记"));
+    layout->addWidget(heading);
     layout->addWidget(new QLabel(QStringLiteral("来源原文（只读）"), editor));
     auto* quote = new QPlainTextEdit(m->text, editor);
     quote->setObjectName("captureQuote");
@@ -1910,18 +1915,20 @@ void MainWindow::editMarkupComment(const QString& id)
     connect(buttons, &QDialogButtonBox::rejected, editor, &QDialog::reject);
     const QString sourcePath = m->docPath;
     const QString originalComment = m->comment;
+    const QString originalTitle = m->title;
     connect(buttons, &QDialogButtonBox::accepted, editor,
-            [this, editor, comment, id, sourcePath, originalComment]() {
+            [this, editor, comment, heading, id, sourcePath, originalComment, originalTitle]() {
         // Do not write a snapshot over edits made while this modeless editor was open.
         Markup* current = findMarkup(id);
-        if (!current || current->docPath != sourcePath || current->comment != originalComment) {
+        if (!current || current->docPath != sourcePath || current->comment != originalComment || current->title != originalTitle) {
             statusBar()->showMessage(QStringLiteral("资料或笔记已变化，请关闭编辑器后重新打开；未覆盖原内容"), 5000);
             return;
         }
-        if (current->comment != comment->toPlainText()) {
+        if (current->comment != comment->toPlainText() || current->title != heading->text().trimmed()) {
             Markup before = *current;
             Markup after = before;
             after.comment = comment->toPlainText();
+            after.title = heading->text().trimmed();
             after.updated = QDateTime::currentMSecsSinceEpoch();
             undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after, QStringLiteral("编辑批注")));
         }

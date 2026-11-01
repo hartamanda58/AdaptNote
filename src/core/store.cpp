@@ -98,12 +98,13 @@ Markup readMarkup(const QSqlQuery& q)
     m.mindOrder = q.value(19).toInt();
     m.anchorChapter = q.value(20).toString();
     m.anchorOffset = q.value(21).toString().isEmpty() ? -1 : q.value(21).toInt();
+    m.title = q.value(22).toString();
     return m;
 }
 
 const char* kSelectCols =
     "select page,type,color,quads,text,comment,created,updated,written,id,docPath,tags,imagePath,"
-    "vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,anchorChapter,anchorOffset"
+    "vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,anchorChapter,anchorOffset,title"
     " from markups";
 
 // QString() is null and binds as SQL NULL; every "? = ''" style guard in this
@@ -381,6 +382,7 @@ bool Store::ensureSchema(QString* error)
     ensureColumn("mind_groups", "topicId", "text default ''");
     ensureColumn("markups", "anchorChapter", "text");
     ensureColumn("markups", "anchorOffset", "integer default -1");
+    ensureColumn("markups", "title", "text default ''");
 
     // v0.6 stored the group *name* in markups.mindGroup; from v0.7 it stores a group id.
     // Adopt any leftover name into a real group row (deterministic id so two devices
@@ -608,7 +610,7 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
     static const char* kUpsertSql =
         "insert into markups(id,docPath,page,type,color,quads,text,comment,created,updated,"
         "written,tags,imagePath,vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,"
-        "anchorChapter,anchorOffset) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "anchorChapter,anchorOffset,title) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " on conflict(id) do update set page=excluded.page, type=excluded.type,"
         " color=excluded.color, quads=excluded.quads, text=excluded.text,"
         " comment=excluded.comment, updated=excluded.updated, written=excluded.written,"
@@ -616,7 +618,7 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
         " deviceId=excluded.deviceId, deleted=excluded.deleted,"
         " conflictedFrom=excluded.conflictedFrom, ink=excluded.ink,"
         " mindGroup=excluded.mindGroup, mindOrder=excluded.mindOrder,"
-        " anchorChapter=excluded.anchorChapter, anchorOffset=excluded.anchorOffset";
+        " anchorChapter=excluded.anchorChapter, anchorOffset=excluded.anchorOffset, title=excluded.title";
 
     QSqlQuery* qp = prepared(QString::fromLatin1(kUpsertSql));
     if (!qp) {
@@ -652,6 +654,7 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
     q.addBindValue(m.mindOrder);
     q.addBindValue(m.anchorChapter);
     q.addBindValue(m.anchorOffset);
+    q.addBindValue(m.title);
     if (!q.exec()) {
         if (error) *error = q.lastError().text();
         return false;

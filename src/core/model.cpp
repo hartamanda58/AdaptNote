@@ -124,6 +124,7 @@ QJsonObject Markup::toJson() const
     o["quads"] = qs;
     o["text"] = text;
     o["comment"] = comment;
+    if (!title.isEmpty()) o["title"] = title;
     o["tags"] = QJsonArray::fromStringList(tags);
     if (!ink.isEmpty()) {
         QJsonArray pts;
@@ -159,6 +160,7 @@ Markup Markup::fromJson(const QJsonObject& o)
     for (const QJsonValue& v : o["quads"].toArray()) m.quads.append(Quad::fromJson(v.toObject()));
     m.text = o["text"].toString();
     m.comment = o["comment"].toString();
+    m.title = o["title"].toString();
     for (const QJsonValue& v : o["tags"].toArray()) m.tags.append(v.toString());
     for (const QJsonValue& v : o["ink"].toArray()) m.ink.append(InkPoint::fromJson(v.toArray()));
     m.imagePath = o["imagePath"].toString();
