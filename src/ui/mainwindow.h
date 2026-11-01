@@ -95,6 +95,8 @@ public:
     // Test hooks for the topic-aware search path.
     void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); refreshNotebookWorkspace(); }
     bool openNotebook(const QString& topicId);
+    QString createNotebook(const QString& name);
+    bool addNotebookDocument(const QString& path);
     void refreshNotebookWorkspace();
     int notebookDocumentCountForTest() const;
     QStringList notebookNoteIdsForTest() const;

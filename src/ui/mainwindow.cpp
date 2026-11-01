@@ -467,7 +467,37 @@ void MainWindow::buildUi()
     notebookTitle_ = new QLabel(QStringLiteral("AdaptNote · 文档阅读"), workspace);
     notebookTitle_->setObjectName("notebookHeader");
     notebookTitle_->setStyleSheet("padding:12px 18px;background:#ffffff;color:#1d2939;font-size:16px;font-weight:600;border-bottom:1px solid #e4e7ec;");
-    workspaceLayout->addWidget(notebookTitle_);
+    auto* header = new QWidget(workspace);
+    auto* headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 12, 0);
+    headerLayout->addWidget(notebookTitle_, 1);
+    auto* libraryButton = new QPushButton(QStringLiteral("资料库"), header);
+    auto* newNotebookButton = new QPushButton(QStringLiteral("新建笔记本"), header);
+    auto* addDocumentButton = new QPushButton(QStringLiteral("添加资料"), header);
+    headerLayout->addWidget(libraryButton);
+    headerLayout->addWidget(newNotebookButton);
+    headerLayout->addWidget(addDocumentButton);
+    connect(libraryButton, &QPushButton::clicked, this, &MainWindow::showLibrary);
+    connect(newNotebookButton, &QPushButton::clicked, this, [this]() {
+        const QString name = askText(this, QStringLiteral("新建笔记本"), QStringLiteral("名称："));
+        if (!name.trimmed().isEmpty()) createNotebook(name);
+    });
+    connect(addDocumentButton, &QPushButton::clicked, this, [this]() {
+        if (currentTopic_.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("请先新建或打开笔记本，再添加资料"), 4000);
+            return;
+        }
+        if (qEnvironmentVariableIsSet("ADAPT_HEADLESS")) return;
+        const QStringList paths = QFileDialog::getOpenFileNames(this, QStringLiteral("添加阅读资料"),
+                                    QString(), QStringLiteral("阅读资料 (*.pdf *.epub)"));
+        for (const QString& path : paths) {
+            if (!addNotebookDocument(path)) {
+                statusBar()->showMessage(QStringLiteral("添加失败：%1；此前已成功添加的资料会保留").arg(path), 5000);
+                break;
+            }
+        }
+    });
+    workspaceLayout->addWidget(header);
     notebookDocuments_ = new QTabBar(workspace);
     notebookDocuments_->setObjectName("notebookDocuments");
     notebookDocuments_->setExpanding(false);
@@ -1175,10 +1205,42 @@ bool MainWindow::activateNotebookNote(const QString& id)
     return false;
 }
 
+QString MainWindow::createNotebook(const QString& name)
+{
+    if (name.trimmed().isEmpty()) return {};
+    Topic topic = store_.stampTopicForLocalWrite(Topic{});
+    topic.name = name.trimmed();
+    if (!store_.upsertTopic(topic)) return {};
+    return openNotebook(topic.id) ? topic.id : QString();
+}
+
+bool MainWindow::addNotebookDocument(const QString& path)
+{
+    if (currentTopic_.isEmpty() || !QFileInfo(path).isFile()) return false;
+    saveReadingState();
+    if (!openDocument(path)) return false;
+    if (!store_.addTopicDoc(currentTopic_, docPath_)) return false;
+    setWorkspaceMode(0);
+    view_->show();
+    refreshNotebookWorkspace();
+    return true;
+}
+
 bool MainWindow::openNotebook(const QString& topicId)
 {
+    bool exists = false;
+    for (const Topic& topic : store_.topics()) if (topic.id == topicId) exists = true;
+    if (!exists) return false;
     const auto docs = store_.topicDocs(topicId);
-    if (docs.isEmpty()) return false;
+    if (docs.isEmpty()) {
+        saveReadingState();
+        currentTopic_ = topicId;
+        setWorkspaceMode(0);
+        view_->hide(); // do not show the previous notebook's document in an empty notebook
+        refreshNotebookWorkspace();
+        statusBar()->showMessage(QStringLiteral("笔记本尚无资料，请点击「添加资料」"), 5000);
+        return true;
+    }
     saveReadingState();
     const QString previous = currentTopic_;
     currentTopic_ = topicId;
@@ -3415,19 +3477,11 @@ void MainWindow::showLibrary()
         if (library_) library_->reload();
     });
     connect(library_, &LibraryView::openTopicRequested, this, [this](const QString& topicId) {
-        // Entering a topic opens its first document so there is something to read next to
-        // the map, and switches the map to the cross-document view.
+        // A notebook may be empty; opening it exposes the add-document entry point.
         QString name;
         for (const Topic& t : store_.topics())
             if (t.id == topicId) name = t.name;
         const QVector<TopicDoc> docs = store_.topicDocs(topicId);
-        if (docs.isEmpty()) {
-            statusBar()->showMessage(
-                QStringLiteral("主题「%1」还没有资料：在书库里选中文档后点「加入选中文档」")
-                    .arg(name),
-                4000);
-            return;
-        }
         if (!openNotebook(topicId)) return;
         statusBar()->showMessage(QStringLiteral("主题「%1」· %2 份资料").arg(name).arg(docs.size()),
                                  3500);

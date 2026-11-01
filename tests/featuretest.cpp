@@ -1016,6 +1016,21 @@ int main(int argc, char** argv)
             w.setWorkspaceMode(0);
             settle();
         }
+        // ---- notebook creation / empty state / add-document workflow ----
+        {
+            const QString notebook = w.createNotebook(QStringLiteral("新的阅读笔记本"));
+            check(!notebook.isEmpty(), QStringLiteral("create notebook from workspace"));
+            check(w.notebookDocumentCountForTest() == 0 && !w.view()->isVisible(),
+                  QStringLiteral("empty notebook does not show the previous document"));
+            check(!w.addNotebookDocument(QStringLiteral("/missing/book.pdf")),
+                  QStringLiteral("missing document is rejected"));
+            check(w.addNotebookDocument(pdf), QStringLiteral("add first notebook document"));
+            check(w.notebookDocumentCountForTest() == 1 && w.view()->isVisible(),
+                  QStringLiteral("adding a document opens its reader and tab"));
+            check(w.addNotebookDocument(pdf) && w.notebookDocumentCountForTest() == 1,
+                  QStringLiteral("adding the same document does not duplicate tabs"));
+            w.openTopicForTest(QString());
+        }
         // ---- Ctrl+F can search the notes of the whole topic ----
         {
             std::printf("\n=== reader: topic-wide note search ===\n");
