@@ -15,6 +15,7 @@ struct Node {
     QString text;       // card title (group name, or a short headline for a note)
     int page = -1;      // >= 0 means "this node points at a place in a document"
     QString markupId;
+    QString parentMarkupId;
     QString docPath;     // local source for document branches; never inferred from a title
     QString groupKey;   // stable key of the group (empty for notes without one)
     QVector<Node> children;

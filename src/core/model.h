@@ -77,6 +77,7 @@ struct Markup {
     // ---- mind map structure ----
     // mindGroup holds the *id* of a MindGroup (empty = fall back to page grouping).
     QString mindGroup;
+    QString parentMarkupId; // optional note-to-note hierarchy within the owning document
     int mindOrder = 0;
 
     QJsonObject toJson() const;

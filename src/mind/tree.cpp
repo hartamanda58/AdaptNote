@@ -50,6 +50,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         leaf.text = m.title.trimmed().isEmpty() ? text : m.title.trimmed();
         leaf.page = m.page;
         leaf.markupId = m.id;
+        leaf.parentMarkupId = m.parentMarkupId;
         leaf.groupKey = m.mindGroup.isEmpty() ? QString()
                                               : QStringLiteral("group:%1").arg(m.mindGroup);
         // Card body: quoted source text, the reader's own words, and where it came from.
@@ -105,6 +106,64 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
     };
     for (auto it = childrenOf.begin(); it != childrenOf.end(); ++it) sortIds(it.value());
 
+    // Validate note-parent edges before grouping. Reject missing/cross-document parents and
+    // break cycles deterministically; rejected nodes fall back to their prior group/page.
+    QHash<QString, Markup> noteById;
+    for (const Markup& m : live) noteById.insert(m.id, m);
+    QHash<QString, QString> noteParent;
+    for (const Markup& m : live) {
+        QString parent = m.parentMarkupId;
+        if (parent == m.id || !noteById.contains(parent) || noteById.value(parent).docPath != m.docPath)
+            parent.clear();
+        else {
+            const Markup parentNote = noteById.value(parent);
+            if (parentNote.mindGroup != m.mindGroup ||
+                (m.mindGroup.isEmpty() && parentNote.page != m.page)) parent.clear();
+        }
+        noteParent.insert(m.id, parent);
+    }
+    for (const Markup& m : live) {
+        QStringList chain;
+        QString cursor = m.id;
+        while (!cursor.isEmpty()) {
+            if (chain.contains(cursor)) {
+                QString smallest = chain.first();
+                for (const QString& id : chain) if (id < smallest) smallest = id;
+                noteParent[smallest].clear();
+                break;
+            }
+            chain.append(cursor);
+            cursor = noteParent.value(cursor);
+        }
+    }
+    QHash<QString, QVector<QString>> childrenOfNote;
+    for (auto it = noteParent.cbegin(); it != noteParent.cend(); ++it)
+        if (!it.value().isEmpty()) childrenOfNote[it.value()].append(it.key());
+    auto sortNoteIds = [&](QVector<QString>& ids) {
+        std::sort(ids.begin(), ids.end(), [&](const QString& a, const QString& b) {
+            const Markup x = noteById.value(a), y = noteById.value(b);
+            if (x.mindOrder != y.mindOrder) return x.mindOrder < y.mindOrder;
+            if (x.page != y.page) return x.page < y.page;
+            return a < b;
+        });
+    };
+    for (auto it = childrenOfNote.begin(); it != childrenOfNote.end(); ++it) sortNoteIds(it.value());
+    std::function<Node(const QString&, const QString&)> buildNote =
+        [&](const QString& id, const QString& inheritedGroupKey) {
+            Node node = leafOf(noteById.value(id));
+            if (node.groupKey.isEmpty()) node.groupKey = inheritedGroupKey;
+            for (const QString& childId : childrenOfNote.value(id))
+                node.children.append(buildNote(childId, node.groupKey));
+            return node;
+        };
+    auto appendNoteForest = [&](Node& parent, const QVector<Markup>& notes) {
+        QVector<QString> roots;
+        for (const Markup& m : notes)
+            if (noteParent.value(m.id).isEmpty()) roots.append(m.id);
+        sortNoteIds(roots);
+        for (const QString& id : roots) parent.children.append(buildNote(id, parent.groupKey));
+    };
+
     // ---- notes per group (dangling ids fall back to page buckets) ----
     QHash<QString, QVector<Markup>> notesOf;
     QVector<Markup> orphaned;
@@ -136,7 +195,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
             if (emitted.contains(childId)) continue;
             node.children.append(buildGroup(childId));
         }
-        for (const Markup& m : notesOf.value(id)) node.children.append(leafOf(m));
+        appendNoteForest(node, notesOf.value(id));
         return node;
     };
 
@@ -152,20 +211,16 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         if (a.page != b.page) return a.page < b.page;
         return a.boundingRect().top() < b.boundingRect().top();
     });
-    int currentPage = -1;
-    for (const Markup& m : pageSorted) {
-        if (m.page != currentPage) {
-            currentPage = m.page;
-            Node bucket;
-            bucket.text = QStringLiteral("第 %1 页").arg(currentPage + 1);
-            bucket.page = currentPage;
-            bucket.groupKey = QStringLiteral("page:%1").arg(currentPage);
-            bucket.isGroup = true;
-            root.children.append(bucket);
-        }
-        Node leaf = leafOf(m);
-        leaf.groupKey = root.children.last().groupKey;   // same key as its page bucket
-        root.children.last().children.append(leaf);
+    QHash<int, QVector<Markup>> notesByPage;
+    for (const Markup& m : pageSorted) notesByPage[m.page].append(m);
+    for (auto it = notesByPage.cbegin(); it != notesByPage.cend(); ++it) {
+        Node bucket;
+        bucket.text = QStringLiteral("第 %1 页").arg(it.key() + 1);
+        bucket.page = it.key();
+        bucket.groupKey = QStringLiteral("page:%1").arg(it.key());
+        bucket.isGroup = true;
+        appendNoteForest(bucket, it.value());
+        root.children.append(bucket);
     }
 
     return root;
@@ -209,7 +264,8 @@ QVector<QPair<QString, int>> planReorder(const QVector<Markup>& siblings, const 
     QVector<QPair<QString, int>> changes;
     for (int i = 0; i < rest.size(); ++i) {
         const int newOrder = (i + 1) * 10;
-        if (rest.at(i).mindOrder != newOrder) changes.append({rest.at(i).id, newOrder});
+        if (rest.at(i).mindOrder != newOrder || !rest.at(i).parentMarkupId.isEmpty())
+            changes.append({rest.at(i).id, newOrder});
     }
     return changes;
 }

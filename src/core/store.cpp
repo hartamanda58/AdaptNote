@@ -99,12 +99,13 @@ Markup readMarkup(const QSqlQuery& q)
     m.anchorChapter = q.value(20).toString();
     m.anchorOffset = q.value(21).toString().isEmpty() ? -1 : q.value(21).toInt();
     m.title = q.value(22).toString();
+    m.parentMarkupId = q.value(23).toString();
     return m;
 }
 
 const char* kSelectCols =
     "select page,type,color,quads,text,comment,created,updated,written,id,docPath,tags,imagePath,"
-    "vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,anchorChapter,anchorOffset,title"
+    "vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,anchorChapter,anchorOffset,title,parentMarkupId"
     " from markups";
 
 // QString() is null and binds as SQL NULL; every "? = ''" style guard in this
@@ -332,7 +333,7 @@ bool Store::ensureSchema(QString* error)
         " written integer, tags text, imagePath text, vv text, deviceId text,"
         " deleted integer default 0, conflictedFrom text, ink text,"
         " mindGroup text, mindOrder integer default 0,"
-        " anchorChapter text, anchorOffset integer default -1)",
+        " anchorChapter text, anchorOffset integer default -1, title text default '', parentMarkupId text default '')",
         "create index if not exists idx_markups_doc on markups(docPath, page)",
         "create index if not exists idx_markups_updated on markups(updated)",
         "create table if not exists settings (key text primary key, value text)",
@@ -383,6 +384,7 @@ bool Store::ensureSchema(QString* error)
     ensureColumn("markups", "anchorChapter", "text");
     ensureColumn("markups", "anchorOffset", "integer default -1");
     ensureColumn("markups", "title", "text default ''");
+    ensureColumn("markups", "parentMarkupId", "text default ''");
 
     // v0.6 stored the group *name* in markups.mindGroup; from v0.7 it stores a group id.
     // Adopt any leftover name into a real group row (deterministic id so two devices
@@ -610,7 +612,7 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
     static const char* kUpsertSql =
         "insert into markups(id,docPath,page,type,color,quads,text,comment,created,updated,"
         "written,tags,imagePath,vv,deviceId,deleted,conflictedFrom,ink,mindGroup,mindOrder,"
-        "anchorChapter,anchorOffset,title) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "anchorChapter,anchorOffset,title,parentMarkupId) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " on conflict(id) do update set page=excluded.page, type=excluded.type,"
         " color=excluded.color, quads=excluded.quads, text=excluded.text,"
         " comment=excluded.comment, updated=excluded.updated, written=excluded.written,"
@@ -618,7 +620,8 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
         " deviceId=excluded.deviceId, deleted=excluded.deleted,"
         " conflictedFrom=excluded.conflictedFrom, ink=excluded.ink,"
         " mindGroup=excluded.mindGroup, mindOrder=excluded.mindOrder,"
-        " anchorChapter=excluded.anchorChapter, anchorOffset=excluded.anchorOffset, title=excluded.title";
+        " anchorChapter=excluded.anchorChapter, anchorOffset=excluded.anchorOffset, title=excluded.title,"
+        " parentMarkupId=excluded.parentMarkupId";
 
     QSqlQuery* qp = prepared(QString::fromLatin1(kUpsertSql));
     if (!qp) {
@@ -655,6 +658,7 @@ bool Store::upsertMarkupRow(const Markup& m, QString* error, bool writeMirror, b
     q.addBindValue(m.anchorChapter);
     q.addBindValue(m.anchorOffset);
     q.addBindValue(m.title);
+    q.addBindValue(m.parentMarkupId);
     if (!q.exec()) {
         if (error) *error = q.lastError().text();
         return false;

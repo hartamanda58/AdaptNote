@@ -404,16 +404,22 @@ int main(int argc, char** argv)
         inChild.id = newId();
         inChild.mindGroup = child.id;
         inChild.text = QStringLiteral("挂在子主题");
-        nested << inTop << inChild;
+        Markup nestedNote = markups.at(2);
+        nestedNote.id = newId();
+        nestedNote.mindGroup = child.id;
+        nestedNote.parentMarkupId = inChild.id;
+        nestedNote.title = QStringLiteral("子笔记标题");
+        nestedNote.text = QStringLiteral("嵌套的个人笔记");
+        nested << inTop << inChild << nestedNote;
         gctx.markups = nested;
         gctx.groupsByDoc.insert(ctx.docPath, {top, child});
 
         check(exports::toOpml(gctx, &err), QStringLiteral("opml with groups: %1").arg(err));
         const QString opml = readAll(gctx.outPath);
         check(xmlWellFormed(opml), QStringLiteral("grouped opml is well formed"));
-        // note leaves are self-closing, so the deepest *open* outline is the subgroup
-        check(maxElementDepth(opml, QStringLiteral("outline")) == 3,
-              QStringLiteral("opml nests group > subgroup (depth %1)")
+        // nested note leaves add a further outline level below the subgroup
+        check(maxElementDepth(opml, QStringLiteral("outline")) == 4,
+              QStringLiteral("opml nests group > subgroup > note (depth %1)")
                   .arg(maxElementDepth(opml, QStringLiteral("outline"))));
         // the note must sit inside the subgroup: its line is indented deeper than the group
         const int childGroupAt = opml.indexOf(QStringLiteral("子主题"));
@@ -422,6 +428,9 @@ int main(int argc, char** argv)
               QStringLiteral("note is written after (inside) its subgroup"));
         check(opml.contains(QStringLiteral("text=\"挂在子主题\"")),
               QStringLiteral("note line present in the grouped outline"));
+        check(opml.contains(QStringLiteral("_title=\"子笔记标题\"")) &&
+              opml.contains(QStringLiteral("text=\"子笔记标题\"")),
+              QStringLiteral("OPML preserves nested note title"));
         check(opml.contains(QStringLiteral("第一部分")) && opml.contains(QStringLiteral("子主题")),
               QStringLiteral("opml carries both group names"));
 
@@ -431,11 +440,11 @@ int main(int argc, char** argv)
             ZipReader zr(gctx.outPath);
             const QString content = QString::fromUtf8(zr.read(QStringLiteral("content.xml")));
             check(xmlWellFormed(content), QStringLiteral("grouped xmind is well formed"));
-            check(countXmlElements(content, QStringLiteral("topic")) == 5,
-                  QStringLiteral("xmind topics = root + group + subgroup + 2 notes (%1)")
+            check(countXmlElements(content, QStringLiteral("topic")) == 6,
+                  QStringLiteral("xmind topics = root + group + subgroup + 3 notes (%1)")
                       .arg(countXmlElements(content, QStringLiteral("topic"))));
-            check(maxElementDepth(content, QStringLiteral("topics")) == 3,
-                  QStringLiteral("xmind nests topics three levels deep (%1)")
+            check(maxElementDepth(content, QStringLiteral("topics")) == 4,
+                  QStringLiteral("xmind nests topics four levels deep (%1)")
                       .arg(maxElementDepth(content, QStringLiteral("topics"))));
             check(content.contains(QStringLiteral("子主题")),
                   QStringLiteral("xmind keeps the subgroup"));
@@ -463,13 +472,20 @@ int main(int argc, char** argv)
         inChild.id = newId();
         inChild.mindGroup = child.id;
         inChild.text = QStringLiteral("挂在子主题的内容");
+        inChild.title = QStringLiteral("子主题笔记标题");
+        Markup nestedNote = markups.at(2);
+        nestedNote.id = newId();
+        nestedNote.mindGroup = child.id;
+        nestedNote.parentMarkupId = inChild.id;
+        nestedNote.title = QStringLiteral("子层级笔记");
+        nestedNote.text = QStringLiteral("带有父子关系");
         Markup loose = markups.at(2);
         loose.id = newId();
         loose.mindGroup.clear();   // no group -> page bucket
 
         ExportContext grouped = ctx;
         grouped.byGroups = true;
-        grouped.markups = {inTop, inChild, loose};
+        grouped.markups = {inTop, inChild, nestedNote, loose};
         grouped.groupsByDoc.clear();
         grouped.groupsByDoc.insert(ctx.docPath, {top, child});
 
@@ -481,14 +497,15 @@ int main(int argc, char** argv)
         check(md.contains(QStringLiteral("### 子主题")),
               QStringLiteral("md nests the subgroup heading"));
         check(md.contains(QStringLiteral("挂在第一部分的内容")) &&
-                  md.contains(QStringLiteral("挂在子主题的内容")),
-              QStringLiteral("md lists the notes under their groups"));
+                  md.contains(QStringLiteral("挂在子主题的内容")) &&
+                  md.contains(QStringLiteral("子层级笔记")),
+              QStringLiteral("md lists notes and nested notes under their groups"));
         check(!md.contains(QStringLiteral("### 第 1 页")),
               QStringLiteral("md does not put the grouped notes under a page heading"));
         int bullets = 0;
         for (const QString& line : md.split(QLatin1Char('\n')))
-            if (line.startsWith(QStringLiteral("- **"))) ++bullets;
-        check(bullets == 3, QStringLiteral("md kept all %1 notes").arg(bullets));
+            if (line.trimmed().startsWith(QStringLiteral("- **"))) ++bullets;
+        check(bullets == 4, QStringLiteral("md kept all %1 notes").arg(bullets));
 
         grouped.outPath = tmp.path() + "/bygroups.html";
         check(exports::toHtml(grouped, &err), QStringLiteral("grouped html: %1").arg(err));
@@ -505,7 +522,7 @@ int main(int argc, char** argv)
         for (int i = html.indexOf(QStringLiteral("class=\"item\"")); i >= 0;
              i = html.indexOf(QStringLiteral("class=\"item\""), i + 1))
             ++items;
-        check(items == 3, QStringLiteral("html kept all %1 notes").arg(items));
+        check(items == 4, QStringLiteral("html kept all %1 notes").arg(items));
     }
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "EXPORT CHECKS PASSED" : "EXPORT CHECKS FAILED", g_fail);

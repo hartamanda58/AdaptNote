@@ -76,7 +76,7 @@ namespace {
 class NotebookOutlineTree : public QTreeWidget {
 public:
     using QTreeWidget::QTreeWidget;
-    std::function<bool(const QString&, QTreeWidgetItem*)> moveNote;
+    std::function<bool(const QString&, QTreeWidgetItem*, bool)> moveNote;
     std::function<bool(const QString&, QTreeWidgetItem*)> moveGroup;
 protected:
     void startDrag(Qt::DropActions) override
@@ -112,9 +112,13 @@ protected:
     {
         if (event->source() != this || !moveNote) { event->ignore(); return; }
         const QString id = QString::fromUtf8(event->mimeData()->data("application/x-adaptnote-note"));
+        auto* target = itemAt(event->position().toPoint());
+        const QRect row = target ? visualItemRect(target) : QRect();
+        const bool nestUnderParent = !row.isEmpty() &&
+                                     event->position().toPoint().y() >= row.center().y() + row.height() / 4;
         const bool moved = id.startsWith(QStringLiteral("group:"))
-                               ? (moveGroup && moveGroup(id.mid(6), itemAt(event->position().toPoint())))
-                               : moveNote(id, itemAt(event->position().toPoint()));
+                               ? (moveGroup && moveGroup(id.mid(6), target))
+                               : moveNote(id, target, nestUnderParent);
         if (moved) event->acceptProposedAction();
         else event->ignore();
     }
@@ -1171,10 +1175,17 @@ void MainWindow::buildDocks()
         return target && moveNotebookGroup(id, target->data(0, Qt::UserRole + 3).toString(),
                                            target->data(0, Qt::UserRole + 2).toString());
     };
-    notebookTree->moveNote = [this](const QString& id, QTreeWidgetItem* target) {
-        return target && moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
-                                         target->data(0, Qt::UserRole + 4).toString(),
-                                         target->data(0, Qt::UserRole).toString());
+    notebookTree->moveNote = [this](const QString& id, QTreeWidgetItem* target, bool nestUnderParent) {
+        if (!target) return false;
+        const QString targetId = target->data(0, Qt::UserRole).toString();
+        if (!targetId.isEmpty())
+            return moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
+                                    target->data(0, Qt::UserRole + 4).toString(),
+                                    nestUnderParent ? QString() : targetId,
+                                    nestUnderParent ? targetId : target->data(0, Qt::UserRole + 5).toString(),
+                                    nestUnderParent);
+        return moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
+                                target->data(0, Qt::UserRole + 4).toString());
     };
     notebookOutline_->setObjectName("notebookOutline");
     notebookOutline_->setHeaderHidden(true);
@@ -1201,7 +1212,8 @@ void MainWindow::buildDocks()
                     deleteMarkupById(noteId);
             });
         } else if (!sourcePath.isEmpty()) {
-            menu.addAction(QStringLiteral("新建自由笔记…"), [this, sourcePath, groupId]() {
+            const QString parentMarkupId = item->data(0, Qt::UserRole + 5).toString();
+            menu.addAction(QStringLiteral("新建自由笔记…"), [this, sourcePath, groupId, parentMarkupId]() {
                 if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
                 auto* editor = new QDialog(this);
                 editor->setAttribute(Qt::WA_DeleteOnClose);
@@ -1216,12 +1228,13 @@ void MainWindow::buildDocks()
                 auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, editor);
                 form->addRow(buttons);
                 connect(buttons, &QDialogButtonBox::rejected, editor, &QDialog::reject);
-                connect(buttons, &QDialogButtonBox::accepted, editor, [this, editor, title, body, groupId]() {
+                connect(buttons, &QDialogButtonBox::accepted, editor, [this, editor, title, body, groupId, parentMarkupId]() {
                     if (title->text().trimmed().isEmpty() || docPath_.isEmpty()) return;
                     Markup note;
                     note.id = newId(); note.docPath = docPath_; note.page = view_->currentPage();
                     note.type = MarkupType::Note; note.title = title->text().trimmed(); note.comment = body->toPlainText();
-                    note.mindGroup = groupId; note.created = QDateTime::currentMSecsSinceEpoch(); note.updated = note.created;
+                    note.mindGroup = groupId; note.parentMarkupId = parentMarkupId;
+                    note.created = QDateTime::currentMSecsSinceEpoch(); note.updated = note.created;
                     undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), note, QStringLiteral("新建自由笔记")));
                     editor->accept();
                 });
@@ -1255,6 +1268,7 @@ void MainWindow::buildDocks()
     connect(notebookOutline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
         if (item) activateNotebookNote(item->data(0, Qt::UserRole).toString());
     });
+    notebookOutline_->setDragDropOverwriteMode(false);
     connect(notebookOutline_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int) {
         if (!item) return;
         const QString id = item->data(0, Qt::UserRole).toString();
@@ -1477,9 +1491,61 @@ bool MainWindow::moveNotebookGroup(const QString& id, const QString& targetPath,
 }
 
 bool MainWindow::moveNotebookNote(const QString& id, const QString& targetPath,
-                                  const QString& groupKey, const QString& beforeId)
+                                  const QString& groupKey, const QString& beforeId,
+                                  const QString& parentMarkupId, bool nestUnderParent)
 {
-    if (id.isEmpty() || id == beforeId || targetPath.isEmpty()) return false;
+    if (id.isEmpty() || id == beforeId || id == parentMarkupId || targetPath.isEmpty()) return false;
+    if (nestUnderParent && !parentMarkupId.isEmpty()) {
+        if (parentMarkupId == id) return false;
+        const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths();
+        Markup child, parent; bool haveChild = false, haveParent = false;
+        for (const QString& path : paths) for (const Markup& note : store_.markups(path)) {
+            if (note.id == id) { child = note; haveChild = true; }
+            if (note.id == parentMarkupId) { parent = note; haveParent = true; }
+        }
+        if (!haveChild || !haveParent || child.docPath != parent.docPath ||
+            child.mindGroup != parent.mindGroup || (child.mindGroup.isEmpty() && child.page != parent.page)) return false;
+        QString cursor = parentMarkupId;
+        while (!cursor.isEmpty()) {
+            if (cursor == id) return false;
+            QString next;
+            for (const Markup& note : store_.markups(child.docPath)) if (note.id == cursor) next = note.parentMarkupId;
+            cursor = next;
+        }
+        if (child.parentMarkupId == parentMarkupId) return false;
+        if (child.docPath != docPath_) { saveReadingState(); if (!openDocument(child.docPath)) return false; }
+        Markup after = child; after.parentMarkupId = parentMarkupId; after.mindOrder = 0;
+        after.updated = QDateTime::currentMSecsSinceEpoch();
+        undo_->push(new MarkupCommand(this, CmdKind::Modify, child, after, QStringLiteral("建立筆记层级")));
+        return true;
+    }
+    if (!beforeId.isEmpty()) {
+        const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths();
+        Markup child, target; bool haveChild = false, haveTarget = false;
+        for (const QString& path : paths) for (const Markup& note : store_.markups(path)) {
+            if (note.id == id) { child = note; haveChild = true; }
+            if (note.id == beforeId) { target = note; haveTarget = true; }
+        }
+        if (!haveChild || !haveTarget || child.docPath != target.docPath || id == beforeId ||
+            target.parentMarkupId != parentMarkupId || child.parentMarkupId != parentMarkupId ||
+            child.mindGroup != target.mindGroup || (child.mindGroup.isEmpty() && child.page != target.page)) return false;
+        if (child.docPath != docPath_) { saveReadingState(); if (!openDocument(child.docPath)) return false; }
+        QVector<Markup> siblings;
+        for (const Markup& note : markups_)
+            if (!note.deleted && note.parentMarkupId == parentMarkupId && note.mindGroup == child.mindGroup &&
+                (note.mindGroup.isEmpty() ? note.page == child.page : true)) siblings.append(note);
+        const auto plan = mind::planReorder(siblings, id, beforeId);
+        QVector<QPair<Markup, Markup>> pairs;
+        for (const auto& step : plan) {
+            Markup* current = findMarkup(step.first);
+            if (!current || current->mindOrder == step.second) continue;
+            Markup after = *current; after.mindOrder = step.second; after.updated = QDateTime::currentMSecsSinceEpoch();
+            pairs.append({*current, after});
+        }
+        if (pairs.isEmpty()) return false;
+        undo_->push(new MultiMarkupCommand(this, pairs, QStringLiteral("调整笔记同级顺序")));
+        return true;
+    }
     // Page buckets are views of source locations, not movable destinations.
     if (!groupKey.startsWith(QStringLiteral("group:"))) return false;
     QString sourcePath;
@@ -1664,6 +1730,7 @@ void MainWindow::refreshNotebookWorkspace()
             }
             item->setData(0, Qt::UserRole, node.markupId);
             item->setData(0, Qt::UserRole + 4, node.groupKey);
+            item->setData(0, Qt::UserRole + 5, node.parentMarkupId);
             if (node.markupId.isEmpty() && groupPaths.contains(node.groupKey)) {
                 item->setData(0, Qt::UserRole + 2, node.groupKey.mid(6));
                 item->setData(0, Qt::UserRole + 3, groupPaths.value(node.groupKey));
@@ -2027,7 +2094,7 @@ void MainWindow::editMarkupComment(const QString& id)
     editor->setWindowTitle(QStringLiteral("摘录与个人批注"));
     editor->resize(580, 520);
     auto* layout = new QVBoxLayout(editor);
-    auto* source = new QLabel(m->text.isEmpty()
+            auto* source = new QLabel(m->text.isEmpty()
                                    ? QStringLiteral("自由笔记 · 无原文来源")
                                    : QStringLiteral("%1 · 第 %2 页").arg(QFileInfo(m->docPath).fileName()).arg(m->page + 1), editor);
     source->setWordWrap(true);
@@ -3274,7 +3341,7 @@ bool MainWindow::applyMindReorder(const QString& markupId, const QString& groupK
     if (groupKey.startsWith(QLatin1String("group:")))
         group = groupKey.mid(6);
     if (group.isEmpty() && groupKey.startsWith(QLatin1String("page:"))) {
-        const int page = groupKey.mid(5).toInt();
+        const int page = groupKey.mid(5).section(QLatin1Char(':'), 0, 0).toInt();
         // keep the note on that page, drop the explicit group
         if (moved->page != page) {
             Markup shifted = *moved;
@@ -3288,19 +3355,20 @@ bool MainWindow::applyMindReorder(const QString& markupId, const QString& groupK
     // siblings = live notes that will live in that bucket after the move
     QVector<Markup> siblings;
     for (const Markup& m : markups_) {
-        if (m.deleted) continue;
+        if (m.deleted || !m.parentMarkupId.isEmpty()) continue;
         const bool sameGroup = group.isEmpty() ? m.mindGroup.isEmpty() : (m.mindGroup == group);
         if (!sameGroup) continue;
         if (group.isEmpty() && groupKey.startsWith(QLatin1String("page:")) &&
-            m.page != groupKey.mid(5).toInt())
+            m.page != groupKey.mid(5).section(QLatin1Char(':'), 0, 0).toInt())
             continue;
         siblings.append(m);
     }
     // the dragged note must be a member (it may be moving in from another bucket)
     Markup candidate = *moved;
     candidate.mindGroup = group;
+    candidate.parentMarkupId.clear();
     if (groupKey.startsWith(QLatin1String("page:")))
-        candidate.page = groupKey.mid(5).toInt();
+        candidate.page = groupKey.mid(5).section(QLatin1Char(':'), 0, 0).toInt();
     bool present = false;
     for (const Markup& m : siblings)
         if (m.id == candidate.id) present = true;
@@ -3315,12 +3383,12 @@ bool MainWindow::applyMindReorder(const QString& markupId, const QString& groupK
         if (!current) continue;
         Markup after = *current;
         after.mindOrder = step.second;
-        if (after.id == markupId) after.mindGroup = group;
-        if (after.mindGroup == after.mindGroup && after.id == markupId &&
+        if (after.id == markupId) { after.mindGroup = group; after.parentMarkupId.clear(); }
+        if (after.id == markupId &&
             groupKey.startsWith(QLatin1String("page:")))
-            after.page = groupKey.mid(5).toInt();
+            after.page = groupKey.mid(5).section(QLatin1Char(':'), 0, 0).toInt();
         if (after.mindOrder == current->mindOrder && after.mindGroup == current->mindGroup &&
-            after.page == current->page)
+            after.parentMarkupId == current->parentMarkupId && after.page == current->page)
             continue;
         after.updated = QDateTime::currentMSecsSinceEpoch();
         pairs.append({*current, after});
@@ -3356,7 +3424,7 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
         }
     }
 
-    if (m->mindGroup == group) return false;
+    if (m->mindGroup == group && m->parentMarkupId.isEmpty()) return false;
 
     int nextOrder = 0;
     for (const Markup& other : markups_) {
@@ -3366,6 +3434,7 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
 
     Markup after = *m;
     after.mindGroup = group;
+    after.parentMarkupId.clear();
     after.mindOrder = nextOrder;
     after.updated = QDateTime::currentMSecsSinceEpoch();
     undo_->push(new MarkupCommand(this, CmdKind::Modify, *m, after,
@@ -3605,6 +3674,10 @@ void MainWindow::ensureMindPanel()
             deleteMarkupById(id);
     });
     connect(mindView_, &mind::MindMapView::childRequested, this, [this](const QString& key) {
+        if (key.startsWith(QStringLiteral("note:"))) {
+            editMarkupComment(key.mid(5));
+            return;
+        }
         const QString parent = key.startsWith(QStringLiteral("group:")) ? groupIdOf(key)
                                                                         : parentGroupOfNote(key);
         const QString name = askText(mindView_, QStringLiteral("新建子分组"),
@@ -3826,6 +3899,12 @@ void MainWindow::showNotebookMindMap()
         });
         connect(notebookMindView_, &mind::MindMapView::deleteRequested, this, [this](const QString& key) {
             if (key.startsWith(QStringLiteral("note:")) && activateNotebookNote(key.mid(5))) deleteMarkupById(key.mid(5));
+        });
+        connect(notebookMindView_, &mind::MindMapView::childRequested, this, [this](const QString& key) {
+            if (key.startsWith(QStringLiteral("note:"))) { editMarkupComment(key.mid(5)); return; }
+            const QString parent = key.startsWith(QStringLiteral("group:")) ? groupIdOf(key) : QString();
+            const QString name = askText(notebookMindWindow_, QStringLiteral("新建子分组"), QStringLiteral("分组名："), QStringLiteral("新分组"));
+            if (!name.trimmed().isEmpty()) createMindGroup(name.trimmed(), parent);
         });
         connect(undo, &QPushButton::clicked, this, &MainWindow::undoCommand);
         connect(redo, &QPushButton::clicked, this, &MainWindow::redoCommand);

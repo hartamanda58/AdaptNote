@@ -442,7 +442,8 @@ QVector<mind::Node> mindRoots(const ExportContext& ctx)
 }
 
 // XMind topic: title + optional note, then children recursively.
-void appendTopic(QString& xml, const mind::Node& node, int depth)
+void appendTopic(QString& xml, const mind::Node& node, int depth,
+                 const QHash<QString, Markup>* notes = nullptr)
 {
     Q_UNUSED(depth);
     auto id = []() {
@@ -451,15 +452,20 @@ void appendTopic(QString& xml, const mind::Node& node, int depth)
     xml += QStringLiteral("%1<topic id=\"%2\" timestamp=\"%3\">\n")
                .arg(QString(depth * 2 + 6, QLatin1Char(' ')), id())
                .arg(QDateTime::currentMSecsSinceEpoch());
+    QString title = node.text;
+    if (!node.markupId.isEmpty() && notes && notes->contains(node.markupId)) {
+        const QString userTitle = notes->value(node.markupId).title.trimmed();
+        if (!userTitle.isEmpty()) title = userTitle;
+    }
     xml += QStringLiteral("%1<title>%2</title>\n")
-               .arg(QString(depth * 2 + 8, QLatin1Char(' ')), xmlEscape(node.text));
+               .arg(QString(depth * 2 + 8, QLatin1Char(' ')), xmlEscape(title));
     if (node.children.isEmpty()) {
         xml += QStringLiteral("%1</topic>\n").arg(QString(depth * 2 + 6, QLatin1Char(' ')));
         return;
     }
     xml += QStringLiteral("%1<children>\n%2<topics type=\"attached\">\n")
                .arg(QString(depth * 2 + 8, QLatin1Char(' ')), QString(depth * 2 + 10, QLatin1Char(' ')));
-    for (const mind::Node& child : node.children) appendTopic(xml, child, depth + 1);
+    for (const mind::Node& child : node.children) appendTopic(xml, child, depth + 1, notes);
     xml += QStringLiteral("%1</topics>\n%2</children>\n")
                .arg(QString(depth * 2 + 10, QLatin1Char(' ')), QString(depth * 2 + 8, QLatin1Char(' ')));
     xml += QStringLiteral("%1</topic>\n").arg(QString(depth * 2 + 6, QLatin1Char(' ')));
@@ -469,12 +475,18 @@ void appendOutline(QString& out, const mind::Node& node, int depth,
                    const QHash<QString, Markup>* notes = nullptr)
 {
     const QString pad(depth * 2, QLatin1Char(' '));
-    out += QStringLiteral("%1<outline text=\"%2\"").arg(pad, xmlEscape(node.text));
+    QString label = node.text;
+    if (!node.markupId.isEmpty() && notes && notes->contains(node.markupId)) {
+        const QString title = notes->value(node.markupId).title.trimmed();
+        if (!title.isEmpty()) label = title;
+    }
+    out += QStringLiteral("%1<outline text=\"%2\"").arg(pad, xmlEscape(label));
     if (node.page >= 0) out += QStringLiteral(" page=\"%1\"").arg(node.page + 1);
 
     // note leaves carry the markup metadata (type, tags, comment, image)
     if (notes && !node.markupId.isEmpty() && notes->contains(node.markupId)) {
         const Markup& m = notes->value(node.markupId);
+        if (!m.title.trimmed().isEmpty()) out += QStringLiteral(" _title=\"%1\"").arg(xmlEscape(m.title.trimmed()));
         out += QStringLiteral(" type=\"%1\"").arg(markupTypeName(m.type));
         if (!m.tags.isEmpty())
             out += QStringLiteral(" tags=\"%1\"").arg(xmlEscape(m.tags.join(QLatin1Char(','))));
@@ -508,7 +520,7 @@ bool toMarkdown(const ExportContext& ctx, QString* error)
 
     // one note as a markdown bullet, shared by both layouts
     auto renderNote = [&](const Markup& m, const QString& indent) {
-        out += indent + QStringLiteral("- **%1**").arg(typeLabel(m.type));
+        out += indent + QStringLiteral("- **%1**").arg(m.title.trimmed().isEmpty() ? typeLabel(m.type) : mdEscape(m.title.trimmed()));
         if (!m.tags.isEmpty())
             out += QStringLiteral(" · #%1").arg(m.tags.join(QStringLiteral(" #")));
         out += QLatin1Char('\n');
@@ -537,7 +549,9 @@ bool toMarkdown(const ExportContext& ctx, QString* error)
                                                                   int depth) {
                 if (!node.markupId.isEmpty()) {
                     const Markup m = lookupMarkup(ctx, node.markupId);
-                    if (!m.id.isEmpty()) renderNote(m, QString());
+                    if (!m.id.isEmpty()) renderNote(m, QString(depth * 2, QLatin1Char(' ')));
+                    if (!m.title.trimmed().isEmpty()) out += QString(depth * 2, QLatin1Char(' ')) + QStringLiteral("## %1\n").arg(mdEscape(m.title.trimmed()));
+                    for (const mind::Node& child : node.children) walk(child, depth + 1);
                     return;
                 }
                 if (!node.text.isEmpty()) {
@@ -635,6 +649,7 @@ bool toHtml(const ExportContext& ctx, QString* error)
                 if (!node.markupId.isEmpty()) {
                     const Markup m = lookupMarkup(ctx, node.markupId);
                     if (!m.id.isEmpty()) renderNote(m);
+                    for (const mind::Node& child : node.children) walk(child, depth + 1);
                     return;
                 }
                 if (!node.text.isEmpty()) {
@@ -739,7 +754,9 @@ bool toXmind(const ExportContext& ctx, QString* error)
         xml += QStringLiteral("      <title>%1</title>\n").arg(xmlEscape(rootNode.text));
         if (!rootNode.children.isEmpty()) {
             xml += QStringLiteral("      <children>\n        <topics type=\"attached\">\n");
-            for (const mind::Node& child : rootNode.children) appendTopic(xml, child, 4);
+            QHash<QString, Markup> noteIndex;
+            for (const Markup& note : ctx.markups) noteIndex.insert(note.id, note);
+            for (const mind::Node& child : rootNode.children) appendTopic(xml, child, 4, &noteIndex);
             xml += QStringLiteral("        </topics>\n      </children>\n");
         }
         xml += QStringLiteral("    </topic>\n");

@@ -144,6 +144,7 @@ QJsonObject Markup::toJson() const
         o["anchorOffset"] = anchorOffset;
     }
     if (!mindGroup.isEmpty()) o["mindGroup"] = mindGroup;
+    if (!parentMarkupId.isEmpty()) o["parentMarkupId"] = parentMarkupId;
     if (mindOrder != 0) o["mindOrder"] = mindOrder;
     return o;
 }
@@ -174,6 +175,7 @@ Markup Markup::fromJson(const QJsonObject& o)
     m.anchorChapter = o["anchorChapter"].toString();
     m.anchorOffset = o.contains("anchorOffset") ? o["anchorOffset"].toInt() : -1;
     m.mindGroup = o["mindGroup"].toString();
+    m.parentMarkupId = o["parentMarkupId"].toString();
     m.mindOrder = o["mindOrder"].toInt();
     return m;
 }

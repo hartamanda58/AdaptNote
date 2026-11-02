@@ -431,12 +431,51 @@ int main(int argc, char** argv)
                 if (g.id == groupId) name = g.name;
             check(name == QStringLiteral("考点"),
                   QStringLiteral("the id resolves to the group entity '%1'").arg(name));
+            Markup parentNote;
+            Markup childNote;
+            for (const Markup& note : w.visibleMarkups()) if (note.id == targetId) parentNote = note;
+            for (const Markup& note : w.visibleMarkups())
+                if (note.id != targetId && note.mindGroup == parentNote.mindGroup) { childNote = note; break; }
+            if (!childNote.id.isEmpty()) {
+                childNote.parentMarkupId = parentNote.id;
+                check(w.storeUpsertForTest(childNote), QStringLiteral("persist a note-under-note parent edge"));
+                const Markup roundTrip = Markup::fromJson(w.visibleMarkups().first().toJson());
+                bool parentRoundTrip = roundTrip.id != parentNote.id || roundTrip.parentMarkupId.isEmpty();
+                for (const Markup& note : w.visibleMarkups())
+                    if (note.id == childNote.id) parentRoundTrip = Markup::fromJson(note.toJson()).parentMarkupId == parentNote.id;
+                check(parentRoundTrip, QStringLiteral("note parent survives sync JSON roundtrip"));
+                w.refreshFromStore();
+                for (const Markup& note : w.visibleMarkups()) if (note.id == parentNote.id) parentNote = note;
+                for (const Markup& note : w.visibleMarkups()) if (note.id == childNote.id) childNote = note;
+            }
 
             const mind::Node tree = mind::buildFromNotes(QStringLiteral("书"), w.visibleMarkups(), groups);
             bool hasGroup = false;
             for (const mind::Node& g : tree.children)
                 if (g.text == QStringLiteral("考点")) hasGroup = true;
             check(hasGroup, QStringLiteral("mind tree shows the 考点 group"));
+            if (!childNote.id.isEmpty()) {
+                bool nestedNote = false;
+                std::function<void(const mind::Node&)> findParent = [&](const mind::Node& node) {
+                    if (node.markupId == parentNote.id)
+                        for (const auto& child : node.children) if (child.markupId == childNote.id) nestedNote = true;
+                    for (const auto& child : node.children) findParent(child);
+                };
+                findParent(tree);
+                check(nestedNote, QStringLiteral("mind map tree nests a note under a note"));
+                bool unique = true; QSet<QString> keys;
+                std::function<void(const mind::Node&)> collect = [&](const mind::Node& node) {
+                    const QString key = mind::nodeKey(node);
+                    if (keys.contains(key)) unique = false;
+                    keys.insert(key);
+                    for (const auto& child : node.children) collect(child);
+                };
+                collect(tree);
+                check(unique, QStringLiteral("nested note ids do not collide with page group keys"));
+                childNote.parentMarkupId.clear();
+                check(w.storeUpsertForTest(childNote), QStringLiteral("reset note hierarchy for following independent tests"));
+                w.refreshFromStore();
+            }
         }
 
         // nested group: create a child, then move it back to the top level
@@ -472,6 +511,12 @@ int main(int argc, char** argv)
 
         // manual ordering inside the group: move a note to the front
         {
+            w.applyMindReparent(targetId, QStringLiteral("group:") + groupId);
+            for (const Markup& note : w.visibleMarkups())
+                if (note.id != targetId && note.mindGroup == groupId && !note.parentMarkupId.isEmpty()) {
+                    Markup parentless = note; parentless.parentMarkupId.clear(); w.storeUpsertForTest(parentless);
+                }
+            w.refreshFromStore();
             // put two more notes into the same group so ordering is visible
             QVector<Markup> all = w.visibleMarkups();
             for (const Markup& m : all) {
@@ -485,11 +530,13 @@ int main(int argc, char** argv)
 
             QVector<QString> inGroup;
             for (const Markup& m : w.visibleMarkups())
-                if (m.mindGroup == groupId) inGroup.append(m.id);
+                if (m.mindGroup == groupId && m.parentMarkupId.isEmpty()) inGroup.append(m.id);
             check(inGroup.size() >= 2,
                   QStringLiteral("group holds %1 notes to reorder").arg(inGroup.size()));
 
             const QString mover = inGroup.last();
+            Markup moverBefore;
+            for (const Markup& note : w.visibleMarkups()) if (note.id == mover) moverBefore = note;
             const QString first = inGroup.first();
             check(w.applyMindReorder(mover, QStringLiteral("group:") + groupId, first),
                   QStringLiteral("move the last note in front of the first"));
@@ -497,7 +544,7 @@ int main(int argc, char** argv)
 
             QVector<QPair<int, QString>> ordered;
             for (const Markup& m : w.visibleMarkups())
-                if (m.mindGroup == groupId) ordered.append({m.mindOrder, m.id});
+                if (m.mindGroup == groupId && m.parentMarkupId.isEmpty()) ordered.append({m.mindOrder, m.id});
             std::sort(ordered.begin(), ordered.end());
             check(!ordered.isEmpty() && ordered.first().second == mover,
                   QStringLiteral("moved note is first in the group (order %1)")
@@ -508,7 +555,8 @@ int main(int argc, char** argv)
             bool firstLeafIsMover = false;
             for (const mind::Node& g : tree.children) {
                 if (g.groupKey != QStringLiteral("group:") + groupId) continue;
-                if (!g.children.isEmpty()) firstLeafIsMover = g.children.first().markupId == mover;
+                for (const auto& child : g.children)
+                    if (child.markupId == mover) firstLeafIsMover = g.children.first().markupId == mover;
             }
             check(firstLeafIsMover, QStringLiteral("tree shows the moved note first"));
 
@@ -516,7 +564,7 @@ int main(int argc, char** argv)
             settle();
             bool restored = false;
             for (const Markup& m : w.visibleMarkups())
-                if (m.id == mover && m.mindOrder != 10) restored = true;
+                if (m.id == mover && m.mindOrder == moverBefore.mindOrder) restored = true;
             check(restored, QStringLiteral("undo restores the previous order in one step"));
         }
 
@@ -1094,8 +1142,32 @@ int main(int argc, char** argv)
             if (independentWindow) independentWindow->close();
             check(w.view()->isVisible(), QStringLiteral("closing independent mind map leaves reader visible"));
             const auto priorNotes = w.visibleMarkups();
-            if (!priorNotes.isEmpty()) {
-                const auto original = priorNotes.first();
+            if (priorNotes.size() >= 2) {
+                const Markup original = priorNotes.first();
+                Markup parent = original;
+                for (const auto& candidate : priorNotes)
+                    if (candidate.id != original.id && candidate.docPath == original.docPath &&
+                        candidate.mindGroup == original.mindGroup && candidate.page == original.page) {
+                        parent = candidate; break;
+                    }
+                if (parent.id == original.id) {
+                    w.createFreeNoteForTest(QStringLiteral("父笔记"), QStringLiteral("父内容"));
+                    parent = w.visibleMarkups().last();
+                    // Place the child on the same explicit scope as its parent.
+                    Markup sibling = original; sibling.mindGroup = parent.mindGroup; sibling.page = parent.page;
+                    w.storeUpsertForTest(sibling); w.refreshFromStore();
+                }
+                check(w.moveNotebookNote(original.id, original.docPath, {}, {}, parent.id, true),
+                      QStringLiteral("outline drop on a note creates a child note"));
+                bool childSet = false;
+                for (const auto& note : w.visibleMarkups()) if (note.id == original.id) childSet = note.parentMarkupId == parent.id;
+                check(childSet, QStringLiteral("outline note nesting persists"));
+                check(!w.moveNotebookNote(parent.id, parent.docPath, {}, {}, original.id),
+                      QStringLiteral("outline rejects note parent cycles"));
+                w.undoCommand();
+                bool childUndo = true;
+                for (const auto& note : w.visibleMarkups()) if (note.id == original.id) childUndo = note.parentMarkupId == original.parentMarkupId;
+                check(childUndo, QStringLiteral("outline note nesting undo restores previous parent"));
                 check(w.moveNotebookNote(original.id, original.docPath, QStringLiteral("group:") + outlineGroup),
                       QStringLiteral("outline drop moves note into a group"));
                 bool moved = false;
@@ -1157,6 +1229,17 @@ int main(int argc, char** argv)
                 };
                 visit(tree);
                 check(unique, QStringLiteral("same-title books and page buckets have unique map keys"));
+                mind::Node notesTree = mind::buildFromNotes(QStringLiteral("one book"), w.visibleMarkups(), {});
+                QSet<QString> pageKeys;
+                std::function<void(const mind::Node&)> collectPages = [&](const mind::Node& node) {
+                    if (node.groupKey.startsWith(QStringLiteral("page:")) && node.isGroup) {
+                        if (pageKeys.contains(node.groupKey)) unique = false;
+                        pageKeys.insert(node.groupKey);
+                    }
+                    for (const auto& child : node.children) collectPages(child);
+                };
+                collectPages(notesTree);
+                check(unique, QStringLiteral("same-page hierarchy has one bucket and unique note layout keys"));
             }
             check(w.notebookNoteIdsForTest().contains(other.id), QStringLiteral("outline includes the other document note"));
             check(w.activateNotebookNote(other.id), QStringLiteral("outline opens the other document source"));

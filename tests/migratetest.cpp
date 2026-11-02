@@ -287,6 +287,9 @@ int main(int argc, char** argv)
         note.id = newId(); note.docPath = legacyDoc; note.page = 0;
         note.text = QStringLiteral("legacy note"); note.type = MarkupType::Highlight;
         legacy.upsertMarkup(note);
+        Markup child = note; child.id = newId(); child.parentMarkupId = note.id;
+        child.title = QStringLiteral("legacy child"); child.text = QStringLiteral("child excerpt");
+        check(legacy.upsertMarkup(child), QStringLiteral("store note hierarchy in old-schema-compatible DB"));
         legacy.ensureMindGroup(legacyDoc, QStringLiteral("Legacy group"));
         legacy.close();
 
@@ -295,6 +298,10 @@ int main(int argc, char** argv)
         const QVector<Topic> topics = reopened.topics();
         check(topics.size() == 1 && topics.first().name == QStringLiteral("legacy-book"),
               QStringLiteral("legacy document gets one deterministic topic"));
+        bool childRestored = false;
+        for (const Markup& migrated : reopened.markups(legacyDoc))
+            if (migrated.title == QStringLiteral("legacy child") && migrated.parentMarkupId == note.id) childRestored = true;
+        check(childRestored, QStringLiteral("note parent survives database reopen/migration"));
         check(reopened.topicDocs(topics.first().id).size() == 1,
               QStringLiteral("legacy topic contains its document"));
         check(!reopened.mindGroupsForTopic(topics.first().id).isEmpty(),
