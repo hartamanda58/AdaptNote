@@ -116,6 +116,7 @@ public:
     // Gives an existing per-document group tree a topic owner (used by the migration and
     // when a document is first attached to a topic).
     bool setMindGroupTopic(const QString& docPath, const QString& topicId);
+    void syncDocumentGroupTopic(const QString& docPath);
     QVector<MindGroup> mindGroupsForTopic(const QString& topicId) const;   // live only
 
     // ---- free-form links between nodes ----

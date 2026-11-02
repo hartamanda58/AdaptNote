@@ -695,7 +695,10 @@ void PageView::paintEvent(QPaintEvent*)
     // Pages are usually downscaled a little (or a lot at high DPI); without this Qt uses
     // nearest-neighbour and small text looks ragged even from a correct bitmap.
     p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p.fillRect(viewport()->rect(), QColor(0x2b, 0x2e, 0x33));
+    const QColor canvas = appearanceTheme_ == 2 ? QColor(0x1f, 0x21, 0x25)
+                         : appearanceTheme_ == 1 ? QColor(0xe7, 0xe1, 0xd4)
+                                                 : QColor(0xe9, 0xeb, 0xef);
+    p.fillRect(viewport()->rect(), canvas);
 
     if (!engine_ || !engine_->isOpen()) {
         p.setPen(QColor(0xcf, 0xd3, 0xd8));

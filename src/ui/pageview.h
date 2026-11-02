@@ -24,7 +24,9 @@ class PageView : public QAbstractScrollArea {
 public:
     explicit PageView(QWidget* parent = nullptr);
 
-    void setEngine(IDocumentEngine* engine);  // not owned
+    void setEngine(IDocumentEngine* engine);
+    void setAppearanceTheme(int theme) { appearanceTheme_ = qBound(0, theme, 2); viewport()->update(); }
+    int appearanceTheme() const { return appearanceTheme_; }  // not owned
     IDocumentEngine* engine() const { return engine_; }
 
     void setLayoutMode(PageLayoutMode m);
@@ -152,6 +154,7 @@ private:
     PageLayoutMode layoutMode_ = PageLayoutMode::Continuous;
     ZoomMode zoomMode_ = ZoomMode::FitWidth;
     float scale_ = 1.f;
+    int appearanceTheme_ = 0; // 0 paper, 1 warm, 2 night
     int rotation_ = 0;
     int currentPage_ = 0;
 

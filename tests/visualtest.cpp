@@ -142,8 +142,8 @@ int main(int argc, char** argv)
     QImage img = grabView(w);
     check(!img.isNull() && img.width() > 600 && img.height() > 400,
           QStringLiteral("window grabbed %1x%2").arg(img.width()).arg(img.height()));
-    check(QColor(img.pixel(3, 3)) == QColor(0x2b, 0x2e, 0x33),
-          QStringLiteral("viewport background is dark grey (%1)").arg(QColor(img.pixel(3, 3)).name()));
+    check(QColor(img.pixel(3, 3)) == QColor(0xe9, 0xeb, 0xef),
+          QStringLiteral("paper appearance uses a soft neutral canvas (%1)").arg(QColor(img.pixel(3, 3)).name()));
 
     const QRect page0 = v->pageRectInViewport(0).toAlignedRect();
     check(page0.isValid() && img.rect().contains(page0.topLeft()),

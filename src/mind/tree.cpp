@@ -12,7 +12,7 @@ namespace an {
 namespace mind {
 
 Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
-                    const QVector<MindGroup>& groups)
+                    const QVector<MindGroup>& groups, bool useAutomaticPageBuckets)
 {
     Node root;
     root.text = docTitle.isEmpty() ? QStringLiteral("未命名") : docTitle;
@@ -205,6 +205,10 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
     }
 
     // ---- notes without an explicit group: page buckets, sorted by page ----
+    if (!useAutomaticPageBuckets) {
+        appendNoteForest(root, orphaned);
+        return root;
+    }
     sortNotes(orphaned);
     QVector<Markup> pageSorted = orphaned;
     std::sort(pageSorted.begin(), pageSorted.end(), [](const Markup& a, const Markup& b) {

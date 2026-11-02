@@ -94,6 +94,7 @@ public:
     QVector<MindLink> mindLinksForTest() const { return store_.mindLinks(mindScopeKey()); }
     // Test hooks for the topic-aware search path.
     void openTopicForTest(const QString& topicId) { currentTopic_ = topicId; updateNotesPanel(); refreshNotebookWorkspace(); }
+    int outlineRootCountForTest() const;
     bool openNotebook(const QString& topicId);
     QString createNotebook(const QString& name);
     bool addNotebookDocument(const QString& path);

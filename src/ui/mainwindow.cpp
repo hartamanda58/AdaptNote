@@ -52,6 +52,7 @@
 #include <QPushButton>
 #include <QTextBrowser>
 #include <QStatusBar>
+#include <QStyledItemDelegate>
 #include <QTabWidget>
 #include <QTabBar>
 #include <QTimer>
@@ -71,6 +72,74 @@
 
 namespace an {
 namespace {
+
+class NotebookOutlineDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        const bool group = index.data(Qt::UserRole + 8).toBool();
+        const QSize base = QStyledItemDelegate::sizeHint(option, index);
+        return QSize(base.width(), group ? 34 : 50);
+    }
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        painter->save();
+        const QRect row = option.rect.adjusted(4, 1, -5, -1);
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hovered = option.state & QStyle::State_MouseOver;
+        if (selected || hovered) {
+            QColor bg = selected ? QColor("#eaf1ff") : QColor("#f4f6f9");
+            painter->setPen(selected ? QColor("#d7e3f8") : Qt::NoPen);
+            painter->setBrush(bg);
+            painter->drawRoundedRect(row, 8, 8);
+        }
+
+        int left = option.rect.left() + 7;
+        const QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
+        if (!icon.isNull()) {
+            const QRect iconRect(left, option.rect.top() + 9, 16, 16);
+            icon.paint(painter, iconRect);
+            left = iconRect.right() + 8;
+        }
+
+        const QString title = index.data(Qt::DisplayRole).toString();
+        const QString preview = index.data(Qt::UserRole + 6).toString();
+        const QString source = index.data(Qt::UserRole + 7).toString();
+        const bool group = index.data(Qt::UserRole + 8).toBool();
+        const QColor primary = selected ? QColor("#244f97") : QColor("#292d33");
+        painter->setPen(primary);
+        QFont titleFont = option.font;
+        titleFont.setPointSizeF(group ? 10.5 : 10.0);
+        titleFont.setWeight(group ? QFont::DemiBold : QFont::Medium);
+        painter->setFont(titleFont);
+        const QRect titleRect(left, option.rect.top() + (group ? 8 : 7),
+                              qMax(20, option.rect.right() - left - 10), group ? 20 : 18);
+        painter->drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(title, Qt::ElideRight, titleRect.width()));
+        if (!group) {
+            const int sourceWidth = source.isEmpty() ? 0 : 52;
+            QRect previewRect(left, option.rect.top() + 27,
+                              qMax(20, option.rect.right() - left - sourceWidth - 14), 16);
+            QFont metaFont = option.font;
+            metaFont.setPointSizeF(8.5);
+            painter->setFont(metaFont);
+            painter->setPen(QColor("#858b95"));
+            const QString sub = preview.isEmpty() ? QStringLiteral("自由笔记") : preview;
+            painter->drawText(previewRect, Qt::AlignLeft | Qt::AlignVCenter,
+                              painter->fontMetrics().elidedText(sub, Qt::ElideRight, previewRect.width()));
+            if (!source.isEmpty()) {
+                QRect sourceRect(option.rect.right() - 62, option.rect.top() + 27, 54, 16);
+                painter->setPen(QColor("#9aa0a9"));
+                painter->drawText(sourceRect, Qt::AlignRight | Qt::AlignVCenter, source);
+            }
+        }
+        painter->restore();
+    }
+};
 
 // Never use QTreeWidget's internal move: SQLite and the undo stack own the structure.
 class NotebookOutlineTree : public QTreeWidget {
@@ -588,7 +657,16 @@ void MainWindow::buildUi()
     notebookTabs_->setTabsClosable(true);
     notebookTabs_->addTab(QStringLiteral("主页"));
     notebookTabs_->setTabButton(0, QTabBar::RightSide, nullptr);
-    workspaceLayout->addWidget(notebookTabs_);
+    auto* applicationRail = new QWidget(workspace);
+    applicationRail->setObjectName("applicationRail");
+    auto* applicationRailLayout = new QHBoxLayout(applicationRail);
+    applicationRailLayout->setContentsMargins(18, 4, 14, 4);
+    applicationRailLayout->setSpacing(18);
+    auto* brand = new QLabel(QStringLiteral("AdaptNote"), applicationRail);
+    brand->setObjectName("applicationBrand");
+    applicationRailLayout->addWidget(brand);
+    applicationRailLayout->addWidget(notebookTabs_, 1);
+    workspaceLayout->addWidget(applicationRail);
     connect(notebookTabs_, &QTabBar::currentChanged, this, [this](int index) {
         if (index == 0) { showLibrary(); return; }
         const QString id = notebookTabs_->tabData(index).toString();
@@ -614,10 +692,16 @@ void MainWindow::buildUi()
     notebookDocuments_ = new QTabBar(workspace);
     notebookDocuments_->setObjectName("notebookDocuments");
     notebookDocuments_->setExpanding(false);
+    notebookDocuments_->setDocumentMode(true);
     notebookDocuments_->setUsesScrollButtons(true);
     auto* documentStrip = new QWidget(workspace);
+    documentStrip->setObjectName("documentStrip");
     auto* documentStripLayout = new QHBoxLayout(documentStrip);
-    documentStripLayout->setContentsMargins(6, 1, 8, 1);
+    documentStripLayout->setContentsMargins(14, 5, 14, 5);
+    documentStripLayout->setSpacing(6);
+    auto* notebookName = new QLabel(notebookTitle_->text(), documentStrip);
+    notebookName->setObjectName("currentNotebookTitle");
+    documentStripLayout->addWidget(notebookName);
     documentStripLayout->setSpacing(6);
     documentStripLayout->addWidget(notebookDocuments_, 1);
     auto* newNotebookButton = new QToolButton(documentStrip);
@@ -632,6 +716,16 @@ void MainWindow::buildUi()
     documentStripLayout->addWidget(newNotebookButton);
     documentStripLayout->addWidget(addDocumentButton);
     documentStripLayout->addWidget(mindWindowButton);
+    auto* appearance = new QComboBox(documentStrip);
+    appearance->setObjectName("readerAppearance");
+    appearance->addItems({QStringLiteral("纸白"), QStringLiteral("暖纸"), QStringLiteral("夜间")});
+    documentStripLayout->addWidget(appearance);
+    connect(appearance, &QComboBox::currentIndexChanged, this, [this](int theme) {
+        view_->setAppearanceTheme(theme);
+        store_.setSetting(QStringLiteral("reader.appearance"), QString::number(theme));
+    });
+    appearance->setCurrentIndex(store_.setting(QStringLiteral("reader.appearance"), QStringLiteral("0")).toInt());
+    view_->setAppearanceTheme(appearance->currentIndex());
     workspaceLayout->addWidget(documentStrip);
     connect(mindWindowButton, &QToolButton::clicked, this, &MainWindow::showNotebookMindMap);
     connect(newNotebookButton, &QToolButton::clicked, this, [this]() {
@@ -1171,6 +1265,7 @@ void MainWindow::buildDocks()
     notebookTree->setAcceptDrops(true);
     notebookTree->setDropIndicatorShown(true);
     notebookTree->setDragDropMode(QAbstractItemView::DragDrop);
+    notebookTree->setObjectName("notebookOutline");
     notebookTree->moveGroup = [this](const QString& id, QTreeWidgetItem* target) {
         return target && moveNotebookGroup(id, target->data(0, Qt::UserRole + 3).toString(),
                                            target->data(0, Qt::UserRole + 2).toString());
@@ -1187,8 +1282,11 @@ void MainWindow::buildDocks()
         return moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
                                 target->data(0, Qt::UserRole + 4).toString());
     };
-    notebookOutline_->setObjectName("notebookOutline");
+    notebookOutline_->setColumnCount(1);
+    notebookOutline_->setItemDelegate(new NotebookOutlineDelegate(notebookOutline_));
     notebookOutline_->setHeaderHidden(true);
+    notebookOutline_->header()->setStretchLastSection(false);
+    notebookOutline_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     notebookOutline_->setIndentation(18);
     notebookOutline_->setWordWrap(true);
     leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记本大纲"));
@@ -1448,6 +1546,11 @@ bool MainWindow::openDocument(const QString& path)
     return true;
 }
 
+int MainWindow::outlineRootCountForTest() const
+{
+    return notebookOutline_ ? notebookOutline_->topLevelItemCount() : 0;
+}
+
 int MainWindow::notebookDocumentCountForTest() const
 {
     return notebookDocuments_ ? notebookDocuments_->count() : 0;
@@ -1620,6 +1723,7 @@ bool MainWindow::addNotebookDocument(const QString& path)
     saveReadingState();
     if (!openDocument(path)) return false;
     if (!store_.addTopicDoc(currentTopic_, docPath_)) return false;
+    store_.setMindGroupTopic(docPath_, currentTopic_);
     setWorkspaceMode(0);
     view_->show();
     refreshNotebookWorkspace();
@@ -1677,6 +1781,9 @@ void MainWindow::refreshNotebookWorkspace()
     if (!currentTopic_.isEmpty()) {
         for (const Topic& t : store_.topics()) if (t.id == currentTopic_) title = t.name;
         for (const TopicDoc& d : store_.topicDocs(currentTopic_)) paths.append(d.docPath);
+        // Older libraries may have topic_docs entries created before group ownership was
+        // backfilled. Reconcile via the explicit document link, never by displayed title.
+        for (const QString& path : paths) store_.syncDocumentGroupTopic(path);
         groups = store_.mindGroupsForTopic(currentTopic_);
     } else if (!docPath_.isEmpty()) {
         paths.append(docPath_);
@@ -1696,8 +1803,11 @@ void MainWindow::refreshNotebookWorkspace()
         input.markups = store_.markups(path);
         inputs.append(input);
     }
-    notebookTitle_->setText(currentTopic_.isEmpty() ? QStringLiteral("文档 · %1").arg(title)
-                           : QStringLiteral("笔记本 · %1    ·    %2 份资料").arg(title).arg(paths.size()));
+    const QString headerText = currentTopic_.isEmpty()
+        ? QStringLiteral("文档 · %1").arg(title)
+        : QStringLiteral("%1    ·    %2 份资料").arg(title).arg(paths.size());
+    notebookTitle_->setText(headerText);
+    if (auto* name = findChild<QLabel*>(QStringLiteral("currentNotebookTitle"))) name->setText(headerText);
     QSet<QString> collapsedKeys;
     QString selectedKey;
     const bool hadTree = notebookOutline_->topLevelItemCount() > 0;
@@ -1711,22 +1821,28 @@ void MainWindow::refreshNotebookWorkspace()
         remember(notebookOutline_->topLevelItem(i));
     notebookOutline_->clear();
     const mind::Node root = currentTopic_.isEmpty() && !inputs.isEmpty()
-                                ? mind::buildFromNotes(title, inputs.first().markups, groups)
+                                ? mind::buildFromNotes(title, inputs.first().markups, groups, !engine_.outline().isEmpty())
                                 : mind::buildFromTopic(title, inputs, groups);
     QHash<QString, QString> groupPaths;
     for (const MindGroup& group : groups) groupPaths.insert(QStringLiteral("group:") + group.id, group.docPath);
     std::function<void(QTreeWidgetItem*, const mind::Node&)> fill =
         [&](QTreeWidgetItem* parent, const mind::Node& node) {
             auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(notebookOutline_);
-            QString label = node.text;
-            if (!node.markupId.isEmpty() && !node.source.isEmpty())
-                label += QStringLiteral("    ·    %1").arg(node.source);
-            item->setText(0, label);
+            item->setText(0, node.text);
+            QString preview = node.comment.simplified();
+            if (preview.isEmpty()) preview = node.excerpt.simplified();
+            item->setData(0, Qt::UserRole + 6, preview);
+            item->setData(0, Qt::UserRole + 7, node.source);
+            item->setData(0, Qt::UserRole + 8, node.isGroup);
             if (node.isGroup) {
-                item->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
+                item->setIcon(0, glyphIcon("organize", QColor("#6b84aa")));
                 QFont font = item->font(0); font.setWeight(QFont::DemiBold); item->setFont(0, font);
+                item->setForeground(0, QBrush(QColor("#313842")));
             } else if (!node.markupId.isEmpty()) {
-                item->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
+                item->setIcon(0, glyphIcon("note", QColor("#8290a3")));
+                item->setForeground(1, QBrush(QColor("#8a9099")));
+                QFont sourceFont = item->font(1); sourceFont.setPointSizeF(qMax(8.0, sourceFont.pointSizeF() - 1));
+                item->setFont(1, sourceFont);
             }
             item->setData(0, Qt::UserRole, node.markupId);
             item->setData(0, Qt::UserRole + 4, node.groupKey);
@@ -3241,8 +3357,7 @@ QString MainWindow::createMindGroup(const QString& name, const QString& parentId
     if (docPath_.isEmpty() || name.trimmed().isEmpty()) return {};
     const QString id = store_.ensureMindGroup(docPath_, name, parentId);
     if (id.isEmpty()) return {};
-    // New groups must be visible to the notebook-wide tree immediately.
-    if (!currentTopic_.isEmpty()) store_.setMindGroupTopic(docPath_, currentTopic_);
+    store_.syncDocumentGroupTopic(docPath_);
     // Undo should remove exactly the row we created, so hand the command a snapshot.
     for (const MindGroup& g : store_.mindGroups(docPath_)) {
         if (g.id != id) continue;

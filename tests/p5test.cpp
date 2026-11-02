@@ -264,7 +264,7 @@ int main(int argc, char** argv)
         gone.deleted = true;   // tombstones must not appear
 
         const mind::Node root =
-            mind::buildFromNotes(QStringLiteral("测试书"), {a, b, c, gone});
+            mind::buildFromNotes(QStringLiteral("测试书"), {a, b, c, gone}, {}, true);
         check(mind::nodeCount(root) == 6,
               QStringLiteral("tree = root + 2 pages + 3 live notes, tombstone skipped (%1 nodes)")
                   .arg(mind::nodeCount(root)));

@@ -83,6 +83,12 @@ int main(int argc, char** argv)
     }
 
     check(w.openDocument(pdf), QStringLiteral("open %1").arg(pdf));
+    check(w.view()->appearanceTheme() == 0, QStringLiteral("reader default appearance is paper white"));
+    w.view()->setAppearanceTheme(1);
+    check(w.view()->appearanceTheme() == 1, QStringLiteral("reader warm-paper appearance is selectable"));
+    w.view()->setAppearanceTheme(2);
+    check(w.view()->appearanceTheme() == 2, QStringLiteral("reader night canvas appearance is selectable"));
+    w.view()->setAppearanceTheme(0);
     w.applyDemoMarkups();
     settle();
 
@@ -1115,6 +1121,9 @@ int main(int argc, char** argv)
             };
             if (outline) for (int i = 0; i < outline->topLevelItemCount(); ++i) inspect(outline->topLevelItem(i));
             check(foundGroup, QStringLiteral("new notebook group appears in outline with explicit source identity"));
+            bool groupOwnedByNotebook = false;
+            for (const MindGroup& group : w.mindGroups()) if (group.id == outlineGroup) groupOwnedByNotebook = group.topicId == notebook;
+            check(groupOwnedByNotebook, QStringLiteral("new notebook group persists the notebook owner id"));
             const QString childGroup = w.createMindGroupForTest(QStringLiteral("层级拖动"));
             const QString sourcePath = w.visibleMarkups().first().docPath;
             check(w.moveNotebookGroup(childGroup, sourcePath, outlineGroup), QStringLiteral("outline can nest a group"));
@@ -1213,6 +1222,8 @@ int main(int argc, char** argv)
 
             w.openTopicForTest(topicId);
             check(w.notebookDocumentCountForTest() == 2, QStringLiteral("notebook shows two document tabs"));
+            check(w.outlineRootCountForTest() == 1, QStringLiteral("notebook outline has one topic root"));
+            check(!w.visibleMarkups().isEmpty(), QStringLiteral("multiple notes are present for custom outline rows"));
             {
                 mind::TopicDocInput a, b;
                 a.title = QStringLiteral("同名资料"); a.docPath = QStringLiteral("/a/book.pdf"); a.markups = w.visibleMarkups();
@@ -1247,6 +1258,7 @@ int main(int argc, char** argv)
                   QStringLiteral("source navigation switches the actual reader document"));
             check(w.notebookDocumentCountForTest() == 2 && w.notebookNoteIdsForTest().size() > 1,
                   QStringLiteral("switching documents preserves the whole notebook outline"));
+            check(w.outlineRootCountForTest() == 1, QStringLiteral("notebook outline has one topic root"));
             auto* outline = w.findChild<QTreeWidget*>(QStringLiteral("notebookOutline"));
             check(outline && outline->topLevelItemCount() == 1, QStringLiteral("notebook has one outline root"));
             if (outline && outline->topLevelItemCount()) {

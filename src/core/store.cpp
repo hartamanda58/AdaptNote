@@ -1446,6 +1446,17 @@ QVector<QString> Store::topicsForDoc(const QString& docPath) const
     return out;
 }
 
+void Store::syncDocumentGroupTopic(const QString& docPath)
+{
+    if (!open_ || docPath.isEmpty()) return;
+    QString topicId;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("select topicId from topic_docs where docPath=? and deleted=0 order by updated desc limit 1");
+    q.addBindValue(nonNull(docPath));
+    if (q.exec() && q.next()) topicId = q.value(0).toString();
+    setMindGroupTopic(docPath, topicId);
+}
+
 bool Store::setMindGroupTopic(const QString& docPath, const QString& topicId)
 {
     if (!open_) return false;
