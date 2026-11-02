@@ -97,6 +97,7 @@ public:
     bool openNotebook(const QString& topicId);
     QString createNotebook(const QString& name);
     bool addNotebookDocument(const QString& path);
+    bool createFreeNoteForTest(const QString& title, const QString& comment);
     bool moveNotebookNote(const QString& id, const QString& targetPath,
                           const QString& groupKey, const QString& beforeId = {});
     bool moveNotebookGroup(const QString& id, const QString& targetPath, const QString& parentId);

@@ -1201,6 +1201,33 @@ void MainWindow::buildDocks()
                     deleteMarkupById(noteId);
             });
         } else if (!sourcePath.isEmpty()) {
+            menu.addAction(QStringLiteral("新建自由笔记…"), [this, sourcePath, groupId]() {
+                if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
+                auto* editor = new QDialog(this);
+                editor->setAttribute(Qt::WA_DeleteOnClose);
+                editor->setWindowTitle(QStringLiteral("新建自由笔记"));
+                editor->resize(520, 360);
+                auto* form = new QFormLayout(editor);
+                auto* title = new QLineEdit(editor);
+                auto* body = new QPlainTextEdit(editor);
+                title->setPlaceholderText(QStringLiteral("例如：这一章的核心问题"));
+                body->setPlaceholderText(QStringLiteral("写下自己的理解、问题或下一步行动……"));
+                form->addRow(QStringLiteral("标题"), title); form->addRow(QStringLiteral("内容"), body);
+                auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, editor);
+                form->addRow(buttons);
+                connect(buttons, &QDialogButtonBox::rejected, editor, &QDialog::reject);
+                connect(buttons, &QDialogButtonBox::accepted, editor, [this, editor, title, body, groupId]() {
+                    if (title->text().trimmed().isEmpty() || docPath_.isEmpty()) return;
+                    Markup note;
+                    note.id = newId(); note.docPath = docPath_; note.page = view_->currentPage();
+                    note.type = MarkupType::Note; note.title = title->text().trimmed(); note.comment = body->toPlainText();
+                    note.mindGroup = groupId; note.created = QDateTime::currentMSecsSinceEpoch(); note.updated = note.created;
+                    undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), note, QStringLiteral("新建自由笔记")));
+                    editor->accept();
+                });
+                editor->show();
+            });
+            menu.addSeparator();
             menu.addAction(groupId.isEmpty() ? QStringLiteral("新建分组…") : QStringLiteral("新建子分组…"),
                            [this, sourcePath, groupId]() {
                 const QString name = askText(this, QStringLiteral("新建分组"), QStringLiteral("名称："));
@@ -1503,6 +1530,22 @@ QString MainWindow::createNotebook(const QString& name)
     topic.name = name.trimmed();
     if (!store_.upsertTopic(topic)) return {};
     return openNotebook(topic.id) ? topic.id : QString();
+}
+
+bool MainWindow::createFreeNoteForTest(const QString& title, const QString& comment)
+{
+    if (docPath_.isEmpty() || title.trimmed().isEmpty()) return false;
+    Markup note;
+    note.id = newId();
+    note.docPath = docPath_;
+    note.page = view_ ? view_->currentPage() : 0;
+    note.type = MarkupType::Note;
+    note.title = title.trimmed();
+    note.comment = comment;
+    note.created = QDateTime::currentMSecsSinceEpoch();
+    note.updated = note.created;
+    undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), note, QStringLiteral("新建自由笔记")));
+    return true;
 }
 
 bool MainWindow::addNotebookDocument(const QString& path)
@@ -1984,8 +2027,9 @@ void MainWindow::editMarkupComment(const QString& id)
     editor->setWindowTitle(QStringLiteral("摘录与个人批注"));
     editor->resize(580, 520);
     auto* layout = new QVBoxLayout(editor);
-    auto* source = new QLabel(QStringLiteral("%1 · 第 %2 页")
-                                  .arg(QFileInfo(m->docPath).fileName()).arg(m->page + 1), editor);
+    auto* source = new QLabel(m->text.isEmpty()
+                                   ? QStringLiteral("自由笔记 · 无原文来源")
+                                   : QStringLiteral("%1 · 第 %2 页").arg(QFileInfo(m->docPath).fileName()).arg(m->page + 1), editor);
     source->setWordWrap(true);
     layout->addWidget(source);
     layout->addWidget(new QLabel(QStringLiteral("我的标题"), editor));
@@ -1997,6 +2041,7 @@ void MainWindow::editMarkupComment(const QString& id)
     auto* quote = new QPlainTextEdit(m->text, editor);
     quote->setObjectName("captureQuote");
     quote->setReadOnly(true);
+    if (m->text.isEmpty()) quote->setPlaceholderText(QStringLiteral("这是一条自由笔记，没有原文摘录。"));
     layout->addWidget(quote, 1);
     layout->addWidget(new QLabel(QStringLiteral("我的批注"), editor));
     auto* comment = new QPlainTextEdit(m->comment, editor);

@@ -1050,6 +1050,12 @@ int main(int argc, char** argv)
             check(w.addNotebookDocument(pdf), QStringLiteral("add first notebook document"));
             check(w.notebookDocumentCountForTest() == 1 && w.view()->isVisible(),
                   QStringLiteral("adding a document opens its reader and tab"));
+            check(w.createFreeNoteForTest(QStringLiteral("自由笔记标题"), QStringLiteral("自由笔记内容")),
+                  QStringLiteral("create a free note without a text selection"));
+            bool foundFree = false;
+            for (const auto& note : w.visibleMarkups())
+                if (note.title == QStringLiteral("自由笔记标题") && note.comment == QStringLiteral("自由笔记内容")) foundFree = true;
+            check(foundFree, QStringLiteral("free note enters the same markup model"));
             const QString outlineGroup = w.createMindGroupForTest(QStringLiteral("工作区分组"));
             auto* outline = w.findChild<QTreeWidget*>(QStringLiteral("notebookOutline"));
             bool foundGroup = false;
