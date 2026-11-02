@@ -20,6 +20,8 @@
 #include <QDialogButtonBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QToolBar>
+#include <QToolButton>
 #include <QTabBar>
 
 #include <cstdio>
@@ -69,6 +71,16 @@ int main(int argc, char** argv)
     w.resize(1300, 900);
     w.show();
     settle();
+    if (auto* toolbar = w.findChild<QToolBar*>(QStringLiteral("mainToolbar"))) {
+        bool noOverflow = true;
+        for (auto* button : toolbar->findChildren<QToolButton*>())
+            if (button->isVisible() && button->text() == QStringLiteral("»")) noOverflow = false;
+        check(noOverflow, QStringLiteral("main toolbar has no overflow button at compact window width"));
+        bool captureTooltips = true;
+        for (QAction* action : toolbar->actions())
+            if (action && (action->text() == QStringLiteral("高亮") || action->text() == QStringLiteral("手写")) && action->toolTip().isEmpty()) captureTooltips = false;
+        check(captureTooltips, QStringLiteral("icon-only annotation tools remain discoverable through tooltips"));
+    }
 
     check(w.openDocument(pdf), QStringLiteral("open %1").arg(pdf));
     w.applyDemoMarkups();

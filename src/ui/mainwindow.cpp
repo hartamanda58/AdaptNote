@@ -239,15 +239,29 @@ QIcon glyphIcon(const QString& kind, const QColor& accent = QColor(0x3d, 0x8b, 0
         }
         p.drawPath(path);
     } else if (kind == "note") {
-        p.setPen(QPen(QColor(0xc7, 0x78, 0x00), 1));
-        p.setBrush(QColor(0xff, 0x98, 0x00));
-        p.drawRoundedRect(QRectF(3.5, 3.5, 13, 13), 2, 2);
-        p.setPen(Qt::white);
-        QFont f;
-        f.setPixelSize(11);
-        f.setBold(true);
-        p.setFont(f);
-        p.drawText(QRectF(3.5, 3.5, 13, 13), Qt::AlignCenter, "!");
+        p.setPen(QPen(QColor(0xa66a, 0x3a, 0x00), 1));
+        p.setBrush(QColor(0xff, 0xf0, 0xb3));
+        p.drawRoundedRect(QRectF(3, 3, 14, 14), 2, 2);
+        p.setPen(QPen(QColor(0x9b, 0x76, 0x16), 1));
+        p.drawLine(6, 7, 14, 7); p.drawLine(6, 10, 14, 10); p.drawLine(6, 13, 11, 13);
+    } else if (kind == "pen") {
+        p.setPen(QPen(QColor(0x4b, 0x55, 0x63), 1.2));
+        p.setBrush(QColor(0xd9, 0xe7, 0xfb));
+        QPolygonF nib{{4, 15}, {14, 4}, {17, 7}, {7, 17}};
+        p.drawPolygon(nib);
+        p.setPen(QPen(accent, 2)); p.drawLine(3, 18, 8, 16);
+    } else if (kind == "eraser") {
+        p.setPen(QPen(QColor(0xa0, 0x4a, 0x4a), 1.1));
+        p.setBrush(QColor(0xf7, 0xce, 0xd0));
+        QPolygonF body{{4, 13}, {12, 4}, {18, 9}, {10, 17}};
+        p.drawPolygon(body);
+        p.setPen(QPen(QColor(0xa0, 0x4a, 0x4a), 1)); p.drawLine(8, 13, 13, 17);
+    } else if (kind == "export") {
+        p.setPen(QPen(QColor(0x3d, 0x6f, 0x55), 1.3));
+        p.setBrush(QColor(0xe6, 0xf3, 0xe9));
+        p.drawRoundedRect(QRectF(3, 8, 14, 9), 1, 1);
+        p.setBrush(QColor(0xff, 0xff, 0xff)); p.drawRect(QRectF(6, 3, 8, 10));
+        p.setPen(QPen(QColor(0x45, 0x8b, 0x5b), 1)); p.drawLine(8, 6, 12, 6); p.drawLine(8, 8, 12, 8);
     } else if (kind == "image") {
         p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 1.2));
         p.setBrush(QColor(0xdfe6f0));
@@ -299,6 +313,27 @@ QIcon glyphIcon(const QString& kind, const QColor& accent = QColor(0x3d, 0x8b, 0
         p.setPen(Qt::NoPen);
         p.drawPolygon(QPolygonF{{12.5, 3.0}, {17.0, 6.0}, {12.0, 7.5}});
         p.drawPolygon(QPolygonF{{7.5, 17.0}, {3.0, 14.0}, {8.0, 12.5}});
+    } else if (kind == "read" || kind == "organize" || kind == "mind") {
+        p.setPen(QPen(QColor(0x4b, 0x5b, 0x73), 1.4));
+        p.setBrush(QColor(0xf7, 0xf9, 0xfc));
+        if (kind == "read") {
+            p.drawRoundedRect(QRectF(3, 3, 14, 14), 2, 2);
+            p.drawLine(10, 4, 10, 16);
+            p.drawLine(5, 7, 8, 7); p.drawLine(12, 7, 15, 7);
+            p.drawLine(5, 10, 8, 10); p.drawLine(12, 10, 15, 10);
+        } else if (kind == "organize") {
+            p.drawRoundedRect(QRectF(2.5, 5, 6, 5), 1, 1);
+            p.drawRoundedRect(QRectF(11.5, 3, 6, 5), 1, 1);
+            p.drawRoundedRect(QRectF(11.5, 12, 6, 5), 1, 1);
+            p.drawLine(8.5, 7.5, 10, 7.5); p.drawLine(10, 5.5, 10, 14.5);
+            p.drawLine(10, 5.5, 11.5, 5.5); p.drawLine(10, 14.5, 11.5, 14.5);
+        } else {
+            p.drawLine(4, 5, 10, 3); p.drawLine(10, 3, 16, 5);
+            p.drawLine(4, 5, 4, 14); p.drawLine(16, 5, 16, 14);
+            p.drawLine(4, 14, 10, 17); p.drawLine(16, 14, 10, 17);
+            p.drawEllipse(QRectF(7, 1, 6, 5));
+            p.drawEllipse(QRectF(1, 12, 6, 6)); p.drawEllipse(QRectF(13, 12, 6, 6));
+        }
     } else if (kind == "prev" || kind == "next") {
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(0x55, 0x5b, 0x66));
@@ -547,7 +582,7 @@ void MainWindow::buildUi()
     notebookTabs_->setObjectName("notebookTabs");
     notebookTabs_->setExpanding(false);
     notebookTabs_->setTabsClosable(true);
-    notebookTabs_->addTab(QStringLiteral("资料库"));
+    notebookTabs_->addTab(QStringLiteral("主页"));
     notebookTabs_->setTabButton(0, QTabBar::RightSide, nullptr);
     workspaceLayout->addWidget(notebookTabs_);
     connect(notebookTabs_, &QTabBar::currentChanged, this, [this](int index) {
@@ -571,31 +606,40 @@ void MainWindow::buildUi()
     });
     notebookTitle_ = new QLabel(QStringLiteral("AdaptNote · 文档阅读"), workspace);
     notebookTitle_->setObjectName("notebookHeader");
-    notebookTitle_->setStyleSheet("padding:12px 18px;background:#ffffff;color:#1d2939;font-size:16px;font-weight:600;border-bottom:1px solid #e4e7ec;");
-    auto* header = new QWidget(workspace);
-    auto* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(0, 0, 12, 0);
-    headerLayout->addWidget(notebookTitle_, 1);
-    auto* libraryButton = new QPushButton(QStringLiteral("资料库"), header);
-    auto* newNotebookButton = new QPushButton(QStringLiteral("新建笔记本"), header);
-    auto* addDocumentButton = new QPushButton(QStringLiteral("添加资料"), header);
-    headerLayout->addWidget(libraryButton);
-    headerLayout->addWidget(newNotebookButton);
-    headerLayout->addWidget(addDocumentButton);
-    auto* mindWindowButton = new QPushButton(QStringLiteral("笔记脑图 ↗"), header);
-    headerLayout->addWidget(mindWindowButton);
-    connect(mindWindowButton, &QPushButton::clicked, this, &MainWindow::showNotebookMindMap);
-    connect(libraryButton, &QPushButton::clicked, this, &MainWindow::showLibrary);
-    connect(newNotebookButton, &QPushButton::clicked, this, [this]() {
+    notebookTitle_->hide(); // selected notebook is already named in the app-level tab
+    notebookDocuments_ = new QTabBar(workspace);
+    notebookDocuments_->setObjectName("notebookDocuments");
+    notebookDocuments_->setExpanding(false);
+    notebookDocuments_->setUsesScrollButtons(true);
+    auto* documentStrip = new QWidget(workspace);
+    auto* documentStripLayout = new QHBoxLayout(documentStrip);
+    documentStripLayout->setContentsMargins(6, 1, 8, 1);
+    documentStripLayout->setSpacing(6);
+    documentStripLayout->addWidget(notebookDocuments_, 1);
+    auto* newNotebookButton = new QToolButton(documentStrip);
+    newNotebookButton->setText(QStringLiteral("+ 笔记本"));
+    newNotebookButton->setToolTip(QStringLiteral("新建笔记本"));
+    auto* addDocumentButton = new QToolButton(documentStrip);
+    addDocumentButton->setText(QStringLiteral("+ 资料"));
+    addDocumentButton->setToolTip(QStringLiteral("添加 PDF 或 EPUB 到当前笔记本"));
+    auto* mindWindowButton = new QToolButton(documentStrip);
+    mindWindowButton->setText(QStringLiteral("脑图 ↗"));
+    mindWindowButton->setToolTip(QStringLiteral("在独立窗口查看当前笔记本脑图"));
+    documentStripLayout->addWidget(newNotebookButton);
+    documentStripLayout->addWidget(addDocumentButton);
+    documentStripLayout->addWidget(mindWindowButton);
+    workspaceLayout->addWidget(documentStrip);
+    connect(mindWindowButton, &QToolButton::clicked, this, &MainWindow::showNotebookMindMap);
+    connect(newNotebookButton, &QToolButton::clicked, this, [this]() {
         const QString name = askText(this, QStringLiteral("新建笔记本"), QStringLiteral("名称："));
         if (!name.trimmed().isEmpty()) createNotebook(name);
     });
-    connect(addDocumentButton, &QPushButton::clicked, this, [this]() {
+    connect(addDocumentButton, &QToolButton::clicked, this, [this]() {
         if (currentTopic_.isEmpty()) {
             statusBar()->showMessage(QStringLiteral("请先新建或打开笔记本，再添加资料"), 4000);
             return;
         }
-        if (qEnvironmentVariableIsSet("ADAPT_HEADLESS")) return;
+        if (kHeadless) return;
         const QStringList paths = QFileDialog::getOpenFileNames(this, QStringLiteral("添加阅读资料"),
                                     QString(), QStringLiteral("阅读资料 (*.pdf *.epub)"));
         for (const QString& path : paths) {
@@ -605,12 +649,6 @@ void MainWindow::buildUi()
             }
         }
     });
-    workspaceLayout->addWidget(header);
-    notebookDocuments_ = new QTabBar(workspace);
-    notebookDocuments_->setObjectName("notebookDocuments");
-    notebookDocuments_->setExpanding(false);
-    notebookDocuments_->setUsesScrollButtons(true);
-    workspaceLayout->addWidget(notebookDocuments_);
     workspaceLayout->addWidget(splitter_, 1);
     setCentralWidget(workspace);
     connect(notebookDocuments_, &QTabBar::currentChanged, this, [this](int index) {
@@ -686,7 +724,7 @@ void MainWindow::buildToolbar()
     tb->setObjectName("mainToolbar");
     tb->setMovable(false);
     tb->setIconSize(QSize(18, 18));
-    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
     QAction* open = tb->addAction(glyphIcon("open"), QStringLiteral("打开"));
     open->setShortcut(QKeySequence::Open);
@@ -719,6 +757,7 @@ void MainWindow::buildToolbar()
 
     tb->addSeparator();
     QAction* prev = tb->addAction(glyphIcon("prev"), QString());
+    prev->setToolTip(QStringLiteral("上一页 · Ctrl+←"));
     prev->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Left));
     connect(prev, &QAction::triggered, this, [this]() { changePage(-1); });
     pageLabel_ = new QLabel(QStringLiteral(" - / - "));
@@ -726,6 +765,7 @@ void MainWindow::buildToolbar()
     pageLabel_->setAlignment(Qt::AlignCenter);
     tb->addWidget(pageLabel_);
     QAction* next = tb->addAction(glyphIcon("next"), QString());
+    next->setToolTip(QStringLiteral("下一页 · Ctrl+→"));
     next->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Right));
     connect(next, &QAction::triggered, this, [this]() { changePage(1); });
 
@@ -779,10 +819,17 @@ void MainWindow::buildToolbar()
     addMarkupAction("underline", QStringLiteral("下划线"), QKeySequence(Qt::Key_U));
     addMarkupAction("squiggly", QStringLiteral("波浪线"), QKeySequence(Qt::Key_S));
     addMarkupAction("note", QStringLiteral("批注"), QKeySequence(Qt::Key_N));
+    for (QAction* action : tb->actions()) {
+        if (!action || action->isSeparator()) continue;
+        if (action->text() == QStringLiteral("高亮")) action->setToolTip(QStringLiteral("黄色高亮 · H"));
+        else if (action->text() == QStringLiteral("下划线")) action->setToolTip(QStringLiteral("下划线标注 · U"));
+        else if (action->text() == QStringLiteral("波浪线")) action->setToolTip(QStringLiteral("波浪线标注 · S"));
+        else if (action->text() == QStringLiteral("批注")) action->setToolTip(QStringLiteral("添加个人批注 · N"));
+    }
 
     auto* toolGroup = new QActionGroup(this);
     toolGroup->setExclusive(true);
-    inkAction_ = tb->addAction(glyphIcon("note", QColor("#1f2328")), QStringLiteral("手写"));
+    inkAction_ = tb->addAction(glyphIcon("pen", QColor("#1f2328")), QStringLiteral("手写"));
     inkAction_->setToolTip(QStringLiteral("手写笔迹（P）：拖拽书写，再按一次退出"));
     inkAction_->setCheckable(true);
     inkAction_->setActionGroup(toolGroup);
@@ -793,7 +840,7 @@ void MainWindow::buildToolbar()
                                     : QStringLiteral("已退出手写模式"), 2500);
     });
 
-    eraseAction_ = tb->addAction(glyphIcon("delete", QColor("#d93025")), QStringLiteral("橡皮"));
+    eraseAction_ = tb->addAction(glyphIcon("eraser", QColor("#d93025")), QStringLiteral("橡皮"));
     eraseAction_->setToolTip(QStringLiteral("橡皮（E）：拖过手写笔迹即可擦除"));
     eraseAction_->setCheckable(true);
     eraseAction_->setActionGroup(toolGroup);
@@ -847,7 +894,9 @@ void MainWindow::buildToolbar()
         {"脑图", "专注脑图（Ctrl+3 / M）", 2, QKeySequence(QStringLiteral("Ctrl+3"))},
     };
     for (const ModeDef& def : modes) {
-        QAction* a = tb->addAction(glyphIcon("image", QColor("#2a6fd0")),
+        const QString modeIcon = def.mode == 0 ? QStringLiteral("read")
+                                 : def.mode == 1 ? QStringLiteral("organize") : QStringLiteral("mind");
+        QAction* a = tb->addAction(glyphIcon(modeIcon, QColor("#2a6fd0")),
                                    QString::fromUtf8(def.label));
         a->setToolTip(QString::fromUtf8(def.tip));
         a->setCheckable(true);
@@ -903,7 +952,7 @@ void MainWindow::buildToolbar()
     // export menu
     auto* exportBtn = new QToolButton(tb);
     exportBtn->setText(QStringLiteral("导出"));
-    exportBtn->setIcon(glyphIcon("save", QColor("#34A853")));
+    exportBtn->setIcon(glyphIcon("export", QColor("#34A853")));
     exportBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     exportBtn->setPopupMode(QToolButton::InstantPopup);
     auto* exportMenu = new QMenu(exportBtn);
@@ -1018,7 +1067,11 @@ void MainWindow::buildToolbar()
     tb->addWidget(moreBtn);
     // Compact labelled controls retain discoverability while keeping low-frequency
     // mode/export controls reachable without the native overflow extension.
-    tb->setStyleSheet(QStringLiteral("QToolButton{padding:3px 2px;font-size:12px;} QToolBar{spacing:1px;}"));
+    tb->setStyleSheet(QStringLiteral("QToolButton{padding:3px 3px;min-width:28px;} QToolBar{spacing:1px;}"));
+    for (QAction* action : tb->actions()) {
+        if (!action || action->isSeparator() || action->text().isEmpty()) continue;
+        if (action->toolTip().isEmpty()) action->setToolTip(action->text());
+    }
 }
 
 void MainWindow::buildFindBar()
@@ -1127,7 +1180,7 @@ void MainWindow::buildDocks()
     notebookOutline_->setHeaderHidden(true);
     notebookOutline_->setIndentation(18);
     notebookOutline_->setWordWrap(true);
-    leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记大纲"));
+    leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记本大纲"));
     notebookOutline_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(notebookOutline_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         auto* item = notebookOutline_->itemAt(pos);
@@ -1290,7 +1343,7 @@ void MainWindow::buildDocks()
         menu.exec(notesList_->mapToGlobal(pos));
     });
 
-    leftTabs_->addTab(notesTab, QStringLiteral("笔记 (0)"));
+    leftTabs_->addTab(notesTab, QStringLiteral("笔记列表 (0)"));
 
     dock->setWidget(leftTabs_);
     dock->setMinimumWidth(280);
@@ -1548,13 +1601,24 @@ void MainWindow::refreshNotebookWorkspace()
     for (int i = 0; i < notebookOutline_->topLevelItemCount(); ++i)
         remember(notebookOutline_->topLevelItem(i));
     notebookOutline_->clear();
-    const mind::Node root = mind::buildFromTopic(title, inputs, groups);
+    const mind::Node root = currentTopic_.isEmpty() && !inputs.isEmpty()
+                                ? mind::buildFromNotes(title, inputs.first().markups, groups)
+                                : mind::buildFromTopic(title, inputs, groups);
     QHash<QString, QString> groupPaths;
     for (const MindGroup& group : groups) groupPaths.insert(QStringLiteral("group:") + group.id, group.docPath);
     std::function<void(QTreeWidgetItem*, const mind::Node&)> fill =
         [&](QTreeWidgetItem* parent, const mind::Node& node) {
             auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(notebookOutline_);
-            item->setText(0, node.text);
+            QString label = node.text;
+            if (!node.markupId.isEmpty() && !node.source.isEmpty())
+                label += QStringLiteral("    ·    %1").arg(node.source);
+            item->setText(0, label);
+            if (node.isGroup) {
+                item->setIcon(0, style()->standardIcon(QStyle::SP_DirIcon));
+                QFont font = item->font(0); font.setWeight(QFont::DemiBold); item->setFont(0, font);
+            } else if (!node.markupId.isEmpty()) {
+                item->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
+            }
             item->setData(0, Qt::UserRole, node.markupId);
             item->setData(0, Qt::UserRole + 4, node.groupKey);
             if (node.markupId.isEmpty() && groupPaths.contains(node.groupKey)) {
@@ -1758,6 +1822,11 @@ QStringList MainWindow::currentTopicDocPaths() const
 void MainWindow::updateNotesPanel()
 {
     if (!notesList_) return;
+    if (currentTopic_.isEmpty()) {
+        if (leftTabs_) leftTabs_->setTabText(0, QStringLiteral("书签大纲"));
+    } else if (leftTabs_) {
+        leftTabs_->setTabText(0, QStringLiteral("笔记本大纲"));
+    }
     const QString keepId = notesList_->currentItem()
                                ? notesList_->currentItem()->data(Qt::UserRole).toString()
                                : QString();
@@ -1804,7 +1873,7 @@ void MainWindow::updateNotesPanel()
         if (m.id == keepId) keepRow = row;
     }
 
-    leftTabs_->setTabText(2, QStringLiteral("笔记 (%1)").arg(shown_.size()));
+    leftTabs_->setTabText(2, QStringLiteral("笔记列表 (%1)").arg(shown_.size()));
     if (keepRow >= 0) notesList_->setCurrentRow(keepRow);
 }
 
@@ -3642,7 +3711,11 @@ void MainWindow::setWorkspaceMode(int mode)
     if (!splitter_ || !mindPanel_) return;
 
     // Space policy: reading is page-first; arranging is page+map; map mode is map-first.
-    if (notesDock_) notesDock_->setVisible(workspaceMode_ == 0);
+    if (notesDock_) {
+        if (!currentTopic_.isEmpty()) notesDock_->setWindowTitle(QStringLiteral("笔记本大纲"));
+        else notesDock_->setWindowTitle(QStringLiteral("文档目录与笔记"));
+        notesDock_->setVisible(workspaceMode_ == 0);
+    }
     if (aiDock_) aiDock_->setVisible(false); // open explicitly from 更多 when needed
 
     if (workspaceMode_ == 0) {
