@@ -60,6 +60,7 @@ public:
 
 signals:
     void nodeActivated(int page);
+    void markupActivated(const QString& markupId);
     // Keyboard / double-click editing requests; the window owns the dialogs and the undo
     // stack, so the view only reports intent.
     void renameRequested(const QString& key);
@@ -96,6 +97,14 @@ private:
     Node root_;
     double zoom_ = 1.0;
     QString dragMarkupId_;
+    QString pressKey_;
+    QPoint pressStart_;
+    QPoint panStart_;
+    QPoint panLast_;
+    int panStartH_ = 0;
+    int panStartV_ = 0;
+    bool nodePressActive_ = false;
+    bool panActive_ = false;
     QPointF dragStartScene_;
     bool dragMoved_ = false;
     bool didInitialFit_ = false;
@@ -107,6 +116,7 @@ private:
     QString pendingLinkFrom_;
     // drawn link items, keyed by link id, for hit testing and highlight
     QHash<QString, QGraphicsItem*> linkItems_;
+    QHash<QString, int> pageByKey_;
     void drawFreeLinks(const QHash<QString, QRectF>& rectOf);
     void clearDropIndicator();
     void updateDropIndicator(const QPointF& scenePos);

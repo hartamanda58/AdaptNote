@@ -10,6 +10,8 @@
 #include <QThread>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QMouseEvent>
+#include <QScrollBar>
 #include <QtMath>
 
 #include <cstdio>
@@ -442,6 +444,8 @@ int main(int argc, char** argv)
         mind::MindMapView view;
         view.resize(900, 600);
         view.setTree(root);
+        view.show();
+        QCoreApplication::processEvents();
         check(view.sceneNodeCount() == 6,
               QStringLiteral("view created %1 node items").arg(view.sceneNodeCount()));
 
@@ -450,15 +454,54 @@ int main(int argc, char** argv)
         check(coloredPixels(img) > 50,
               QStringLiteral("rendered map has visible nodes (%1 colored samples)").arg(coloredPixels(img)));
 
-        // hit testing used by drag-and-drop regroup
+        // Real viewport input must select nodes, activate notes, preserve double click,
+        // drag nodes for reorganization, and pan the canvas on the middle mouse button.
         {
-            const QPointF centre = view.nodeCenter(QStringLiteral("a"));
-            check(!centre.isNull(), QStringLiteral("node centre found for a note"));
-            check(view.markupIdAt(centre) == QStringLiteral("a"),
+            const QPointF sceneCenter = view.nodeCenter(QStringLiteral("a"));
+            check(!sceneCenter.isNull(), QStringLiteral("node centre found for a note"));
+            check(view.markupIdAt(sceneCenter) == QStringLiteral("a"),
                   QStringLiteral("markupIdAt resolves the dragged note"));
-            const QString groupAtNote = view.groupKeyAt(centre);
+            const QString groupAtNote = view.groupKeyAt(sceneCenter);
             check(groupAtNote.startsWith(QStringLiteral("page:")),
                   QStringLiteral("a page-grouped note reports its group key (%1)").arg(groupAtNote));
+
+            int activated = 0, renamed = 0;
+            QObject::connect(&view, &mind::MindMapView::markupActivated, [&activated](const QString& id) {
+                if (id == QStringLiteral("a")) ++activated;
+            });
+            QObject::connect(&view, &mind::MindMapView::renameRequested, [&renamed](const QString& key) {
+                if (key == QStringLiteral("note:a")) ++renamed;
+            });
+            const QPoint start = view.mapFromScene(sceneCenter);
+            auto sendMouse = [&](QEvent::Type type, const QPoint& pos, Qt::MouseButton button,
+                                 Qt::MouseButtons buttons) {
+                QMouseEvent event(type, QPointF(pos), QPointF(view.viewport()->mapToGlobal(pos)),
+                                  button, buttons, Qt::NoModifier);
+                QApplication::sendEvent(view.viewport(), &event);
+                QCoreApplication::processEvents();
+            };
+            sendMouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+            sendMouse(QEvent::MouseButtonRelease, start, Qt::LeftButton, Qt::NoButton);
+            check(activated == 1 && view.selectedKey() == QStringLiteral("note:a"),
+                  QStringLiteral("single click selects and activates note card"));
+            sendMouse(QEvent::MouseButtonDblClick, start, Qt::LeftButton, Qt::LeftButton);
+            check(renamed == 1, QStringLiteral("double click emits note edit request"));
+
+            const QPoint nodeEnd = start + QPoint(45, 24);
+            sendMouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+            sendMouse(QEvent::MouseMove, start + QPoint(15, 8), Qt::NoButton, Qt::LeftButton);
+            sendMouse(QEvent::MouseMove, nodeEnd, Qt::NoButton, Qt::LeftButton);
+            sendMouse(QEvent::MouseButtonRelease, nodeEnd, Qt::LeftButton, Qt::NoButton);
+            check(!view.hasDropIndicator(), QStringLiteral("node drag clears the temporary indicator on release"));
+
+            const QPoint panStart = view.viewport()->rect().center();
+            const QPointF sceneBeforePan = view.mapToScene(panStart);
+            const QTransform transformBeforePan = view.transform();
+            sendMouse(QEvent::MouseButtonPress, panStart, Qt::MiddleButton, Qt::MiddleButton);
+            sendMouse(QEvent::MouseMove, panStart - QPoint(70, 40), Qt::NoButton, Qt::MiddleButton);
+            sendMouse(QEvent::MouseButtonRelease, panStart - QPoint(70, 40), Qt::MiddleButton, Qt::NoButton);
+            check(view.transform() != transformBeforePan,
+                  QStringLiteral("middle-drag pans the mind map canvas"));
         }
 
         view.setZoom(10.0);

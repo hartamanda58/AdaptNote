@@ -3816,6 +3816,10 @@ void MainWindow::ensureMindPanel()
     });
 
     // Jump to the page but stay in the map: the old modal dialog closed on every click.
+    connect(mindView_, &mind::MindMapView::markupActivated, this, [this](const QString& id) {
+        jumpToMarkup(id);
+        updateStatus();
+    });
     connect(mindView_, &mind::MindMapView::nodeActivated, this, [this](int page) {
         if (page < 0) return;
         view_->gotoPage(page);
@@ -4023,10 +4027,8 @@ void MainWindow::showNotebookMindMap()
         });
         connect(undo, &QPushButton::clicked, this, &MainWindow::undoCommand);
         connect(redo, &QPushButton::clicked, this, &MainWindow::redoCommand);
-        connect(notebookMindView_, &mind::MindMapView::nodeActivated, this, [this](int) {
-            const QString key = notebookMindView_->selectedKey();
-            if (key.startsWith(QStringLiteral("note:"))) activateNotebookNote(key.mid(5));
-        });
+        connect(notebookMindView_, &mind::MindMapView::markupActivated, this,
+                [this](const QString& id) { activateNotebookNote(id); });
         connect(notebookMindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
             if (key.startsWith(QStringLiteral("note:")) && activateNotebookNote(key.mid(5))) editMarkupComment(key.mid(5));
             if (key.startsWith(QStringLiteral("group:"))) {

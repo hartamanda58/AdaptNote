@@ -23,6 +23,7 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QTabBar>
+#include <QScrollBar>
 
 #include <cstdio>
 #include <functional>
@@ -1349,6 +1350,7 @@ int main(int argc, char** argv)
                 if (m.mindGroup != groupId) { noteId = m.id; break; }
             check(!noteId.isEmpty(), QStringLiteral("found a note outside the group"));
 
+            const QPointF panBefore = mv->mapToScene(mv->viewport()->rect().center());
             const QRectF from = mv->rectForKey(QStringLiteral("note:") + noteId);
             const QRectF to = mv->rectForKey(QStringLiteral("group:") + groupId);
             check(!from.isNull() && !to.isNull(),
@@ -1358,7 +1360,21 @@ int main(int argc, char** argv)
                 // QGraphicsView receives mouse input through its viewport, so the events
                 // have to be addressed there (sending them to the view does nothing).
                 QWidget* vp = mv->viewport();
+                int clickActivations = 0;
+                int doubleClickEdits = 0;
+                QObject::connect(mv, &mind::MindMapView::markupActivated, &w,
+                                 [&clickActivations, noteId](const QString& id) { if (id == noteId) ++clickActivations; });
+                QObject::connect(mv, &mind::MindMapView::renameRequested, &w,
+                                 [&doubleClickEdits, noteId](const QString& key) { if (key == QStringLiteral("note:") + noteId) ++doubleClickEdits; });
                 const QPoint start = vp->mapFrom(mv, mv->mapFromScene(from.center()));
+                QMouseEvent clickPress(QEvent::MouseButtonPress, start, vp->mapToGlobal(start), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &clickPress);
+                QMouseEvent clickRelease(QEvent::MouseButtonRelease, start, vp->mapToGlobal(start), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &clickRelease);
+                check(clickActivations == 1, QStringLiteral("real viewport click activates the note card"));
+                QMouseEvent doubleClick(QEvent::MouseButtonDblClick, start, vp->mapToGlobal(start), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &doubleClick);
+                check(doubleClickEdits == 1, QStringLiteral("real viewport double click requests note edit"));
                 const QPoint mid =
                     vp->mapFrom(mv, mv->mapFromScene((from.center() + to.center()) / 2.0));
                 const QPoint end = vp->mapFrom(mv, mv->mapFromScene(to.center()));
@@ -1387,6 +1403,17 @@ int main(int argc, char** argv)
                 check(landed == groupId,
                       QStringLiteral("note moved into the target group (expected %1, got '%2')")
                           .arg(groupId.left(8), landed.left(8)));
+
+                const QPoint panStart = vp->rect().center();
+                const QTransform transformBefore = mv->transform();
+                QMouseEvent panPress(QEvent::MouseButtonPress, panStart, vp->mapToGlobal(panStart), Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &panPress);
+                const QPoint panEnd = panStart - QPoint(60, 35);
+                QMouseEvent panMove(QEvent::MouseMove, panEnd, vp->mapToGlobal(panEnd), Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &panMove);
+                QMouseEvent panRelease(QEvent::MouseButtonRelease, panEnd, vp->mapToGlobal(panEnd), Qt::MiddleButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(vp, &panRelease);
+                check(mv->transform() != transformBefore, QStringLiteral("real viewport middle drag pans canvas"));
             }
             w.setWorkspaceMode(0);
             settle();

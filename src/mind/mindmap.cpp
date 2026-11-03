@@ -9,9 +9,11 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QCursor>
+#include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QScrollBar>
 #include <QtMath>
 
 #include <algorithm>
@@ -55,7 +57,7 @@ MindMapView::MindMapView(QWidget* parent)
     scene_ = new QGraphicsScene(this);
     setScene(scene_);
     setRenderHint(QPainter::Antialiasing, true);
-    setDragMode(QGraphicsView::ScrollHandDrag);
+    setDragMode(QGraphicsView::NoDrag);
     setBackgroundBrush(QColor(0xfa, 0xfb, 0xfd));
     setFrameShape(QFrame::NoFrame);
 }
@@ -288,6 +290,41 @@ void MindMapView::updateDropIndicator(const QPointF& scenePos)
 
 void MindMapView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (!panActive_ && event->buttons().testFlag(Qt::MiddleButton)) {
+        panActive_ = true;
+        panStart_ = event->pos();
+        panLast_ = event->pos();
+        panStartH_ = horizontalScrollBar()->value();
+        panStartV_ = verticalScrollBar()->value();
+        setCursor(Qt::ClosedHandCursor);
+    }
+    if (panActive_) {
+        const QPoint delta = event->pos() - panLast_;
+        panLast_ = event->pos();
+        // Translate the canvas itself instead of relying only on scrollbar range: small
+        // maps still pan naturally when they initially fit inside the viewport.
+        const double factor = qMax(0.2, zoom_);
+        translate(delta.x() / factor, delta.y() / factor);
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        event->accept();
+        return;
+    }
+    if (nodePressActive_ && (event->pos() - pressStart_).manhattanLength() >= QApplication::startDragDistance()) {
+        if (!dragMarkupId_.isEmpty()) {
+            dragStartScene_ = mapToScene(pressStart_);
+            dragMoved_ = true;
+            nodePressActive_ = false;
+        } else {
+            panActive_ = true;
+            panStart_ = pressStart_;
+            panLast_ = pressStart_;
+            panStartH_ = horizontalScrollBar()->value();
+            panStartV_ = verticalScrollBar()->value();
+            setCursor(Qt::ClosedHandCursor);
+            nodePressActive_ = false;
+        }
+    }
     if (!dragMarkupId_.isEmpty()) {
         const QPointF scenePos = mapToScene(event->pos());
         if (!dragMoved_ && (scenePos - dragStartScene_).manhattanLength() > 6.0)
@@ -314,6 +351,22 @@ void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
 void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 {
     clearDropIndicator();
+    if (panActive_) {
+        panActive_ = false;
+        setCursor(linkMode_ ? Qt::CrossCursor : Qt::ArrowCursor);
+        event->accept();
+        return;
+    }
+    if (nodePressActive_) {
+        nodePressActive_ = false;
+        const QString key = pressKey_;
+        pressKey_.clear();
+        dragMarkupId_.clear();
+        if (key.startsWith(QStringLiteral("note:"))) emit markupActivated(key.mid(5));
+        else emit nodeActivated(pageByKey_.value(key, -1));
+        event->accept();
+        return;
+    }
     if (!dragMarkupId_.isEmpty() && dragMoved_) {
         const QString id = dragMarkupId_;
         const QPointF scenePos = mapToScene(event->pos());
@@ -326,6 +379,8 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 
         dragMarkupId_.clear();
         dragMoved_ = false;
+        nodePressActive_ = false;
+        pressKey_.clear();
 
         if (!hasTarget) {
             emit nodeReparented(id, QString());   // empty canvas -> back to the page bucket
@@ -417,6 +472,16 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
 
 void MindMapView::mousePressEvent(QMouseEvent* event)
 {
+    if (event->button() == Qt::MiddleButton) {
+        panActive_ = true;
+        panStart_ = event->pos();
+        panLast_ = event->pos();
+        panStartH_ = horizontalScrollBar()->value();
+        panStartV_ = verticalScrollBar()->value();
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
 
@@ -437,23 +502,25 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             return;
         }
 
-        const QString id = markupIdAt(scenePos);
-        if (!id.isEmpty()) {
-            dragMarkupId_ = id;
+        const QString key = keyAt(scenePos);
+        if (!key.isEmpty()) {
+            pressKey_ = key;
+            pressStart_ = event->pos();
+            nodePressActive_ = true;
+            dragMarkupId_ = markupIdAt(scenePos);
             dragStartScene_ = scenePos;
             dragMoved_ = false;
-            QGraphicsView::mousePressEvent(event);
+            setSelectedKey(key);
+            event->accept();
             return;
         }
-        const QString key = keyAt(scenePos);
-        if (!key.isEmpty()) setSelectedKey(key);
-        for (QGraphicsItem* item : scene_->items(scenePos)) {
-            const QVariant data = item->data(0);
-            if (data.isValid()) {
-                emit nodeActivated(data.toInt());
-                event->accept();
-                return;
-            }
+        setSelectedKey(QString());
+        if (event->button() == Qt::LeftButton) {
+            pressKey_.clear();
+            pressStart_ = event->pos();
+            nodePressActive_ = true;
+            event->accept();
+            return;
         }
     }
     QGraphicsView::mousePressEvent(event);
@@ -723,7 +790,9 @@ void MindMapView::rebuild()
         layoutTree(root_, heights, 64.0, opts, collapsed_, &canvas);
 
     QHash<QString, QRectF> rectOf;
-    for (const PlacedNode& p : placed) { rectOf.insert(p.key, p.rect); }
+    pageByKey_.clear();
+    for (const Node* node : order) pageByKey_.insert(nodeKey(*node), node->page);
+    for (const PlacedNode& p : placed) rectOf.insert(p.key, p.rect);
 
     // Links first so cards paint over them.
     std::function<void(const Node&)> drawLinks = [&](const Node& n) {
