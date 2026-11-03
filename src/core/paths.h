@@ -11,12 +11,14 @@ namespace an {
 // %APPDATA% and nothing stays inside the extracted folder.
 //
 //  1. ADAPT_DATA_DIR (absolute, or relative to the executable)
-//  2. <exeDir>/data when that directory exists (portable layout)
-//  3. the usual per-user location
+//  2. <bundle>/data when bin/<exe> and portable.flag mark a packaged bundle
+//  3. <exeDir>/data for a flat portable layout
+//  4. the usual per-user location
 //
 // Kept dependency-light and parameterised so it can be unit tested without touching the
 // real environment.
-QString resolveDataDir(const QString& exeDir, const QString& envOverride, const QString& fallback);
+QString resolveDataDir(const QString& exeDir, const QString& envOverride, const QString& fallback,
+                       bool portableBundle = false);
 
 // Same, using the real environment and QCoreApplication::applicationDirPath().
 QString defaultDataDir(const QString& exeDir = QString());

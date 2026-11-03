@@ -6,6 +6,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QGuiApplication>
@@ -253,6 +254,16 @@ int main(int argc, char** argv)
         check(an::resolveDataDir(exe, none, fallback) == QDir::cleanPath(exe + "/data"),
               QStringLiteral("a data/ folder next to the exe wins (%1)")
                   .arg(an::resolveDataDir(exe, none, fallback)));
+        QDir().mkpath(exe + QStringLiteral("/bin"));
+        QDir().mkpath(exe + QStringLiteral("/data"));
+        QFile flag(exe + QStringLiteral("/portable.flag"));
+        check(flag.open(QIODevice::WriteOnly), QStringLiteral("create explicit portable marker"));
+        flag.write("AdaptNote portable bundle v1\\n"); flag.close();
+        check(an::resolveDataDir(exe + QStringLiteral("/bin"), none, fallback, true)
+                  == QDir::cleanPath(exe + QStringLiteral("/data")),
+              QStringLiteral("bin executable resolves ../data for marked portable bundle"));
+        check(an::resolveDataDir(exe + QStringLiteral("/bin"), none, fallback, false) == fallback,
+              QStringLiteral("unmarked bin executable stays in per-user data"));
 
         check(an::resolveDataDir(exe, QStringLiteral("mydata"), fallback)
                   == QDir::cleanPath(exe + "/mydata"),

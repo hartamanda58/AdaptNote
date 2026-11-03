@@ -3,7 +3,8 @@
 #   pwsh -File scripts\make_portable.ps1 [-QtDir "C:\Qt\6.8.3\msvc2022_64"]
 #
 # Produces dist\AdaptNote-<version>-windows-x64.zip containing:
-#   AdaptNote.bat        launcher (data stays inside the folder)
+#   AdaptNote.bat        optional launcher (data stays inside the folder)
+#   portable.flag       lets bin\adaptnote.exe resolve ..\data\ by itself
 #   bin\adaptnote.exe    the app (+ bundled MuPDF is static)
 #   bin\*.dll            Qt 6 runtime, plugins and the MSVC runtime, staged by windeployqt
 #   data\                created on first run (library.db / mirror / images)
@@ -43,7 +44,8 @@ if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 Write-Host "== stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-New-Item -ItemType Directory -Path $bin, (Join-Path $stage "samples") -Force | Out-Null
+New-Item -ItemType Directory -Path $bin, (Join-Path $stage "samples"), (Join-Path $stage "data") -Force | Out-Null
+Set-Content -Path (Join-Path $stage "portable.flag") -Value "AdaptNote portable bundle v1" -Encoding ascii
 
 $exe = Get-ChildItem -Path $BuildDir -Recurse -Filter adaptnote.exe |
        Where-Object { $_.FullName -notmatch "CMakeFiles" } | Select-Object -First 1
@@ -86,7 +88,7 @@ Write-Host "== verify the staged tree"
 # Fail here rather than shipping a zip that cannot start: a missing platform plugin makes
 # Qt abort with "could not find or load the Qt platform plugin windows".
 foreach ($need in @("bin\adaptnote.exe", "bin\Qt6Core.dll", "bin\Qt6Gui.dll",
-                    "bin\Qt6Widgets.dll", "bin\platforms\qwindows.dll")) {
+                    "bin\Qt6Widgets.dll", "bin\platforms\qwindows.dll", "portable.flag")) {
     if (-not (Test-Path (Join-Path $stage $need))) { throw "staged package is missing $need" }
 }
 $kept = @("adaptnote.exe","Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","Qt6Network.dll",
@@ -118,7 +120,8 @@ Write-Host "== readme"
 AdaptNote（Windows 便携版）
 ==========================
 
-运行：双击 AdaptNote.bat（或从命令行 AdaptNote.bat --doc 某本书.pdf）
+运行：双击 bin\adaptnote.exe 或 AdaptNote.bat（可带 --doc 某本书.pdf）
+      程序已配置为直接运行时将数据保存在本目录 data\ 中。
 数据：全部在 data\ 目录里（笔记库 data\library.db，图片 data\images\）；
       整个文件夹拷到 U 盘即可带走，删掉 data\ 恢复出厂状态。
 示例：samples\test.pdf / samples\test.epub

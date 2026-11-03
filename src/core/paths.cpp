@@ -7,7 +7,8 @@
 
 namespace an {
 
-QString resolveDataDir(const QString& exeDir, const QString& envOverride, const QString& fallback)
+QString resolveDataDir(const QString& exeDir, const QString& envOverride, const QString& fallback,
+                       bool portableBundle)
 {
     // 1) explicit override always wins (tests, scripts, unusual installs)
     if (!envOverride.trimmed().isEmpty()) {
@@ -19,7 +20,15 @@ QString resolveDataDir(const QString& exeDir, const QString& envOverride, const 
         return QDir::cleanPath(QDir(exeDir).absoluteFilePath(p));
     }
 
-    // 2) portable layout: a `data` directory next to the executable
+    // 2) Portable root bundle: when the executable is in bin/, the manifest explicitly
+    // opts into ../data. Ordinary installs are never redirected based on their parent.
+    if (portableBundle && !exeDir.isEmpty()) {
+        const QDir binDir(exeDir);
+        const QString rootData = binDir.absoluteFilePath(QStringLiteral("../data"));
+        if (QFileInfo(rootData).isDir()) return QDir::cleanPath(rootData);
+    }
+
+    // 3) Portable flat layout: a data/ directory next to the executable.
     if (!exeDir.isEmpty()) {
         const QString portable = QDir(exeDir).absoluteFilePath(QStringLiteral("data"));
         if (QFileInfo(portable).isDir()) return QDir::cleanPath(portable);
@@ -33,7 +42,9 @@ QString defaultDataDir(const QString& exeDir)
 {
     const QString fallback =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return resolveDataDir(exeDir, qEnvironmentVariable("ADAPT_DATA_DIR"), fallback);
+    const QString root = QDir(exeDir).absoluteFilePath(QStringLiteral(".."));
+    const bool portableBundle = QFileInfo(QDir(root).absoluteFilePath(QStringLiteral("portable.flag"))).isFile();
+    return resolveDataDir(exeDir, qEnvironmentVariable("ADAPT_DATA_DIR"), fallback, portableBundle);
 }
 
 }  // namespace an
