@@ -336,6 +336,7 @@ void MindMapView::mouseMoveEvent(QMouseEvent* event)
 
 void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if (event->button() != Qt::LeftButton) { QGraphicsView::mouseDoubleClickEvent(event); return; }
     if (scene_) {
         const QString key = keyAt(mapToScene(event->pos()));
         if (!key.isEmpty()) {
@@ -362,8 +363,12 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
         const QString key = pressKey_;
         pressKey_.clear();
         dragMarkupId_.clear();
-        if (key.startsWith(QStringLiteral("note:"))) emit markupActivated(key.mid(5));
-        else emit nodeActivated(pageByKey_.value(key, -1));
+        if (!key.isEmpty()) {
+            setSelectedKey(key);
+            emit nodeSelected(key);
+            if (key.startsWith(QStringLiteral("note:"))) emit markupActivated(key.mid(5));
+            else emit nodeActivated(pageByKey_.value(key, -1));
+        }
         event->accept();
         return;
     }
@@ -472,6 +477,10 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
 
 void MindMapView::mousePressEvent(QMouseEvent* event)
 {
+    if (event->button() == Qt::RightButton) {
+        QGraphicsView::mousePressEvent(event);
+        return; // preserve QContextMenuEvent delivery on release
+    }
     if (event->button() == Qt::MiddleButton) {
         panActive_ = true;
         panStart_ = event->pos();
@@ -482,6 +491,7 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if (event->button() != Qt::LeftButton) { QGraphicsView::mousePressEvent(event); return; }
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
 
@@ -684,8 +694,21 @@ void MindMapView::setCollapsed(const QString& key, bool collapsed)
 void MindMapView::setSelectedKey(const QString& key)
 {
     if (selectedKey_ == key) return;
+    const QRectF oldRect = rectForKey(selectedKey_);
+    const QRectF newRect = rectForKey(key);
     selectedKey_ = key;
-    rebuild();
+    auto updateBorder = [this](const QString& target, const QColor& color, qreal width) {
+        if (target.isEmpty()) return;
+        for (QGraphicsItem* item : scene_->items()) {
+            if (item->data(4).toString() != target || item->data(1).isValid()) continue;
+            if (auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item)) {
+                QPen pen = card->pen(); pen.setColor(color); pen.setWidthF(width); card->setPen(pen);
+            }
+        }
+    };
+    updateBorder(selectedKey_, QColor(0x2f, 0x6b, 0xd8), 2.4);
+    if (!oldRect.isNull()) viewport()->update(mapFromScene(oldRect).boundingRect());
+    if (!newRect.isNull()) viewport()->update(mapFromScene(newRect).boundingRect());
 }
 
 void MindMapView::setLinks(const QVector<MindLink>& links)

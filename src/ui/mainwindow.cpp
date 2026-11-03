@@ -3731,7 +3731,7 @@ void MainWindow::ensureMindPanel()
     vbox->addWidget(mindView_, 1);
 
     auto* hint = new QLabel(
-        QStringLiteral("单击卡片选中并跳回原文 · 双击改名 · 拖动笔记换分组 · 右键分组更多操作"),
+        QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：编辑　·　右键：菜单"),
         mindPanel_);
     hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:11px;padding:2px 8px 4px;"));
     hint->setWordWrap(true);
@@ -4124,7 +4124,11 @@ void MainWindow::showNotebookMindMap()
         auto* exportImage = new QPushButton(QStringLiteral("导出 PNG"), notebookMindWindow_);
         actions->addWidget(fit); actions->addWidget(undo); actions->addWidget(redo);
         actions->addWidget(link); actions->addWidget(exportImage); actions->addStretch();
+        auto* interactionHint = new QLabel(QStringLiteral("左键：选中/定位　·　双击：编辑　·　拖卡片：整理　·　中键拖：移动画布　·　右键：菜单"), notebookMindWindow_);
+        interactionHint->setObjectName("mindInteractionHint");
+        interactionHint->setStyleSheet(QStringLiteral("color:#7a8089;padding:2px 8px;font-size:11px;"));
         layout->addLayout(actions);
+        layout->addWidget(interactionHint);
         notebookMindView_ = new mind::MindMapView(notebookMindWindow_);
         notebookMindView_->setObjectName("notebookMindCanvas");
         layout->addWidget(notebookMindView_, 1);
@@ -4163,6 +4167,26 @@ void MainWindow::showNotebookMindMap()
         connect(redo, &QPushButton::clicked, this, &MainWindow::redoCommand);
         connect(notebookMindView_, &mind::MindMapView::markupActivated, this,
                 [this](const QString& id) { activateNotebookNote(id); });
+        connect(notebookMindView_, &mind::MindMapView::nodeSelected, this,
+                [this](const QString& key) { notebookMindView_->setSelectedKey(key); });
+        connect(notebookMindView_, &mind::MindMapView::nodeActivated, this,
+                [this](int page) { if (page >= 0 && view_) view_->gotoPage(page); });
+        connect(notebookMindView_, &mind::MindMapView::groupMenuRequested, this,
+                [this](const QString& key, const QPoint& pos) {
+            QMenu menu(notebookMindWindow_);
+            menu.addAction(QStringLiteral("重命名分组…"), [this, key]() {
+                const QString id = groupIdOf(key);
+                for (const MindGroup& group : store_.mindGroups(docPath_)) if (group.id == id) {
+                    const QString name = askText(notebookMindWindow_, QStringLiteral("重命名分组"), QStringLiteral("名称："), group.name);
+                    if (!name.trimmed().isEmpty()) renameMindGroup(id, name);
+                }
+            });
+            menu.addAction(QStringLiteral("新建子分组…"), [this, key]() {
+                const QString name = askText(notebookMindWindow_, QStringLiteral("新建子分组"), QStringLiteral("名称："), QStringLiteral("子分组"));
+                if (!name.trimmed().isEmpty()) createMindGroup(name, groupIdOf(key));
+            });
+            menu.exec(pos);
+        });
         connect(notebookMindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
             if (key.startsWith(QStringLiteral("note:")) && activateNotebookNote(key.mid(5))) editMarkupComment(key.mid(5));
             if (key.startsWith(QStringLiteral("group:"))) {

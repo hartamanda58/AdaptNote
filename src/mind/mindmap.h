@@ -61,6 +61,7 @@ public:
 signals:
     void nodeActivated(int page);
     void markupActivated(const QString& markupId);
+    void nodeSelected(const QString& key);
     // Keyboard / double-click editing requests; the window owns the dialogs and the undo
     // stack, so the view only reports intent.
     void renameRequested(const QString& key);
