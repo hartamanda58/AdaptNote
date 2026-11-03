@@ -142,6 +142,8 @@ int main(int argc, char** argv)
         const QString tr = buildUserPrompt(PromptAction::Translate, QStringLiteral("hello"),
                                            QStringLiteral("b"), 0, QStringLiteral("英文"));
         check(tr.contains(QStringLiteral("英文")), QStringLiteral("translate honours the target language"));
+        check(tr.contains(QStringLiteral("hello")) && tr.contains(QStringLiteral("%s")) == false,
+              QStringLiteral("translation prompt substitutes selected text in its format string"));
 
         QTemporaryDir tmp;
         const QString path = tmp.path() + "/roles.json";

@@ -79,6 +79,9 @@ public:
     int workspaceMode() const { return workspaceMode_; }
     bool notesDockVisibleForTest() const;
     bool aiDockVisibleForTest() const;
+    void translateSelectionForTest();
+    QString translationForTest() const;
+    QString statusMessageForTest() const;
     // The mind-map panel (null until the workspace is built); tests use it to assert that
     // the map really shows the same notes the reader sees.
     mind::MindMapView* mindMapView() const { return mindView_; }
@@ -99,6 +102,7 @@ public:
     QString createNotebook(const QString& name);
     bool addNotebookDocument(const QString& path);
     bool createFreeNoteForTest(const QString& title, const QString& comment);
+    void storeSettingForTest(const QString& key, const QString& value) { store_.setSetting(key, value); }
     bool moveNotebookNote(const QString& id, const QString& targetPath,
                           const QString& groupKey, const QString& beforeId = {},
                           const QString& parentMarkupId = {}, bool nestUnderParent = false);
@@ -205,6 +209,8 @@ private:
     void editAiRoles();
     void buildReaderMenu();
     void runAiWithSelection();
+    void showSelectionTranslation();
+    void updateSelectionTranslationAction();
     void insertAiAsNote();
     void onInkStroke(int page, const QVector<InkPoint>& points);
     void onReaderSentence(const an::read::Sentence& sentence);
@@ -283,6 +289,10 @@ private:
     QToolButton* aiReasoningToggle_ = nullptr;
     QPushButton* aiRunButton_ = nullptr;
     QPushButton* aiInsertButton_ = nullptr;
+    QToolButton* translateSelectionButton_ = nullptr;
+    QDialog* translationDialog_ = nullptr;
+    QTextBrowser* translationOutput_ = nullptr;
+    bool translationRequest_ = false;
     QString aiContent_;
     QString aiReasoningText_;
     bool exportFiltered_ = false;

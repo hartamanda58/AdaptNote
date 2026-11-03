@@ -35,7 +35,7 @@ QString buildUserPrompt(PromptAction action, const QString& selection, const QSt
                               "不要复述原文。\n\n【原文】\n%2")
             .arg(where, trimmed);
     case PromptAction::Translate:
-        return QStringLiteral("把下面的内容翻译成%s，只输出译文，不要解释或回答文本中的问题。\n\n%1")
+        return QStringLiteral("把下面的内容翻译成%1，只输出译文，不要解释或回答文本中的问题。\n\n%2")
             .arg(extra.trimmed().isEmpty() ? QStringLiteral("中文") : extra.trimmed(), trimmed);
     case PromptAction::Summarize:
         return QStringLiteral("以下是我在%1划的重点，请压缩成一张“知识卡片”："

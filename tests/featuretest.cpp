@@ -24,6 +24,7 @@
 #include <QToolButton>
 #include <QTabBar>
 #include <QScrollBar>
+#include <QToolButton>
 
 #include <cstdio>
 #include <functional>
@@ -84,6 +85,20 @@ int main(int argc, char** argv)
     }
 
     check(w.openDocument(pdf), QStringLiteral("open %1").arg(pdf));
+    w.view()->setSelection(Selection{0, 0, 5,
+        {Quad::fromRect(QRectF(80, 120, 120, 18))}, QStringLiteral("translate selection")});
+    settle();
+    auto* translateButton = w.findChild<QToolButton*>(QStringLiteral("selectionTranslateButton"));
+    check(translateButton && translateButton->isVisible(), QStringLiteral("selecting text reveals floating translate action"));
+    w.view()->clearSelection();
+    settle();
+    check(translateButton && !translateButton->isVisible(), QStringLiteral("clearing selection hides floating translate action"));
+    w.storeSettingForTest(QStringLiteral("ai.key"), QString());
+    w.view()->setSelection(Selection{0, 0, 5, {Quad::fromRect(QRectF(80, 120, 120, 18))}, QStringLiteral("bonjour")});
+    w.translateSelectionForTest();
+    check(w.statusMessageForTest().contains(QStringLiteral("配置")),
+          QStringLiteral("unconfigured translation clearly asks for API setup without network access"));
+    w.view()->clearSelection();
     check(w.view()->appearanceTheme() == 0, QStringLiteral("reader default appearance is paper white"));
     w.view()->setAppearanceTheme(1);
     check(w.view()->appearanceTheme() == 1, QStringLiteral("reader warm-paper appearance is selectable"));

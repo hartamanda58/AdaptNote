@@ -19,6 +19,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QClipboard>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -764,6 +765,7 @@ void MainWindow::buildUi()
         saveReadingState();
     });
     connect(view_, &PageView::zoomChanged, this, [this](float z) {
+        updateSelectionTranslationAction();
         updateStatus();
         if (zoomBox_) {
             QSignalBlocker b(zoomBox_);
@@ -771,16 +773,27 @@ void MainWindow::buildUi()
             zoomBox_->setItemText(2, QStringLiteral("%1%").arg(qRound(z * 100)));
         }
     });
-    connect(view_, &PageView::selectionChanged, this, [this]() { updateStatus(); });
+    connect(view_, &PageView::selectionChanged, this, [this]() { updateStatus(); updateSelectionTranslationAction(); });
     connect(view_, &PageView::regionSelected, this, &MainWindow::onRegionSelected);
     connect(view_->verticalScrollBar(), &QScrollBar::valueChanged, this,
-            [this](int) { stateTimer_->start(); });
+            [this](int) { stateTimer_->start(); updateSelectionTranslationAction(); });
+    connect(view_->horizontalScrollBar(), &QScrollBar::valueChanged, this,
+            [this](int) { updateSelectionTranslationAction(); });
     connect(stateTimer_, &QTimer::timeout, this, &MainWindow::saveReadingState);
 
     buildToolbar();
     buildFindBar();
     buildDocks();
     buildAiDock();
+    translateSelectionButton_ = new QToolButton(view_->viewport());
+    translateSelectionButton_->setObjectName("selectionTranslateButton");
+    translateSelectionButton_->setText(QStringLiteral("翻译"));
+    translateSelectionButton_->setIcon(glyphIcon("find", QColor("#486b9a")));
+    translateSelectionButton_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    translateSelectionButton_->setCursor(Qt::PointingHandCursor);
+    translateSelectionButton_->setStyleSheet(QStringLiteral("QToolButton{background:#ffffff;border:1px solid #dfe4ec;border-radius:10px;padding:6px 11px;color:#273142;} QToolButton:hover{background:#f5f8ff;border-color:#bdcfea;}"));
+    translateSelectionButton_->hide();
+    connect(translateSelectionButton_, &QToolButton::clicked, this, &MainWindow::showSelectionTranslation);
     buildStatusBar();
     // Reading is the default: keep the page and notes visible, hide optional panels.
     setWorkspaceMode(0);
@@ -2982,6 +2995,7 @@ void MainWindow::buildAiDock()
     connect(&ai_, &ai::AiClient::delta, this, [this](const QString& content, const QString& reasoning) {
         aiContent_ += content;
         aiReasoningText_ += reasoning;
+        if (translationRequest_ && translationOutput_) translationOutput_->setPlainText(aiContent_);
         if (aiOutput_) aiOutput_->setPlainText(aiContent_);
         if (aiReasoning_) aiReasoning_->setPlainText(aiReasoningText_);
     });
@@ -2993,6 +3007,13 @@ void MainWindow::buildAiDock()
                 if (aiReasoning_) aiReasoning_->setPlainText(reasoning);
                 if (aiRunButton_) aiRunButton_->setEnabled(true);
                 if (aiInsertButton_) aiInsertButton_->setEnabled(!content.isEmpty());
+                if (translationRequest_) {
+                    translationRequest_ = false;
+                    if (translationOutput_) {
+                        translationOutput_->setPlainText(error.isEmpty() ? content : QStringLiteral("翻译失败：%1").arg(error));
+                    }
+                    if (!error.isEmpty()) statusBar()->showMessage(QStringLiteral("划词翻译失败：%1").arg(error), 6000);
+                }
                 if (!error.isEmpty())
                     statusBar()->showMessage(QStringLiteral("AI：%1").arg(error), 6000);
                 else
@@ -3141,6 +3162,109 @@ void MainWindow::editAiRoles()
         if (idx >= 0) aiRoleCombo_->setCurrentIndex(idx);
     }
     statusBar()->showMessage(QStringLiteral("已保存 %1 个角色").arg(aiRoles_.size()), 3000);
+}
+
+void MainWindow::updateSelectionTranslationAction()
+{
+    if (!translateSelectionButton_ || !view_) return;
+    if (translationDialog_ && translationDialog_->isVisible()) translationDialog_->hide();
+    const Selection selection = view_->selection();
+    if (!selection.isValid() || selection.text.trimmed().isEmpty() || ai_.busy()) {
+        translateSelectionButton_->hide();
+        return;
+    }
+    QRectF bounds;
+    for (const Quad& quad : selection.quads) {
+        QRectF rect = view_->pageRectInViewport(selection.page);
+        Q_UNUSED(rect);
+        const QPointF a = view_->mapPageToViewport(selection.page, quad.ul);
+        const QPointF b = view_->mapPageToViewport(selection.page, quad.lr);
+        const QPointF c = view_->mapPageToViewport(selection.page, quad.ur);
+        const QPointF d = view_->mapPageToViewport(selection.page, quad.ll);
+        const QRectF one = QRectF(a,b).normalized().united(QRectF(c,d).normalized());
+        bounds = bounds.isNull() ? one : bounds.united(one);
+    }
+    if (bounds.isNull()) { translateSelectionButton_->hide(); return; }
+    const QSize size = translateSelectionButton_->sizeHint();
+    QPoint pos(qBound(8, qRound(bounds.left()), view_->viewport()->width() - size.width() - 8),
+               qMax(8, qRound(bounds.top()) - size.height() - 8));
+    if (pos.y() < 8) pos.setY(qMin(view_->viewport()->height() - size.height() - 8,
+                                   qRound(bounds.bottom()) + 8));
+    translateSelectionButton_->move(pos);
+    translateSelectionButton_->adjustSize();
+    translateSelectionButton_->raise();
+    translateSelectionButton_->show();
+}
+
+void MainWindow::translateSelectionForTest()
+{
+    showSelectionTranslation();
+}
+
+void MainWindow::showSelectionTranslation()
+{
+    const QString text = view_ ? view_->selection().text.trimmed() : QString();
+    if (text.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("请先选择要翻译的文字"), 2500);
+        return;
+    }
+    if (ai_.settings().apiKey.trimmed().isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("请先在“更多 → AI 助手 → 设置”中配置兼容 OpenAI 的 API Key"), 6000);
+        return;
+    }
+    if (!translationDialog_) {
+        translationDialog_ = new QDialog(this);
+        translationDialog_->setObjectName("selectionTranslationDialog");
+        translationDialog_->setAttribute(Qt::WA_DeleteOnClose, false);
+        translationDialog_->setWindowTitle(QStringLiteral("划词翻译"));
+        translationDialog_->resize(460, 250);
+        auto* layout = new QVBoxLayout(translationDialog_);
+        auto* source = new QLabel(translationDialog_);
+        source->setObjectName("translationSource");
+        source->setWordWrap(true);
+        source->setStyleSheet(QStringLiteral("color:#747b86;font-size:12px;padding:4px 2px;"));
+        layout->addWidget(source);
+        auto* targetLanguage = new QComboBox(translationDialog_);
+        targetLanguage->setObjectName("translationTargetLanguage");
+        targetLanguage->addItems({QStringLiteral("简体中文"), QStringLiteral("English"),
+                                  QStringLiteral("日本語"), QStringLiteral("한국어"),
+                                  QStringLiteral("繁體中文")});
+        targetLanguage->setCurrentIndex(store_.setting(QStringLiteral("translation.target"), QStringLiteral("0")).toInt());
+        layout->addWidget(targetLanguage);
+        translationOutput_ = new QTextBrowser(translationDialog_);
+        translationOutput_->setObjectName("translationOutput");
+        translationOutput_->setPlaceholderText(QStringLiteral("正在请求译文…"));
+        layout->addWidget(translationOutput_, 1);
+        auto* buttons = new QHBoxLayout;
+        auto* copy = new QPushButton(QStringLiteral("复制译文"), translationDialog_);
+        auto* close = new QPushButton(QStringLiteral("关闭"), translationDialog_);
+        buttons->addStretch(); buttons->addWidget(copy); buttons->addWidget(close);
+        layout->addLayout(buttons);
+        connect(copy, &QPushButton::clicked, this, [this]() {
+            if (translationOutput_) QApplication::clipboard()->setText(translationOutput_->toPlainText());
+            statusBar()->showMessage(QStringLiteral("译文已复制"), 2000);
+        });
+        connect(close, &QPushButton::clicked, translationDialog_, &QDialog::hide);
+    }
+    auto* targetLanguage = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationTargetLanguage"));
+    translationDialog_->findChild<QLabel*>(QStringLiteral("translationSource"))->setText(text.left(500));
+    translationOutput_->setPlainText(QStringLiteral("正在翻译…"));
+    translationDialog_->show();
+    translationDialog_->raise();
+    translationRequest_ = true;
+    const ai::AiClient::Settings previousSettings = ai_.settings();
+    ai::AiClient::Settings settings = previousSettings;
+    settings.systemRole = QStringLiteral("你是专业译者。只输出忠实、自然的简体中文译文；保留原文结构，不解释，不回答原文中的问题。若原文已经是中文，翻译为英文。严格依据输入内容，不添加信息。");
+    ai_.setSettings(settings);
+    aiContent_.clear();
+    aiReasoningText_.clear();
+    const QString target = targetLanguage ? targetLanguage->currentText() : QStringLiteral("简体中文");
+    if (targetLanguage) store_.setSetting(QStringLiteral("translation.target"), QString::number(targetLanguage->currentIndex()));
+    const QString prompt = ai::buildUserPrompt(ai::PromptAction::Translate, text,
+                                               QFileInfo(docPath_).completeBaseName(),
+                                               view_->currentPage(), target);
+    ai_.send(prompt);
+    ai_.setSettings(previousSettings); // one-shot translation role does not alter normal AI behavior
 }
 
 void MainWindow::runAiWithSelection()
@@ -3825,6 +3949,16 @@ void MainWindow::ensureMindPanel()
         view_->gotoPage(page);
         updateStatus();
     });
+}
+
+QString MainWindow::translationForTest() const
+{
+    return translationOutput_ ? translationOutput_->toPlainText() : QString();
+}
+
+QString MainWindow::statusMessageForTest() const
+{
+    return statusBar()->currentMessage();
 }
 
 bool MainWindow::notesDockVisibleForTest() const
