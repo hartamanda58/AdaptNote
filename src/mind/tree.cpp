@@ -1,6 +1,7 @@
 #include "mind/tree.h"
 
 #include <QFileInfo>
+#include <QMap>
 
 #include <algorithm>
 #include <functional>
@@ -215,7 +216,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         if (a.page != b.page) return a.page < b.page;
         return a.boundingRect().top() < b.boundingRect().top();
     });
-    QHash<int, QVector<Markup>> notesByPage;
+    QMap<int, QVector<Markup>> notesByPage;
     for (const Markup& m : pageSorted) notesByPage[m.page].append(m);
     for (auto it = notesByPage.cbegin(); it != notesByPage.cend(); ++it) {
         Node bucket;
