@@ -121,7 +121,7 @@ jobs:
           foreach ($n in @("bin\adaptnote.exe","bin\Qt6Core.dll","bin\Qt6Gui.dll",
                            "bin\Qt6Widgets.dll","bin\Qt6Network.dll","bin\Qt6Sql.dll",
                            "bin\Qt6Svg.dll","bin\platforms\qwindows.dll",
-                           "bin\sqldrivers\qsqlite.dll")) {
+                           "bin\sqldrivers\qsqlite.dll","portable.flag")) {
             $p = Join-Path $root.FullName $n
             if (Test-Path $p) { Say "  present $n" } else { Say "  MISSING $n"; $failed = $true }
           }
@@ -225,10 +225,19 @@ jobs:
           if ($ratio -lt 1.8) { throw "render bitmap did not scale with dpi (ratio $ratio)" }
           if (!(Test-Path (Join-Path $smoke "data\library.db"))) { throw "smoke did not keep data in ADAPT_DATA_DIR" }
 
+          # Direct-exe portability check: no launcher and no ADAPT_DATA_DIR override.
+          # portable.flag in the bundle root must make bin\adaptnote.exe resolve ..\data.
+          Remove-Item Env:\ADAPT_DATA_DIR -ErrorAction SilentlyContinue
+          $directExports = Join-Path $smoke "direct-exe-exports"
+          RunSmoke -label "direct-exe-portable-data" -CliArgs @("--doc", $pdf, "--export-dir", $directExports)
+          $bundleDb = Join-Path $root.FullName "data\library.db"
+          if (!(Test-Path $bundleDb)) { throw "direct exe launch did not create package-root data\library.db" }
+
           Add-Content ci/windows-report.txt "--- runtime smoke ---"
           Add-Content ci/windows-report.txt "PDF CLI export: PASS (md/html/opml/xmind/apkg)"
           Add-Content ci/windows-report.txt "EPUB CLI open/export: PASS"
-          Add-Content ci/windows-report.txt "Portable data dir: PASS"
+          Add-Content ci/windows-report.txt "Portable launcher data dir: PASS"
+          Add-Content ci/windows-report.txt "Direct bin\adaptnote.exe package-root data: PASS"
           Add-Content ci/windows-report.txt "PDF/EPUB window screenshots: PASS (qwindows)"
           Add-Content ci/windows-report.txt ("High-DPI render ratio at 200% scaling: " + $ratio)
 
