@@ -3852,6 +3852,16 @@ void MainWindow::ensureMindPanel()
             [this](const QString& markupId, const QString& groupKey, const QString& beforeId) {
                 if (applyMindReorder(markupId, groupKey, beforeId)) rebuildMindMap();
             });
+    connect(mindView_, &mind::MindMapView::noteMenuRequested, this,
+            [this](const QString& noteId, const QPoint& globalPos) {
+        QMenu menu(mindView_);
+        menu.addAction(QStringLiteral("编辑标题与批注…"), [this, noteId]() { editMarkupComment(noteId); });
+        menu.addAction(QStringLiteral("定位原文"), [this, noteId]() { jumpToMarkup(noteId); });
+        menu.addAction(QStringLiteral("删除笔记"), [this, noteId]() {
+            if (confirm(mindView_, QStringLiteral("删除笔记"), QStringLiteral("删除这条笔记？可用 Ctrl+Z 撤销。"))) deleteMarkupById(noteId);
+        });
+        menu.exec(globalPos);
+    });
     connect(mindView_, &mind::MindMapView::groupMenuRequested, this,
             [this](const QString& groupKey, const QPoint& globalPos) {
                 QString name;
@@ -4171,6 +4181,19 @@ void MainWindow::showNotebookMindMap()
                 [this](const QString& key) { notebookMindView_->setSelectedKey(key); });
         connect(notebookMindView_, &mind::MindMapView::nodeActivated, this,
                 [this](int page) { if (page >= 0 && view_) view_->gotoPage(page); });
+        connect(notebookMindView_, &mind::MindMapView::noteMenuRequested, this,
+                [this](const QString& noteId, const QPoint& pos) {
+            QMenu menu(notebookMindWindow_);
+            menu.addAction(QStringLiteral("编辑标题与批注…"), [this, noteId]() {
+                if (activateNotebookNote(noteId)) editMarkupComment(noteId);
+            });
+            menu.addAction(QStringLiteral("定位原文"), [this, noteId]() { activateNotebookNote(noteId); });
+            menu.addAction(QStringLiteral("删除笔记"), [this, noteId]() {
+                if (activateNotebookNote(noteId) && confirm(notebookMindWindow_, QStringLiteral("删除笔记"),
+                    QStringLiteral("删除这条笔记？可用 Ctrl+Z 撤销。"))) deleteMarkupById(noteId);
+            });
+            menu.exec(pos);
+        });
         connect(notebookMindView_, &mind::MindMapView::groupMenuRequested, this,
                 [this](const QString& key, const QPoint& pos) {
             QMenu menu(notebookMindWindow_);

@@ -465,7 +465,10 @@ int main(int argc, char** argv)
             check(groupAtNote.startsWith(QStringLiteral("page:")),
                   QStringLiteral("a page-grouped note reports its group key (%1)").arg(groupAtNote));
 
-            int activated = 0, renamed = 0;
+            int activated = 0, renamed = 0, noteMenus = 0;
+            QObject::connect(&view, &mind::MindMapView::noteMenuRequested, [&noteMenus](const QString& id, const QPoint&) {
+                if (id == QStringLiteral("a")) ++noteMenus;
+            });
             QObject::connect(&view, &mind::MindMapView::markupActivated, [&activated](const QString& id) {
                 if (id == QStringLiteral("a")) ++activated;
             });
@@ -486,6 +489,9 @@ int main(int argc, char** argv)
                   QStringLiteral("single click selects and activates note card"));
             sendMouse(QEvent::MouseButtonDblClick, start, Qt::LeftButton, Qt::LeftButton);
             check(renamed == 1, QStringLiteral("double click emits note edit request"));
+            QContextMenuEvent context(QContextMenuEvent::Mouse, start, view.viewport()->mapToGlobal(start));
+            QApplication::sendEvent(view.viewport(), &context);
+            check(noteMenus == 1 && context.isAccepted(), QStringLiteral("right click on note opens its context menu request"));
 
             const QPoint nodeEnd = start + QPoint(45, 24);
             sendMouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);

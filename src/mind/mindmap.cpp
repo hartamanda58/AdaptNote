@@ -541,6 +541,12 @@ void MindMapView::contextMenuEvent(QContextMenuEvent* event)
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
         for (QGraphicsItem* item : scene_->items(scenePos)) {
+            const QVariant nodeId = item->data(1);
+            if (nodeId.isValid() && !nodeId.toString().isEmpty()) {
+                emit noteMenuRequested(nodeId.toString(), event->globalPos());
+                event->accept();
+                return;
+            }
             const QVariant id = item->data(5);
             if (id.isValid() && !id.toString().isEmpty()) {
                 emit linkMenuRequested(id.toString(), event->globalPos());
@@ -694,18 +700,23 @@ void MindMapView::setCollapsed(const QString& key, bool collapsed)
 void MindMapView::setSelectedKey(const QString& key)
 {
     if (selectedKey_ == key) return;
-    const QRectF oldRect = rectForKey(selectedKey_);
+    const QString oldKey = selectedKey_;
+    const QRectF oldRect = rectForKey(oldKey);
     const QRectF newRect = rectForKey(key);
     selectedKey_ = key;
     auto updateBorder = [this](const QString& target, const QColor& color, qreal width) {
         if (target.isEmpty()) return;
         for (QGraphicsItem* item : scene_->items()) {
-            if (item->data(4).toString() != target || item->data(1).isValid()) continue;
-            if (auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item)) {
-                QPen pen = card->pen(); pen.setColor(color); pen.setWidthF(width); card->setPen(pen);
-            }
+            if (item->data(4).toString() != target) continue;
+            auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
+            if (!card || card->data(7).toBool()) continue;
+            QPen pen = card->pen();
+            pen.setColor(color);
+            pen.setWidthF(width);
+            card->setPen(pen);
         }
     };
+    updateBorder(oldKey, QColor(0xe3, 0xe7, 0xee), 1.0);
     updateBorder(selectedKey_, QColor(0x2f, 0x6b, 0xd8), 2.4);
     if (!oldRect.isNull()) viewport()->update(mapFromScene(oldRect).boundingRect());
     if (!newRect.isNull()) viewport()->update(mapFromScene(newRect).boundingRect());
@@ -862,6 +873,7 @@ void MindMapView::rebuild()
         if (depth == 0) fill = QColor(0x2f, 0x6b, 0xd8);
 
         auto* card = scene_->addRect(rect, border, QBrush(fill));
+        card->setData(7, 1); // identifies the card background, distinct from its text children
         card->setZValue(2);
         card->setData(0, n.page);
         card->setData(2, n.groupKey);

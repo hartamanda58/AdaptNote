@@ -71,7 +71,8 @@ signals:
     // Two cards picked in link mode.
     void linkRequested(const QString& fromKey, const QString& toKey);
     // Right click on an existing link (its id), or on a card while not in link mode.
-    void linkMenuRequested(const QString& linkId, const QPoint& globalPos);   // emitted when a node with a page is clicked
+    void linkMenuRequested(const QString& linkId, const QPoint& globalPos);
+    void noteMenuRequested(const QString& markupId, const QPoint& globalPos);
     // A note was dragged onto a group (or onto another note's group) -> regroup it.
     // An empty groupKey means "ungroup" (dropped on empty canvas).
     void nodeReparented(const QString& markupId, const QString& groupKey);
