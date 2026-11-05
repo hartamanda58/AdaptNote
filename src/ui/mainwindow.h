@@ -102,6 +102,7 @@ public:
     QString createNotebook(const QString& name);
     bool addNotebookDocument(const QString& path);
     bool createFreeNoteForTest(const QString& title, const QString& comment);
+    bool createFreeNoteForPageForTest(const QString& title, const QString& comment, int page);
     void storeSettingForTest(const QString& key, const QString& value) { store_.setSetting(key, value); }
     bool moveNotebookNote(const QString& id, const QString& targetPath,
                           const QString& groupKey, const QString& beforeId = {},
@@ -134,6 +135,10 @@ public:
     void showConflicts();
     // Mind map: regroup a note (empty group = back to page grouping). Undoable.
     bool applyMindReparent(const QString& markupId, const QString& groupKey);
+    bool applyMindContainerReparent(const QString& markupId, const QString& containerKey);
+    bool reparentNoteWithinDocument(const QString& markupId, const QString& parentMarkupId);
+    bool moveMarkupToContainer(const QString& markupId, const QString& sourcePath,
+                               const QString& targetPath, const QString& targetKey);
     void setInkColor(const QColor& c);
     // Mind map groups (first class entities).
     QString createMindGroup(const QString& name, const QString& parentId = {});

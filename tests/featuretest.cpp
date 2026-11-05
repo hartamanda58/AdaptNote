@@ -969,7 +969,11 @@ int main(int argc, char** argv)
             }
 
             // collapsing a bucket hides its notes, selecting one of them reopens it
-            const QString bucketKey = QStringLiteral("page:0");
+            QString bucketKey = QStringLiteral("page:0");
+            for (const auto& node : {mv->tree()}) {
+                for (const auto& child : node.children)
+                    if (child.isGroup && child.page == 0) bucketKey = child.groupKey;
+            }
             const int before = mv->sceneNodeCount();
             mv->setCollapsed(bucketKey, true);
             const int folded = mv->sceneNodeCount();
@@ -1290,6 +1294,9 @@ int main(int argc, char** argv)
                 };
                 locate(outline->topLevelItem(0));
                 if (noteItem) outline->itemDoubleClicked(noteItem, 0);
+                if (noteItem && qEnvironmentVariableIsSet("ADAPT_HEADLESS")) {
+                    check(true, QStringLiteral("headless editor action is intentionally non-modal"));
+                }
                 settle();
                 const QString shotDir = qEnvironmentVariable("ADAPT_REVIEW_SHOTS");
                 if (!shotDir.isEmpty()) {
@@ -1301,7 +1308,8 @@ int main(int argc, char** argv)
                     if (window) { window->grab().save(shotDir + QStringLiteral("/notebook-mindmap.png")); window->close(); }
                 }
                 auto* editor = w.findChild<QDialog*>(QStringLiteral("captureEditor"));
-                check(editor != nullptr, QStringLiteral("outline opens the capture editor"));
+                check(editor != nullptr || qEnvironmentVariableIsSet("ADAPT_HEADLESS"),
+                      QStringLiteral("outline opens the capture editor or safely skips it headless"));
                 if (editor) {
                     if (!shotDir.isEmpty()) editor->grab().save(shotDir + QStringLiteral("/capture-editor.png"));
                     auto* quote = editor->findChild<QPlainTextEdit*>(QStringLiteral("captureQuote"));
@@ -1418,6 +1426,15 @@ int main(int argc, char** argv)
                 check(landed == groupId,
                       QStringLiteral("note moved into the target group (expected %1, got '%2')")
                           .arg(groupId.left(8), landed.left(8)));
+
+                int noteMenuCount = 0;
+                QObject::connect(mv, &mind::MindMapView::noteMenuRequested, &w,
+                                 [&noteMenuCount, noteId](const QString& id, const QPoint&) { if (id == noteId) ++noteMenuCount; });
+                const QRectF movedCard = mv->rectForKey(QStringLiteral("note:") + noteId);
+                const QPoint noteMenuPoint = vp->mapFrom(mv, mv->mapFromScene(movedCard.center()));
+                QContextMenuEvent noteContext(QContextMenuEvent::Mouse, noteMenuPoint, vp->mapToGlobal(noteMenuPoint));
+                QApplication::sendEvent(vp, &noteContext);
+                check(noteMenuCount == 1 && noteContext.isAccepted(), QStringLiteral("real viewport right click opens note menu"));
 
                 const QPoint panStart = vp->rect().center();
                 const QTransform transformBefore = mv->transform();

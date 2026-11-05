@@ -76,8 +76,11 @@ signals:
     // A note was dragged onto a group (or onto another note's group) -> regroup it.
     // An empty groupKey means "ungroup" (dropped on empty canvas).
     void nodeReparented(const QString& markupId, const QString& groupKey);
+    void containerReparentRequested(const QString& sourceKey, const QString& sourcePath,
+                                    const QString& targetKey, const QString& targetPath);
     // Right click on a group node: the key is the same "group:<id>" string.
     void groupMenuRequested(const QString& groupKey, const QPoint& globalPos);
+    void pageMenuRequested(const QString& pageKey, const QString& docPath, const QPoint& globalPos);
     // Dropped on/near a note: insert the dragged one in front of `beforeMarkupId`
     // (empty = append at the end of that group).
     void noteReorderRequested(const QString& markupId, const QString& groupKey,
@@ -99,6 +102,8 @@ private:
     Node root_;
     double zoom_ = 1.0;
     QString dragMarkupId_;
+    QString dragContainerKey_;
+    QString dragContainerPath_;
     QString pressKey_;
     QPoint pressStart_;
     QPoint panStart_;

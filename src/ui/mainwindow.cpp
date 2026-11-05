@@ -1374,7 +1374,7 @@ void MainWindow::buildDocks()
                 });
             }
         }
-        if (!menu.isEmpty()) menu.exec(notebookOutline_->viewport()->mapToGlobal(pos));
+        if (!menu.isEmpty() && !kHeadless) menu.exec(notebookOutline_->viewport()->mapToGlobal(pos));
     });
     connect(notebookOutline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
         if (item) activateNotebookNote(item->data(0, Qt::UserRole).toString());
@@ -1492,7 +1492,7 @@ void MainWindow::buildDocks()
         menu.addAction(QStringLiteral("编辑标签…"), [this, id]() { editMarkupTags(id); });
         menu.addSeparator();
         menu.addAction(QStringLiteral("删除"), [this, id]() { deleteMarkupById(id); });
-        menu.exec(notesList_->mapToGlobal(pos));
+        if (!kHeadless) menu.exec(notesList_->mapToGlobal(pos));
     });
 
     leftTabs_->addTab(notesTab, QStringLiteral("笔记列表 (0)"));
@@ -1716,11 +1716,16 @@ QString MainWindow::createNotebook(const QString& name)
 
 bool MainWindow::createFreeNoteForTest(const QString& title, const QString& comment)
 {
+    return createFreeNoteForPageForTest(title, comment, view_ ? view_->currentPage() : 0);
+}
+
+bool MainWindow::createFreeNoteForPageForTest(const QString& title, const QString& comment, int page)
+{
     if (docPath_.isEmpty() || title.trimmed().isEmpty()) return false;
     Markup note;
     note.id = newId();
     note.docPath = docPath_;
-    note.page = view_ ? view_->currentPage() : 0;
+    note.page = qMax(0, page);
     note.type = MarkupType::Note;
     note.title = title.trimmed();
     note.comment = comment;
@@ -1834,7 +1839,7 @@ void MainWindow::refreshNotebookWorkspace()
         remember(notebookOutline_->topLevelItem(i));
     notebookOutline_->clear();
     const mind::Node root = currentTopic_.isEmpty() && !inputs.isEmpty()
-                                ? mind::buildFromNotes(title, inputs.first().markups, groups, !engine_.outline().isEmpty())
+                                ? mind::buildFromNotes(title, inputs.first().markups, groups, !engine_.outline().isEmpty(), inputs.first().docPath)
                                 : mind::buildFromTopic(title, inputs, groups);
     QHash<QString, QString> groupPaths;
     for (const MindGroup& group : groups) groupPaths.insert(QStringLiteral("group:") + group.id, group.docPath);
@@ -2216,7 +2221,11 @@ void MainWindow::editMarkupComment(const QString& id)
         return;
     }
     if (!m) return;
-    // Modeless: never block headless runs, and keep the source visible while editing.
+    if (kHeadless) {
+        statusBar()->showMessage(QStringLiteral("正在运行无窗口测试，编辑窗口不打开"), 2500);
+        return;
+    }
+    // Modeless: keep the source visible while editing.
     auto* editor = new QDialog(this);
     editor->setAttribute(Qt::WA_DeleteOnClose);
     editor->setObjectName("captureEditor");
@@ -3685,6 +3694,93 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
     return true;
 }
 
+bool MainWindow::applyMindContainerReparent(const QString& markupId, const QString& containerKey)
+{
+    return moveMarkupToContainer(markupId, docPath_, docPath_, containerKey);
+}
+
+bool MainWindow::reparentNoteWithinDocument(const QString& markupId, const QString& parentMarkupId)
+{
+    Markup* child = findMarkup(markupId);
+    Markup* parent = findMarkup(parentMarkupId);
+    if (!child || !parent || child->id == parent->id || child->docPath != parent->docPath ||
+        child->mindGroup != parent->mindGroup || (child->mindGroup.isEmpty() && child->page != parent->page)) return false;
+    QString cursor = parent->id;
+    while (!cursor.isEmpty()) {
+        if (cursor == child->id) return false;
+        QString next;
+        for (const Markup& note : markups_) if (note.id == cursor) next = note.parentMarkupId;
+        cursor = next;
+    }
+    if (child->parentMarkupId == parent->id) return false;
+    Markup after = *child; after.parentMarkupId = parent->id;
+    after.updated = QDateTime::currentMSecsSinceEpoch();
+    undo_->push(new MarkupCommand(this, CmdKind::Modify, *child, after, QStringLiteral("建立笔记父子关系")));
+    return true;
+}
+
+bool MainWindow::moveMarkupToContainer(const QString& markupId, const QString& sourcePath,
+                                       const QString& targetPath, const QString& targetKey)
+{
+    const QString pagePrefix = QStringLiteral("page:");
+    QString containerDocument;
+    QString pagePart;
+    if (targetKey.startsWith(QStringLiteral("docpage:"))) {
+        const QString payload = targetKey.mid(QStringLiteral("docpage:").size());
+        const int split = payload.lastIndexOf(QStringLiteral(":page:"));
+        if (split < 0) return false;
+        containerDocument = payload.left(split);
+        pagePart = payload.mid(split + QStringLiteral(":page:").size());
+    } else if (targetKey.startsWith(pagePrefix)) {
+        const int split = targetKey.indexOf(QLatin1Char(':'), pagePrefix.size());
+        if (split >= 0) {
+            pagePart = targetKey.mid(pagePrefix.size(), split - pagePrefix.size());
+            containerDocument = targetKey.mid(split + 1);
+        } else pagePart = targetKey.mid(pagePrefix.size());
+    } else if (targetKey.startsWith(QStringLiteral("document:"))) {
+        containerDocument = targetKey.mid(QStringLiteral("document:").size());
+        pagePart = QStringLiteral("0");
+    } else return false;
+
+    const QString source = QFileInfo(sourcePath).absoluteFilePath();
+    const QString destination = containerDocument.isEmpty() ? QFileInfo(targetPath).absoluteFilePath()
+                                                            : QFileInfo(containerDocument).absoluteFilePath();
+    if (source.isEmpty() || destination.isEmpty()) return false;
+    Markup snapshot;
+    bool found = false;
+    for (const Markup& row : store_.markups(source)) if (row.id == markupId) { snapshot = row; found = true; break; }
+    bool targetExists = false;
+    for (const TopicDoc& doc : currentTopicDocPaths().isEmpty() ? QVector<TopicDoc>() : store_.topicDocs(currentTopic_))
+        if (QFileInfo(doc.docPath).absoluteFilePath() == destination) targetExists = true;
+    if (!currentTopic_.isEmpty() && !targetExists) return false;
+    bool ok = false; const int page = pagePart.toInt(&ok);
+    if (!found || !ok || page < 0) return false;
+    Markup after = snapshot;
+    after.docPath = destination;
+    after.page = page;
+    after.mindGroup.clear();
+    after.parentMarkupId.clear();
+    after.mindOrder = 0;
+    after.updated = QDateTime::currentMSecsSinceEpoch();
+    if (source != destination) {
+        if (store_.markups(destination).size() >= 0) {
+            after.id = newId();
+            after.docPath = destination;
+            after.parentMarkupId.clear();
+            after.mindGroup.clear();
+            undo_->push(new MarkupCommand(this, CmdKind::Remove, snapshot, Markup(),
+                                          QStringLiteral("从原资料移出笔记")));
+            undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), after,
+                                          QStringLiteral("复制笔记到目标资料")));
+            return true;
+        }
+    }
+    if (source != docPath_ && !openDocument(source)) return false;
+    undo_->push(new MarkupCommand(this, CmdKind::Modify, snapshot, after,
+                                  QStringLiteral("移动笔记到第 %1 页分支").arg(page + 1)));
+    return true;
+}
+
 void MainWindow::ensureMindPanel()
 {
     if (mindPanel_ || !splitter_) return;
@@ -3842,8 +3938,19 @@ void MainWindow::ensureMindPanel()
                         return;
                     }
                 });
-                menu.exec(globalPos);
+                if (!kHeadless) menu.exec(globalPos);
             });
+    connect(mindView_, &mind::MindMapView::containerReparentRequested, this,
+            [this](const QString& markupId, const QString& sourcePath,
+                   const QString& targetKey, const QString& targetPath) {
+        if (!targetKey.startsWith(QStringLiteral("page:")) &&
+            !targetKey.startsWith(QStringLiteral("docpage:")) &&
+            !targetKey.startsWith(QStringLiteral("document:"))) {
+            if (reparentNoteWithinDocument(markupId, targetKey)) rebuildMindMap();
+            return;
+        }
+        if (moveMarkupToContainer(markupId, sourcePath, targetPath, targetKey)) rebuildMindMap();
+    });
     connect(mindView_, &mind::MindMapView::nodeReparented, this,
             [this](const QString& markupId, const QString& groupKey) {
                 if (applyMindReparent(markupId, groupKey)) rebuildMindMap();
@@ -3860,7 +3967,7 @@ void MainWindow::ensureMindPanel()
         menu.addAction(QStringLiteral("删除笔记"), [this, noteId]() {
             if (confirm(mindView_, QStringLiteral("删除笔记"), QStringLiteral("删除这条笔记？可用 Ctrl+Z 撤销。"))) deleteMarkupById(noteId);
         });
-        menu.exec(globalPos);
+        if (!kHeadless) menu.exec(globalPos);
     });
     connect(mindView_, &mind::MindMapView::groupMenuRequested, this,
             [this](const QString& groupKey, const QPoint& globalPos) {
@@ -3891,7 +3998,7 @@ void MainWindow::ensureMindPanel()
                         updateNotesPanel();
                     }
                 });
-                menu.exec(globalPos);
+                if (!kHeadless) menu.exec(globalPos);
             });
     // ---- editing requests from the map: the window owns dialogs and undo ----
     connect(mindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
@@ -4048,7 +4155,7 @@ void MainWindow::rebuildMindMap()
     }
     mindView_->setLinks(store_.mindLinks(mindScopeKey()));
     mindView_->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
-                                            store_.mindGroups(docPath_)));
+                                            store_.mindGroups(docPath_), true, docPath_));
 }
 
 bool MainWindow::removeMindLinkForTest(const QString& id)
@@ -4181,6 +4288,19 @@ void MainWindow::showNotebookMindMap()
                 [this](const QString& key) { notebookMindView_->setSelectedKey(key); });
         connect(notebookMindView_, &mind::MindMapView::nodeActivated, this,
                 [this](int page) { if (page >= 0 && view_) view_->gotoPage(page); });
+        connect(notebookMindView_, &mind::MindMapView::pageMenuRequested, this,
+                [this](const QString& pageKey, const QString& sourcePath, const QPoint& pos) {
+            QMenu menu(notebookMindWindow_);
+            menu.addAction(QStringLiteral("在此页新建自由笔记…"), [this, pageKey, sourcePath]() {
+                const int page = pageKey.mid(5).section(QLatin1Char(':'), 0, 0).toInt();
+                if (sourcePath != docPath_) { saveReadingState(); if (!openDocument(sourcePath)) return; }
+                if (page >= 0) view_->gotoPage(page);
+                const QString title = askText(notebookMindWindow_, QStringLiteral("新建自由笔记"), QStringLiteral("标题："));
+                if (title.trimmed().isEmpty()) return;
+                createFreeNoteForPageForTest(title.trimmed(), {}, page);
+            });
+            if (!kHeadless) menu.exec(pos);
+        });
         connect(notebookMindView_, &mind::MindMapView::noteMenuRequested, this,
                 [this](const QString& noteId, const QPoint& pos) {
             QMenu menu(notebookMindWindow_);
@@ -4192,7 +4312,7 @@ void MainWindow::showNotebookMindMap()
                 if (activateNotebookNote(noteId) && confirm(notebookMindWindow_, QStringLiteral("删除笔记"),
                     QStringLiteral("删除这条笔记？可用 Ctrl+Z 撤销。"))) deleteMarkupById(noteId);
             });
-            menu.exec(pos);
+            if (!kHeadless) menu.exec(pos);
         });
         connect(notebookMindView_, &mind::MindMapView::groupMenuRequested, this,
                 [this](const QString& key, const QPoint& pos) {

@@ -90,22 +90,19 @@ QString MindMapView::groupKeyAt(const QPointF& scenePos) const
 {
     if (!scene_) return {};
     for (QGraphicsItem* item : scene_->items(scenePos)) {
-        const QVariant group = item->data(2);
-        if (group.isValid()) return group.toString();
-        const QVariant id = item->data(1);
-        if (id.isValid()) {
-            // a note behaves like its group (groups can be nested now)
-            std::function<QString(const Node&)> findLeaf = [&](const Node& node) -> QString {
-                for (const Node& child : node.children) {
-                    if (child.markupId == id.toString()) return child.groupKey;
-                    const QString nested = findLeaf(child);
-                    if (!nested.isNull()) return nested;
-                }
-                return QString();
-            };
-            const QString key = findLeaf(root_);
-            if (!key.isNull()) return key;
-        }
+        // Text and decoration items are separate scene items, not children of the card.
+        // Their node key is the reliable route back to the corresponding tree node.
+        QString key;
+        for (QGraphicsItem* hit = item; hit && key.isEmpty(); hit = hit->parentItem())
+            key = hit->data(4).toString();
+        if (key.isEmpty()) continue;
+        QString found;
+        std::function<void(const Node&)> walk = [&](const Node& node) {
+            if (nodeKey(node) == key) { found = node.groupKey; return; }
+            for (const Node& child : node.children) if (found.isEmpty()) walk(child);
+        };
+        walk(root_);
+        if (!found.isEmpty()) return found;
     }
     return {};
 }
@@ -120,19 +117,19 @@ bool MindMapView::dropTargetAt(const QPointF& scenePos, QString* groupKey,
     // A note under the cursor: insert before it when dropping in its upper half. The note
     // being dragged follows the cursor and would otherwise be its own drop target.
     for (QGraphicsItem* item : scene_->items(scenePos)) {
-        const QVariant id = item->data(1);
-        if (!id.isValid()) continue;
-        if (!dragMarkupId_.isEmpty() && id.toString() == dragMarkupId_) continue;
-        const QRectF box = item->sceneBoundingRect();
+        QString targetId;
+        QRectF box;
+        for (QGraphicsItem* card = item; card; card = card->parentItem()) {
+            const QString key = card->data(4).toString();
+            if (!card->data(7).toBool() || !key.startsWith(QStringLiteral("note:"))) continue;
+            targetId = key.mid(5);
+            box = card->sceneBoundingRect();
+            break;
+        }
+        if (targetId.isEmpty() || (!dragMarkupId_.isEmpty() && targetId == dragMarkupId_)) continue;
         const bool upperHalf = scenePos.y() < box.center().y();
         if (groupKey) *groupKey = groupKeyAt(scenePos);
-        if (beforeId) {
-            if (upperHalf) {
-                *beforeId = id.toString();
-            } else if (beforeId) {
-                *beforeId = QString();   // append right after this note
-            }
-        }
+        if (beforeId) *beforeId = upperHalf ? targetId : QString();
         return true;
     }
 
@@ -140,17 +137,29 @@ bool MindMapView::dropTargetAt(const QPointF& scenePos, QString* groupKey,
     // card as well, otherwise it reports the note's current group.
     QString group;
     for (QGraphicsItem* item : scene_->items(scenePos)) {
-        const QVariant id = item->data(1);
-        if (id.isValid() && !dragMarkupId_.isEmpty() && id.toString() == dragMarkupId_) continue;
-        const QVariant key = item->data(2);
-        if (key.isValid() && !key.toString().isEmpty()) {
-            group = key.toString();
+        for (QGraphicsItem* card = item; card; card = card->parentItem()) {
+            if (!card->data(7).toBool()) continue;
+            if (card->data(1).isValid() && !dragMarkupId_.isEmpty() &&
+                card->data(1).toString() == dragMarkupId_) continue;
+            group = card->data(2).toString();
             break;
         }
+        if (!group.isEmpty()) break;
     }
     if (!group.isEmpty()) {
         if (groupKey) *groupKey = group;
         return true;
+    }
+    // Page/document containers are valid hierarchy targets even though they are not
+    // user-created MindGroup records.
+    for (QGraphicsItem* item : scene_->items(scenePos)) {
+        const QString key = item->data(4).toString();
+        if (item->data(7).toBool() && (key.startsWith(QStringLiteral("page:")) ||
+                                       key.startsWith(QStringLiteral("docpage:")) ||
+                                       key.startsWith(QStringLiteral("document:")))) {
+            if (groupKey) *groupKey = key;
+            return true;
+        }
     }
     return false;
 }
@@ -159,10 +168,10 @@ QString MindMapView::keyAt(const QPointF& scenePos) const
 {
     if (!scene_) return {};
     for (QGraphicsItem* item : scene_->items(scenePos)) {
-        // Cards carry their nodeKey in data(4) and so do their text children, so the whole
-        // card is a hit target rather than just the painted rectangle.
-        const QVariant key = item->data(4);
-        if (key.isValid() && !key.toString().isEmpty()) return key.toString();
+        for (QGraphicsItem* hit = item; hit; hit = hit->parentItem()) {
+            const QString key = hit->data(4).toString();
+            if (!key.isEmpty()) return key;
+        }
     }
     return {};
 }
@@ -381,25 +390,31 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
         QString group;
         QString before;
         const bool hasTarget = dropTargetAt(scenePos, &group, &before);
+        const QString sourceContainer = dragContainerKey_;
 
         dragMarkupId_.clear();
         dragMoved_ = false;
         nodePressActive_ = false;
         pressKey_.clear();
+        dragContainerKey_.clear();
 
         if (!hasTarget) {
             emit nodeReparented(id, QString());   // empty canvas -> back to the page bucket
             return;
         }
-        if (!before.isEmpty()) {
+            if (!before.isEmpty()) {
             emit noteReorderRequested(id, group, before);
             return;
         }
         if (!group.isEmpty()) {
-            emit nodeReparented(id, group);
+            if (group.startsWith(QStringLiteral("page:")) || group.startsWith(QStringLiteral("docpage:")) ||
+                group.startsWith(QStringLiteral("document:")))
+                emit containerReparentRequested(id, dragContainerPath_, group, QString());
+            else emit nodeReparented(id, group);
             return;
         }
-        emit nodeReparented(id, QString());   // dropped on empty canvas -> page bucket
+        if (!sourceContainer.isEmpty()) emit containerReparentRequested(id, dragContainerPath_, sourceContainer, dragContainerPath_);
+        else emit nodeReparented(id, QString());   // dropped on empty canvas -> page bucket
         return;
     }
     dragMarkupId_.clear();
@@ -517,7 +532,18 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             pressKey_ = key;
             pressStart_ = event->pos();
             nodePressActive_ = true;
-            dragMarkupId_ = markupIdAt(scenePos);
+            dragMarkupId_ = key.startsWith(QStringLiteral("note:")) ? key.mid(5) : markupIdAt(scenePos);
+            dragContainerKey_ = (key.startsWith(QStringLiteral("page:")) ||
+                                 key.startsWith(QStringLiteral("docpage:")) ||
+                                 key.startsWith(QStringLiteral("document:"))) ? key : QString();
+            const Node* sourceNode = nullptr;
+            std::function<const Node*(const Node&)> findNode = [&](const Node& node) -> const Node* {
+                if (nodeKey(node) == key) return &node;
+                for (const Node& child : node.children) if (const Node* found = findNode(child)) return found;
+                return nullptr;
+            };
+            sourceNode = findNode(root_);
+            dragContainerPath_ = sourceNode ? sourceNode->docPath : root_.docPath;
             dragStartScene_ = scenePos;
             dragMoved_ = false;
             setSelectedKey(key);
@@ -540,19 +566,32 @@ void MindMapView::contextMenuEvent(QContextMenuEvent* event)
 {
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
+        const QString key = keyAt(scenePos);
+        if (key.startsWith(QStringLiteral("note:"))) {
+            emit noteMenuRequested(key.mid(5), event->globalPos());
+            event->accept();
+            return;
+        }
         for (QGraphicsItem* item : scene_->items(scenePos)) {
-            const QVariant nodeId = item->data(1);
-            if (nodeId.isValid() && !nodeId.toString().isEmpty()) {
-                emit noteMenuRequested(nodeId.toString(), event->globalPos());
-                event->accept();
-                return;
-            }
             const QVariant id = item->data(5);
             if (id.isValid() && !id.toString().isEmpty()) {
                 emit linkMenuRequested(id.toString(), event->globalPos());
                 event->accept();
                 return;
             }
+        }
+        if ((key.startsWith(QStringLiteral("page:")) || key.startsWith(QStringLiteral("docpage:"))) &&
+            !rectForKey(key).isNull()) {
+            QString path = root_.docPath;
+            const QString prefix = QStringLiteral("docpage:");
+            if (key.startsWith(prefix)) {
+                const QString payload = key.mid(prefix.size());
+                const int split = payload.lastIndexOf(QStringLiteral(":page:"));
+                if (split >= 0) path = payload.left(split);
+            }
+            emit pageMenuRequested(key, path, event->globalPos());
+            event->accept();
+            return;
         }
     }
     handleCanvasContextMenu(event);
@@ -878,10 +917,8 @@ void MindMapView::rebuild()
         card->setData(0, n.page);
         card->setData(2, n.groupKey);
         card->setData(4, key);   // nodeKey(): hit target for select/rename/keys
-        if (!n.markupId.isEmpty()) {
-            card->setData(1, n.markupId);
-            card->setFlag(QGraphicsItem::ItemIsMovable, true);
-        }
+        if (!n.markupId.isEmpty()) card->setData(1, n.markupId);
+        if (!n.docPath.isEmpty()) card->setData(6, n.docPath);
         if (selected) card->setData(3, 1);   // hit-test helper: selected marker
 
         double y = rect.top() + kPadY;

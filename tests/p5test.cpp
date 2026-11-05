@@ -465,7 +465,13 @@ int main(int argc, char** argv)
             check(groupAtNote.startsWith(QStringLiteral("page:")),
                   QStringLiteral("a page-grouped note reports its group key (%1)").arg(groupAtNote));
 
-            int activated = 0, renamed = 0, noteMenus = 0;
+            int activated = 0, renamed = 0, noteMenus = 0, pageMenus = 0, containerDrops = 0;
+            QObject::connect(&view, &mind::MindMapView::pageMenuRequested,
+                             [&pageMenus](const QString& key, const QString&, const QPoint&) { if (key.startsWith(QStringLiteral("page:"))) ++pageMenus; });
+            QObject::connect(&view, &mind::MindMapView::containerReparentRequested,
+                             [&containerDrops](const QString& id, const QString&, const QString& key, const QString&) {
+                if (id == QStringLiteral("a") && key.startsWith(QStringLiteral("page:"))) ++containerDrops;
+            });
             QObject::connect(&view, &mind::MindMapView::noteMenuRequested, [&noteMenus](const QString& id, const QPoint&) {
                 if (id == QStringLiteral("a")) ++noteMenus;
             });
@@ -492,13 +498,21 @@ int main(int argc, char** argv)
             QContextMenuEvent context(QContextMenuEvent::Mouse, start, view.viewport()->mapToGlobal(start));
             QApplication::sendEvent(view.viewport(), &context);
             check(noteMenus == 1 && context.isAccepted(), QStringLiteral("right click on note opens its context menu request"));
+            const QPointF pageCenter = view.rectForKey(QStringLiteral("page:0")).center();
+            const QPoint pagePoint = view.mapFromScene(pageCenter);
+            QContextMenuEvent pageContext(QContextMenuEvent::Mouse, pagePoint, view.viewport()->mapToGlobal(pagePoint));
+            QApplication::sendEvent(view.viewport(), &pageContext);
+            check(pageMenus == 1 && pageContext.isAccepted(), QStringLiteral("right click on page node opens page menu request"));
 
-            const QPoint nodeEnd = start + QPoint(45, 24);
+            const QRectF pageBucket = view.rectForKey(QStringLiteral("page:0"));
+            const QPoint nodeEnd = pageBucket.isNull() ? start + QPoint(45, 24)
+                                                        : view.mapFromScene(pageBucket.center());
             sendMouse(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
             sendMouse(QEvent::MouseMove, start + QPoint(15, 8), Qt::NoButton, Qt::LeftButton);
             sendMouse(QEvent::MouseMove, nodeEnd, Qt::NoButton, Qt::LeftButton);
             sendMouse(QEvent::MouseButtonRelease, nodeEnd, Qt::LeftButton, Qt::NoButton);
             check(!view.hasDropIndicator(), QStringLiteral("node drag clears the temporary indicator on release"));
+            check(containerDrops == 1, QStringLiteral("left-drag note onto page bucket emits a container move"));
 
             const QPoint panStart = view.viewport()->rect().center();
             const QPointF sceneBeforePan = view.mapToScene(panStart);

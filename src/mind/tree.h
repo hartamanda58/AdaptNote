@@ -45,7 +45,8 @@ Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs
 // Notes without a group fall back to page buckets, so an unorganised document still
 // shows a useful outline.
 Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
-                    const QVector<MindGroup>& groups = {}, bool useAutomaticPageBuckets = true);
+                    const QVector<MindGroup>& groups = {}, bool useAutomaticPageBuckets = true,
+                    const QString& sourceDocPath = {});
 
 int nodeCount(const Node& node);
 int depthOf(const Node& node);

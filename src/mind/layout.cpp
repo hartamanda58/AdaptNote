@@ -17,8 +17,8 @@ QString nodeKey(const Node& n)
     // is how drop targets are resolved), so keying them by groupKey would collapse every
     // note of a page into one layout slot.
     if (!n.markupId.isEmpty()) return QStringLiteral("note:%1").arg(n.markupId);
+    if (!n.groupKey.isEmpty()) return n.groupKey;   // "group:<id>" or page bucket
     if (!n.docPath.isEmpty()) return QStringLiteral("document:") + n.docPath;
-    if (!n.groupKey.isEmpty()) return n.groupKey;   // "group:<id>" or scoped page bucket
     return n.page < 0 ? QStringLiteral("root:") + n.text : QStringLiteral("page:%1").arg(n.page);
 }
 

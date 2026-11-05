@@ -13,10 +13,12 @@ namespace an {
 namespace mind {
 
 Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
-                    const QVector<MindGroup>& groups, bool useAutomaticPageBuckets)
+                    const QVector<MindGroup>& groups, bool useAutomaticPageBuckets,
+                    const QString& sourceDocPath)
 {
     Node root;
     root.text = docTitle.isEmpty() ? QStringLiteral("未命名") : docTitle;
+    root.docPath = sourceDocPath;
 
     QVector<Markup> live;
     for (const Markup& m : markups)
@@ -51,6 +53,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         leaf.text = m.title.trimmed().isEmpty() ? text : m.title.trimmed();
         leaf.page = m.page;
         leaf.markupId = m.id;
+        leaf.docPath = m.docPath;
         leaf.parentMarkupId = m.parentMarkupId;
         leaf.groupKey = m.mindGroup.isEmpty() ? QString()
                                               : QStringLiteral("group:%1").arg(m.mindGroup);
@@ -189,6 +192,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         Node node;
         node.text = g.name;
         node.groupKey = QStringLiteral("group:%1").arg(id);
+        node.docPath = g.docPath;
         node.page = -1;
         node.isGroup = true;
         emitted.insert(id);
@@ -222,7 +226,10 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
         Node bucket;
         bucket.text = QStringLiteral("第 %1 页").arg(it.key() + 1);
         bucket.page = it.key();
-        bucket.groupKey = QStringLiteral("page:%1").arg(it.key());
+        bucket.docPath = sourceDocPath;
+        bucket.groupKey = sourceDocPath.isEmpty()
+            ? QStringLiteral("page:%1").arg(it.key())
+            : QStringLiteral("page:%1:%2").arg(it.key()).arg(sourceDocPath);
         bucket.isGroup = true;
         appendNoteForest(bucket, it.value());
         root.children.append(bucket);
@@ -289,7 +296,7 @@ Node buildFromTopic(const QString& topicName, const QVector<TopicDocInput>& docs
         for (const MindGroup& g : groups)
             if (g.docPath == doc.docPath) own.append(g);
 
-        Node branch = buildFromNotes(doc.title, doc.markups, own);
+        Node branch = buildFromNotes(doc.title, doc.markups, own, true, doc.docPath);
         if (branch.children.isEmpty()) continue;   // nothing to show for that document
         branch.text = doc.title.isEmpty() ? QFileInfo(doc.docPath).completeBaseName() : doc.title;
         // Page buckets from different books must not share layout/collapse keys.
