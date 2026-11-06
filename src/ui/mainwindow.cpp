@@ -93,8 +93,8 @@ public:
         const bool selected = option.state & QStyle::State_Selected;
         const bool hovered = option.state & QStyle::State_MouseOver;
         if (selected || hovered) {
-            QColor bg = selected ? QColor("#eaf1ff") : QColor("#f4f6f9");
-            painter->setPen(selected ? QColor("#d7e3f8") : Qt::NoPen);
+            QColor bg = selected ? QColor("#22304a") : QColor("#1e222b");
+            painter->setPen(selected ? QColor("#35507d") : Qt::NoPen);
             painter->setBrush(bg);
             painter->drawRoundedRect(row, 8, 8);
         }
@@ -111,7 +111,7 @@ public:
         const QString preview = index.data(Qt::UserRole + 6).toString();
         const QString source = index.data(Qt::UserRole + 7).toString();
         const bool group = index.data(Qt::UserRole + 8).toBool();
-        const QColor primary = selected ? QColor("#244f97") : QColor("#292d33");
+        const QColor primary = selected ? QColor("#a9cbff") : QColor("#e6e9ef");
         painter->setPen(primary);
         QFont titleFont = option.font;
         titleFont.setPointSizeF(group ? 10.5 : 10.0);
@@ -128,13 +128,13 @@ public:
             QFont metaFont = option.font;
             metaFont.setPointSizeF(8.5);
             painter->setFont(metaFont);
-            painter->setPen(QColor("#858b95"));
+            painter->setPen(QColor("#b1bac8"));
             const QString sub = preview.isEmpty() ? QStringLiteral("自由笔记") : preview;
             painter->drawText(previewRect, Qt::AlignLeft | Qt::AlignVCenter,
                               painter->fontMetrics().elidedText(sub, Qt::ElideRight, previewRect.width()));
             if (!source.isEmpty()) {
                 QRect sourceRect(option.rect.right() - 62, option.rect.top() + 27, 54, 16);
-                painter->setPen(QColor("#9aa0a9"));
+                painter->setPen(QColor("#9aa4b2"));
                 painter->drawText(sourceRect, Qt::AlignRight | Qt::AlignVCenter, source);
             }
         }
@@ -1266,12 +1266,82 @@ void MainWindow::buildFindBar()
 
 void MainWindow::buildDocks()
 {
-    auto* dock = new QDockWidget(QStringLiteral("笔记本大纲与目录"), this);
+    // Left bookshelf rail: keep document browsing inside the main reading workspace.
+    auto* shelf = new QDockWidget(QStringLiteral("书架"), this);
+    bookshelfDock_ = shelf;
+    shelf->setObjectName("bookshelfDock");
+    shelf->setAllowedAreas(Qt::LeftDockWidgetArea);
+    bookshelfContent_ = new QWidget(shelf);
+    auto* shelfLayout = new QVBoxLayout(bookshelfContent_);
+    shelfLayout->setContentsMargins(8, 8, 8, 8);
+    auto* shelfTabs = new QTabWidget(bookshelfContent_);
+    shelfTabs->setDocumentMode(true);
+
+    auto* booksPane = new QWidget(shelfTabs);
+    auto* booksLayout = new QVBoxLayout(booksPane);
+    booksLayout->setContentsMargins(4, 8, 4, 4);
+    auto* addBook = new QPushButton(QStringLiteral("+ 打开资料"), booksPane);
+    addBook->setObjectName("shelfAddBook");
+    booksLayout->addWidget(addBook);
+    bookshelfList_ = new QListWidget(booksPane);
+    bookshelfList_->setObjectName("bookshelfList");
+    booksLayout->addWidget(bookshelfList_, 1);
+    shelfTabs->addTab(booksPane, QStringLiteral("书架"));
+
+    auto* topicsPane = new QWidget(shelfTabs);
+    auto* topicsLayout = new QVBoxLayout(topicsPane);
+    topicsLayout->setContentsMargins(4, 8, 4, 4);
+    auto* addTopic = new QPushButton(QStringLiteral("+ 新建笔记本"), topicsPane);
+    topicsLayout->addWidget(addTopic);
+    topicShelfList_ = new QListWidget(topicsPane);
+    topicShelfList_->setObjectName("topicShelfList");
+    topicsLayout->addWidget(topicShelfList_, 1);
+    shelfTabs->addTab(topicsPane, QStringLiteral("笔记本"));
+
+    pageOutlineOnShelf_ = new QTreeWidget(shelfTabs);
+    pageOutlineOnShelf_->setObjectName("shelfPageOutline");
+    outlineTree_ = pageOutlineOnShelf_;
+    pageOutlineOnShelf_->setHeaderHidden(true);
+    shelfTabs->addTab(pageOutlineOnShelf_, QStringLiteral("目录"));
+
+
+    shelfLayout->addWidget(shelfTabs, 1);
+
+    connect(addBook, &QPushButton::clicked, this, [this]() { if (!kHeadless) chooseFile(); });
+    connect(bookshelfList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        if (item) openDocument(item->data(Qt::UserRole).toString());
+    });
+    connect(bookshelfList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        if (!item) return;
+        const QString path = item->data(Qt::UserRole).toString();
+        if (!currentTopic_.isEmpty()) addNotebookDocument(path); else openDocument(path);
+    });
+    connect(addTopic, &QPushButton::clicked, this, [this]() {
+        const QString name = askText(this, QStringLiteral("新建笔记本"), QStringLiteral("名称："));
+        if (!name.trimmed().isEmpty()) createNotebook(name);
+    });
+    connect(topicShelfList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        if (item) openNotebook(item->data(Qt::UserRole).toString());
+    });
+    connect(pageOutlineOnShelf_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
+        if (!item) return;
+        const int page = item->data(0, Qt::UserRole).toInt();
+        if (page >= 0) { view_->gotoPage(page); updateStatus(); }
+    });
+    shelf->setWidget(bookshelfContent_);
+    shelf->setMinimumWidth(210);
+    addDockWidget(Qt::LeftDockWidgetArea, shelf);
+    resizeDocks({shelf}, {250}, Qt::Horizontal);
+
+    auto* dock = new QDockWidget(QStringLiteral("摘录 / 笔记 / 生词 / 脑图"), this);
     notesDock_ = dock;
     dock->setObjectName("notesDock");
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
-    leftTabs_ = new QTabWidget(dock);
+    readerSideTabs_ = new QTabWidget(dock);
+    readerSideTabs_->setObjectName("readerSideTabs");
+    readerSideTabs_->setDocumentMode(true);
+    leftTabs_ = readerSideTabs_;
     auto* notebookTree = new NotebookOutlineTree(leftTabs_);
     notebookOutline_ = notebookTree;
     notebookTree->setDragEnabled(true);
@@ -1295,6 +1365,7 @@ void MainWindow::buildDocks()
         return moveNotebookNote(id, target->data(0, Qt::UserRole + 3).toString(),
                                 target->data(0, Qt::UserRole + 4).toString());
     };
+    notebookOutline_->setObjectName("notebookOutline");
     notebookOutline_->setColumnCount(1);
     notebookOutline_->setItemDelegate(new NotebookOutlineDelegate(notebookOutline_));
     notebookOutline_->setHeaderHidden(true);
@@ -1302,7 +1373,7 @@ void MainWindow::buildDocks()
     notebookOutline_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     notebookOutline_->setIndentation(18);
     notebookOutline_->setWordWrap(true);
-    leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记本大纲"));
+    leftTabs_->addTab(notebookOutline_, QStringLiteral("笔记"));
     notebookOutline_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(notebookOutline_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         auto* item = notebookOutline_->itemAt(pos);
@@ -1385,19 +1456,6 @@ void MainWindow::buildDocks()
         const QString id = item->data(0, Qt::UserRole).toString();
         if (activateNotebookNote(id)) editMarkupComment(id);
     });
-
-    outlineTree_ = new QTreeWidget(leftTabs_);
-    outlineTree_->setHeaderHidden(true);
-    outlineTree_->setColumnCount(1);
-    connect(outlineTree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
-        if (!item) return;
-        const int page = item->data(0, Qt::UserRole).toInt();
-        if (page >= 0) {
-            view_->gotoPage(page);
-            updateStatus();
-        }
-    });
-    leftTabs_->addTab(outlineTree_, QStringLiteral("文档目录"));
 
     // ---- notes tab: search + tag filter + colour filter + list ----
     auto* notesTab = new QWidget(leftTabs_);
@@ -1495,12 +1553,35 @@ void MainWindow::buildDocks()
         if (!kHeadless) menu.exec(notesList_->mapToGlobal(pos));
     });
 
-    leftTabs_->addTab(notesTab, QStringLiteral("笔记列表 (0)"));
+    leftTabs_->addTab(notesTab, QStringLiteral("摘录"));
+    auto* wordsPane = new QWidget(leftTabs_);
+    auto* wordsLayout = new QVBoxLayout(wordsPane);
+    auto* wordsEmpty = new QLabel(QStringLiteral("生词本尚未接入当前笔记数据。\n此标签先保留 MN 工作区布局，不展示虚构条目。"), wordsPane);
+    wordsEmpty->setObjectName("sidePanelHint");
+    wordsEmpty->setWordWrap(true);
+    wordsLayout->addWidget(wordsEmpty);
+    wordsLayout->addStretch();
+    leftTabs_->addTab(wordsPane, QStringLiteral("生词"));
+    QWidget* mapTab = new QWidget(leftTabs_);
+    auto* mapTabLayout = new QVBoxLayout(mapTab);
+    mapTabLayout->setContentsMargins(0, 0, 0, 0);
+    auto* mapActions = new QHBoxLayout;
+    auto* mapFit = new QPushButton(QStringLiteral("适配"), mapTab);
+    auto* mapOpen = new QPushButton(QStringLiteral("独立窗口 ↗"), mapTab);
+    mapActions->addWidget(mapFit); mapActions->addWidget(mapOpen); mapActions->addStretch();
+    mapTabLayout->addLayout(mapActions);
+    auto* rightMindView = new mind::MindMapView(mapTab);
+    rightMindView->setObjectName("rightMindMap");
+    shelfMindView_ = rightMindView;
+    mapTabLayout->addWidget(rightMindView, 1);
+    connect(mapFit, &QPushButton::clicked, rightMindView, &mind::MindMapView::fitToContent);
+    connect(mapOpen, &QPushButton::clicked, this, &MainWindow::showNotebookMindMap);
+    leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
 
     dock->setWidget(leftTabs_);
-    dock->setMinimumWidth(280);
+    dock->setMinimumWidth(300);
     addDockWidget(Qt::RightDockWidgetArea, dock);
-    resizeDocks({dock}, {330}, Qt::Horizontal);
+    resizeDocks({shelf, dock}, {220, 360}, Qt::Horizontal);
 }
 
 void MainWindow::buildStatusBar()
@@ -1529,6 +1610,7 @@ bool MainWindow::openDocument(const QString& path)
     view_->setEngine(&engine_);
     reloadOutline();
     reloadMarkups();
+    refreshBookshelf();
     hits_.clear();
     hitIndex_ = -1;
     view_->setSearchHits({}, -1);
@@ -1826,6 +1908,8 @@ void MainWindow::refreshNotebookWorkspace()
         : QStringLiteral("%1    ·    %2 份资料").arg(title).arg(paths.size());
     notebookTitle_->setText(headerText);
     if (auto* name = findChild<QLabel*>(QStringLiteral("currentNotebookTitle"))) name->setText(headerText);
+    if (bookshelfDock_) bookshelfDock_->setWindowTitle(currentTopic_.isEmpty()
+        ? QStringLiteral("书架 · %1").arg(title) : QStringLiteral("书架 · %1").arg(title));
     QSet<QString> collapsedKeys;
     QString selectedKey;
     const bool hadTree = notebookOutline_->topLevelItemCount() > 0;
@@ -1853,14 +1937,11 @@ void MainWindow::refreshNotebookWorkspace()
             item->setData(0, Qt::UserRole + 7, node.source);
             item->setData(0, Qt::UserRole + 8, node.isGroup);
             if (node.isGroup) {
-                item->setIcon(0, glyphIcon("organize", QColor("#6b84aa")));
+                item->setIcon(0, glyphIcon("organize", QColor("#8bb8ff")));
                 QFont font = item->font(0); font.setWeight(QFont::DemiBold); item->setFont(0, font);
-                item->setForeground(0, QBrush(QColor("#313842")));
+                item->setForeground(0, QBrush(QColor("#d5dae3")));
             } else if (!node.markupId.isEmpty()) {
-                item->setIcon(0, glyphIcon("note", QColor("#8290a3")));
-                item->setForeground(1, QBrush(QColor("#8a9099")));
-                QFont sourceFont = item->font(1); sourceFont.setPointSizeF(qMax(8.0, sourceFont.pointSizeF() - 1));
-                item->setFont(1, sourceFont);
+                item->setIcon(0, glyphIcon("note", QColor("#b3c7e6")));
             }
             item->setData(0, Qt::UserRole, node.markupId);
             item->setData(0, Qt::UserRole + 4, node.groupKey);
@@ -1883,10 +1964,12 @@ void MainWindow::refreshNotebookWorkspace()
             for (const auto& child : node.children) fill(item, child);
         };
     fill(nullptr, root);
+    refreshBookshelf();
     if (notebookMindView_) {
         notebookMindView_->setLinks(store_.mindLinks(mindScopeKey()));
         notebookMindView_->setTree(root);
     }
+
 }
 
 void MainWindow::restoreReadingState()
@@ -4453,6 +4536,41 @@ void MainWindow::showConflicts()
     dlg->show();
     dlg->raise();
     dlg->activateWindow();
+}
+
+void MainWindow::refreshBookshelf()
+{
+    if (!bookshelfList_ || !topicShelfList_) return;
+    bookshelfList_->clear();
+    for (const DocRow& doc : store_.documents()) {
+        auto* item = new QListWidgetItem(doc.title.isEmpty() ? QFileInfo(doc.path).fileName() : doc.title,
+                                         bookshelfList_);
+        item->setData(Qt::UserRole, doc.path);
+        item->setToolTip(doc.path);
+        item->setIcon(style()->standardIcon(QStyle::SP_FileIcon));
+        if (doc.path == docPath_) item->setSelected(true);
+    }
+    topicShelfList_->clear();
+    for (const Topic& topic : store_.topics()) {
+        auto* item = new QListWidgetItem(topic.name, topicShelfList_);
+        item->setData(Qt::UserRole, topic.id);
+        item->setToolTip(QStringLiteral("%1 份资料").arg(store_.topicDocs(topic.id).size()));
+    }
+    if (pageOutlineOnShelf_) {
+        pageOutlineOnShelf_->clear();
+        if (!docPath_.isEmpty()) {
+            std::function<void(QTreeWidgetItem*, const QVector<OutlineItem>&)> fill =
+                [&](QTreeWidgetItem* parent, const QVector<OutlineItem>& nodes) {
+                    for (const OutlineItem& node : nodes) {
+                        auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(pageOutlineOnShelf_);
+                        item->setText(0, node.title);
+                        item->setData(0, Qt::UserRole + 1, node.page);
+                        fill(item, node.children);
+                    }
+                };
+            fill(nullptr, engine_.outline());
+        }
+    }
 }
 
 void MainWindow::showLibrary()

@@ -110,12 +110,14 @@ public:
     bool moveNotebookGroup(const QString& id, const QString& targetPath, const QString& parentId);
     void showNotebookMindMap();
     void refreshNotebookWorkspace();
+    void refreshBookshelf();
     int notebookDocumentCountForTest() const;
     QStringList notebookNoteIdsForTest() const;
     bool activateNotebookNote(const QString& id);
     void setFindScopeForTest(int scope);
     int notesPanelCountForTest() const;
     QString notesPanelTextForTest(int row) const;
+    int bookshelfCountForTest() const;
     bool storeUpsertForTest(const Markup& m) { return store_.upsertMarkup(m); }
     QString createTopicForTest(const QString& name)
     {
@@ -243,6 +245,13 @@ private:
     QTabBar* notebookDocuments_ = nullptr;
     QTreeWidget* notebookOutline_ = nullptr;
     QDockWidget* notesDock_ = nullptr;
+    QDockWidget* bookshelfDock_ = nullptr;
+    QWidget* bookshelfContent_ = nullptr;
+    QListWidget* bookshelfList_ = nullptr;
+    QListWidget* topicShelfList_ = nullptr;
+    QTreeWidget* pageOutlineOnShelf_ = nullptr;
+    mind::MindMapView* shelfMindView_ = nullptr;
+    QTabWidget* readerSideTabs_ = nullptr;
     QDockWidget* aiDock_ = nullptr;
     QToolBar* findBar_ = nullptr;
     QDialog* notebookMindWindow_ = nullptr;
