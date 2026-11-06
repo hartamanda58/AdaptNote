@@ -1,289 +1,269 @@
-# HANDOVER — AdaptNote（BookxNote 同类自用实现）
+# HANDOVER — AdaptNote
 
-> 这份文档是"交接"用的：它记录**当前状态、为什么这么设计、踩过哪些坑、还没做什么**。
-> 阅读顺序建议：①快速开始 → ②现状 → ③架构 → ④坑 → ⑤后续。
+> 交接文档。新会话先读这份，再按需读 `docs/reader-redesign/`。
+> 旧版本（2026-10-27）的内容重写在文末「附录：历史交接」，仅在需要考古时看。
 
 ---
 
-## 1. 一句话定位
+## 0. 当前状态（2026-11）
 
-对标 **BookxNote Pro**（已用 REA 反编译过其发布件）的**本地优先**阅读与标注工具：
-PDF/EPUB 阅读 → 标注/手写 → 笔记/标签/搜索 → 导出（MD/HTML/OPML/XMind/Anki）→ WebDAV 同步 →
-脑图/朗读/AI 助手。C++20 + Qt6 Widgets + MuPDF，约 **9.7k 行**，自用、不分发。
+- 分支 `main`，最新提交 `ea38004`（`style(workspace): align reader shell with self-hosted MN reference layout`）
+- 本地 11 套测试全绿；Windows 构建 + 便携包运行验收全绿
+- 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1 万行，自用、不分发
+- 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
 
-## 2. 快速开始
+### 最近一次验收
 
-```bash
-# 依赖（Debian 12 实测）
-apt install cmake ninja-build qt6-base-dev qt6-sql-sqlite qt6-multimedia-dev \
-            qt6-declarative-dev libmupdf-dev libmujs-dev libfreetype-dev \
-            libharfbuzz-dev libgumbo-dev libopenjp2-7-dev libjbig2dec0-dev \
-            libjpeg62-turbo-dev zlib1g-dev fonts-noto-cjk xvfb
-
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-bash scripts/make_testdata.sh build      # 生成 build/test.pdf + test.epub
-./build/adaptnote --doc build/test.pdf   # 运行
-bash scripts/demo.sh                     # 构建+造档+7 套测试+截图（一条命令）
+```text
+run 42248461529  Windows 构建   success
+run 42259336748  便携包运行验收 success
 ```
 
-单跑测试（都需要 `QT_QPA_PLATFORM=offscreen`，GUI 类用 offscreen 即可）：
+报告分支：`ci-report` 的 `ci/windows-report.txt`；包含 PDF/EPUB 导出、便携数据目录、
+**直接双击 EXE 数据落包内**、窗口截图、200% DPI 渲染 ratio=2。
+
+### 最新可下载包
+
+```text
+https://github.com/hartamanda58/AdaptNote/releases/download/mn-reference-ui-ea38004/AdaptNote-windows-x64-portable.zip
+sha256: f11d7910d5a874944bdfdf611d32f2e64ff7f546800c3203c7beabe16860ee81
+```
+
+包内直接运行 `bin\adaptnote.exe` 即可；`portable.flag` 让它把数据写到包根 `data\`。
+`AdaptNote.bat` 仍然兼容。
+
+---
+
+## 1. 环境与路径
+
+| 项 | 值 |
+| --- | --- |
+| 工作副本 | `/root/adaptnote`（唯一改代码的地方） |
+| 远程 | `https://github.com/hartamanda58/AdaptNote.git`（public） |
+| 分支 | `main` |
+| Token | `/root/.gh_token`（600），**用完应吊销** |
+| CI 脚本 | `/root/bxn/ci.py`、`push_dispatch.py` |
+| 参考压缩包 | `/root/Px72.tar`（270MB，**不在仓库内**） |
+
+Push：
+
+```bash
+cd /root/adaptnote
+export GH_TOKEN=$(< /root/.gh_token)
+git -c credential.helper='!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f' push origin main
+```
+
+> 历史 clone `/root/pi work/AdaptNote-clone` 的 origin 曾经指错（指向本地目录，push 不进 GitHub）。
+> 不要在那里改代码。
+
+### 参考包内容（`/root/Px72.tar`）
+
+- `03-mn-源码/mn/` —— **自研 MN**（Node + Web + Electron 壳），三栏深色 UI 的参考对象；
+  有 `STATE.md`、`HANDOFF.txt`、182 项测试，但未打包成 Windows exe（better-sqlite3 ABI 问题）。
+- `02-ReaderNote-源码分析.tar.gz` —— ReaderNote 的静态逆向产物（decompiled JS + 报告）。
+- `01-ReaderNote便携版-已解锁.zip` —— **绕过许可的破解版**。
+  **不要运行、不要利用、不要分发**；需要行为参考时只看 `02` 的静态分析与公开界面。
+
+---
+
+## 2. 构建与测试
+
+```bash
+cd /root/adaptnote
+python3 scripts/syntax_check.py <changed files>   # 用 compile_commands.json 做 -fsyntax-only
+python3 scripts/check_dialogs.py                  # 禁止 headless 下裸模态框
+cmake --build build -j2
+```
+
+11 套测试（**每个测试必须独立数据目录**，共用会互相污染）：
 
 ```bash
 cd build
-QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./selftest test.pdf test.epub
-QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./visualtest test.pdf
-QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./featuretest test.pdf
-QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./exporttest test.pdf
-XDG_DATA_HOME=$(mktemp -d) ./synctest test.pdf ../scripts/dav_server.py
-XDG_DATA_HOME=$(mktemp -d) ./aitest ../scripts/fake_openai_server.py
-QT_QPA_PLATFORM=offscreen XDG_DATA_HOME=$(mktemp -d) ./p5test test.pdf
+run(){ n=$1; shift; QT_QPA_PLATFORM=offscreen ADAPT_HEADLESS=1 \
+  ADAPT_DATA_DIR=$(mktemp -d) XDG_DATA_HOME=$(mktemp -d) ./$n "$@"; }
+run selftest     test.pdf test.epub
+run visualtest   test.pdf
+run featuretest  test.pdf test.epub
+run exporttest   test.pdf
+run synctest     test.pdf ../scripts/dav_server.py
+run aitest       ../scripts/fake_openai_server.py
+run p5test       test.pdf
+run librarytest
+run migratetest  test.pdf
+run importtest   test.pdf
+run conflicttest
 ```
 
-> 每个用例单独 `XDG_DATA_HOME`：早期共用目录导致用例互相污染（前一个用例的笔记串进后一个），
-> 是一个真实踩过的坑，见 §7.4。
-
-## 3. 现状
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| P0 | 工程骨架、主题、引擎抽象、测试脚手架 | ✅ |
-| P1 | PDF/EPUB 打开、单页/连续/双页、缩放/旋转、文本选择、高亮/下划线/波浪线/批注、写回 PDF、大纲/笔记面板 | ✅ |
-| P2 | FTS5 全文搜索、标签、颜色筛选、图片摘录、撤销/重做、阅读位置记忆、旧库自动迁移 | ✅ |
-| P3 | 导出 MD / HTML / OPML / XMind(8) / Anki `.apkg`（自研 ZIP 读写） | ✅ |
-| P4 | WebDAV 双向同步 + 版本向量合并 + 墓碑 + 冲突保留 + If-Match 条件写 | ✅ |
-| P5 | 手写笔迹（RDP+贝塞尔）、脑图（QGraphicsScene）、逐句朗读、AI 面板（OpenAI 兼容流式） | ✅ |
-| 完善轮 | 墨迹速度调宽 + 橡皮、图片摘录同步、脑图点击跳转/导出 PNG、AI 角色编辑器、朗读语速菜单、只导出筛选结果 | ✅ |
-| 完善轮 2 | **手写局部擦除**（按轨迹切断笔迹）、**整个书库合并导出**（按书分组，五种格式） | ✅ |
-| 完善轮 3 | **书库视图**（文档表 + 跨库笔记搜索/标签筛选 + 双击打开/跳转） | ✅ |
-| 完善轮 4 | **脑图可编辑**：笔记带 `mindGroup` / `mindOrder`，拖动改分组（可撤销），未分组的仍按页自动分组 | ✅ |
-| 完善轮 5 | **书库文档管理**：改名、多选、从书库移除（笔记转墓碑以便同步传播、不动文件）、选中文档批量导出五种格式 | ✅ |
-| 完善轮 6 | **笔迹颜色独立**（含预览与持久化）、**橡皮切点插值**（缺口 ≈ 2×半径） | ✅ |
-| 完善轮 26 | **Windows 便携 zip 在真 Windows 上构建成功**：GitHub Actions 上 10 轮迭代收敛（run 40225724484）——MuPDF 走 `platform\win32\mupdf.sln`+msbuild、CRT 统一 `/MD`、Qt 6.8.3/msvc2022_64、无头测试、11 套测试全绿、产出 `AdaptNote-0.22-windows-x64.zip`（65 MB） | ✅ 已验证 |
-| 完善轮 25 | **Windows 构建通道**：Actions workflow（MuPDF + 本项目 + 11 测试 + 打包上传）、`windows-vm.sh`（QEMU/KVM 小 VM）、`make_test_epub.py`（无 bash 也能造 fixture）、2c4g 实测内存预算 | ✅ 产物已跑出（见完善轮 26） |
-| 完善轮 24 | **Windows 支持**：`M_PI`→`kPi`、MuPDF 路径改 UTF-8、测试解释器按平台切换、CMake 加 `WIN32/MSVC` 分支（MuPDF 查找 / `NOMINMAX` / `/utf-8` / `windeployqt` 目标）、`scripts/make_portable.ps1` | ✅ 已在 CI 上编译通过 |
-| 完善轮 23 | **便携版打包**：`scripts/make_portable.sh` 收集二进制/Qt/插件/依赖闭包，`RPATH=$ORIGIN/lib` 重定位，`AdaptNote.sh` 把 `XDG_DATA_HOME` 指向包内 `data/`；`env -i` + 移目录 + xvfb 三重验证（0 个系统 Qt 依赖） | ✅ |
-| 完善轮 22 | **数位板倾斜/旋转笔刷**：`InkPoint::tilt/angle` + `ink::tiltFromDegrees()` + 椭圆形且带方向的盖章渲染（倾斜越平越宽），倾斜/角度随笔画存档与同步 | ✅ |
-| 完善轮 21 | **按脑图分组导出**：`ExportContext::byGroups` + Markdown/HTML 复用 `mindRoots()` 递归渲染（分组→子分组→笔记，未分组落页桶），导出菜单加勾选项 | ✅ |
-| 完善轮 20 | **冲突可视化合并**：`conflicts::find()/plan()` 纯逻辑 + `ui/conflictdialog`左右对照面板，保留左/右/都保留三种处理，工具栏「冲突」入口 | ✅ |
-| 完善轮 19 | **打开即提示内嵌标注**：`pendingEmbeddedAnnotations()`（去重后的待导入数，扫描上限 50 页）+ 每个文件版本只问一次（settings 里按 sha1(路径:大小:mtime) 记忆）；`setEmbeddedPromptEnabled()` 可关掉弹窗便于脚本/测试 | ✅ |
-| 完善轮 18 | **读回 PDF 内嵌标注**：`IDocumentEngine::readAnnotations()` 把 Highlight/Underline/Squiggly/FreeText/Text/Ink 读成笔记（颜色/批注/作者/几何），`imports::fromPdfAnnotations()` 去重后入库，工具栏「读标注」 | ✅ |
-| 完善轮 17 | **导入**：`imports::fromMarkdown()`（解析 BookxNote 形状的 `## 第 N 页` / `- **高亮** · #tag` / `> 摘录` / `- 批注：`）+ JSON 镜像无损往返 + `commit()` 批量入库 + 工具栏「导入」 | ✅ |
-| 完善轮 16 | **PDF 换版本迁移**：文档记录文件大小/mtime，变化时按摘录文字全篇重定位（`migrate::migrateByText`，同页优先 → 全篇打分），一次事务写回 + 报告 + 可撤销 | ✅ |
-| 完善轮 15 | **重排版锚点**：`Markup::anchorChapter/anchorOffset` + 引擎 `chapterOfPage/chapterOffsetOf/pageForChapterOffset` + `relocateAnchors()`（开档/换版式自动重定位） | ✅ |
-| 完善轮 14 | **写库再优化**：FTS 语句预编译、改写路径复用插入批、可选 `--fast-import`（实测收益在噪声内，默认关）、bench 支持重复测量与全新 id | ✅ |
-| 完善轮 13 | **导出跟随分组树**：`mind/tree.*` 抽成无 Widgets 依赖的纯树模块，XMind/OPML 直接复用 `buildFromNotes`（嵌套分组 + 页桶回落），OPML 叶子保留 type/tags/_note | ✅ |
-| 完善轮 12 | **数位板压感**：`QTabletEvent` 接管笔压（+旋转/切向压力回退），鼠标仍用速度模拟；输入路径抽成 `inkInputBegin/Move/End` 便于无硬件测试 | ✅ |
-| 完善轮 11 | **组内手动排序**：`mind::planReorder()` 纯函数（10/20/30 重排）+ 拖拽落点细化（插到某条之前/之后）+ `Alt+↑/↓` + 多笔记一步撤销 | ✅ |
-| 完善轮 10 | **脑图多级分组**：`MindGroup::parentId` + 循环保护 + 删父组时子组上提；`buildFromNotes` 递归建树；右键「新建子分组 / 上移一级」 | ✅ |
-| 完善轮 9 | **书库智能视图**：最近阅读 / 未读 / 读了一部分 / 有笔记 / 有冲突 / 按标签（`DocFilter` + `documentPathsWithTag`） | ✅ |
-| 完善轮 8 | **性能**：渲染缓存 LRU（字节预算）、批量单事务写入、FTS 变更才重建、FTS id 集合缓存、quads 快序列化；新增 `tools/bench.cpp` + `scripts/bench.sh` 与 README 实测表 | ✅ |
-| 完善轮 7 | **脑图分组实体化**：`mind_groups` 表 + 旧数据自动迁移（文本名→实体 id）、新��/重命名/删除分组、分组随同步合并（并发改名取新名） | ✅ |
-
-**测试总量：299 项断言 + 31 项 Python 独立校验，全绿。**
-`selftest 48 · visualtest 34 · featuretest 37 · exporttest 51 · synctest 53 · aitest 39 · p5test 37`
-
-截图：`shots/{main,find,double,rotated,epub,mindmap}.png`；导出样例：`shots/exports/`。
-
-## 4. 目录与模块职责
-
-```
-src/
-  main.cpp                  CLI：--doc/--demo/--page/--mode/--zoom/--rotate/--find/
-                            --export-dir/--mindmap/--screenshot
-  core/model.{h,cpp}        Markup / Quad / InkPoint / Selection / TextHit / OutlineItem + JSON
-  core/textselect.{h,cpp}   点命中、区间→按行合并 quad、文本提取（NFKC 归一化）
-  core/store.{h,cpp}        SQLite（documents/markups/settings + FTS5）+ 每文档 JSON 镜像 + 迁移
-                            + 书库管理（documents()/renameDocument()/forgetDocument()）
-  render/engine.h           引擎抽象（11 个方法）
-  render/mupdf_engine.cpp   MuPDF 后端：渲染/字符 quad/目录/PDF annot 增量写回
-  ui/pageview.{h,cpp}       版式、缩放、旋转、渲染缓存、选区、叠加层、墨迹、朗读高亮、坐标映射
-  ui/mainwindow.{h,cpp}     工具栏/面板/撤销栈/搜索/筛选/导出/同步/AI/脑图/朗读/书库入口
-  ui/libraryview.{h,cpp}    书库：文档表（笔记数/冲突数/上次读到）+ 跨库笔记浏览
-  export/zip.{h,cpp}        自研 ZIP 读写（deflate + CRC32），供 xmind/apkg 用
-  export/exporter.{h,cpp}   5 种导出格式
-  sync/vv.{h,cpp}           版本向量：dominates / concurrentWith / join
-  sync/webdav_client.{h,cpp}PROPFIND/GET/PUT(If-Match)/MKCOL/DELETE（阻塞 + 超时）
-  sync/sync_manager.{h,cpp} 合并引擎 + 按书推拉
-  ai/ai_client.{h,cpp}      OpenAI 兼容流式（含 reasoning_content / 取消 / 错误体解析）
-  ai/prompts.{h,cpp}        提示词模板 + 角色（JSON 持久化，可编辑）
-  ink/ink.{h,cpp}           RDP 简化 + Catmull-Rom 平滑 + 压力线宽 + 包围盒
-  mind/mindmap.{h,cpp}      笔记→树（显式分组优先，否则按页）、树形布局、缩放、拖拽重分组、渲染成图
-  read/reader.{h,cpp}       断句 + 逐句推进（TTS 可选，无引擎则按字速）
-tools/mkpdf.cpp             生成测试 PDF（A4/72dpi，含双栏页与层级页）
-tests/*.cpp                 7 个测试目标（见上）
-scripts/
-  make_testdata.sh          造 test.pdf + test.epub（EPUB2 + NCX）
-  demo.sh                   一键构建/测试/截图
-  dav_server.py             最小 WebDAV 服务器（stdlib，PROPFIND/GET/PUT+If-Match/MKCOL）
-  fake_openai_server.py     假 OpenAI SSE 端点（含 reasoning_content、慢速、401）
-  validate_exports.py       Python 独立复核导出物（zipfile/sqlite3/xml.etree）
-resources/app.qss           浅色主题
-```
-
-## 5. 数据模型
-
-`Markup`（笔记/标注）核心字段：`id, docPath, page, type, color, quads[], text, comment,
-tags[], imagePath, ink[], created, updated, writtenToPdf, vv, deviceId, deleted, conflictedFrom`
-
-- `type`：`highlight | underline | squiggly | note | image | ink`
-- **坐标**：`quads` / `ink[].pos` 一律是 **PDF 页面坐标（point，未缩放未旋转）**；显示时才乘 CTM。
-- `vv`：版本向量 `device:ms,device:ms`；`deleted` 是墓碑；`conflictedFrom` 指向冲突源。
-
-存储位置（`QStandardPaths::AppDataLocation`，Linux 为 `~/.local/share/AdaptNote/AdaptNote/`）：
-
-```
-library.db             documents / markups / settings / notes_fts(FTS5 trigram)  + WAL
-mirror/<书名>.json     人类可读镜像（每次写笔记后重导，可 diff / 可 git）
-images/<uuid>.png     图片摘录原始截图（2× 渲染后裁剪）
-ai_roles.json         AI 角色（首次用内置 4 个播种，可编辑）
-```
-
-`settings` 表键：`deviceId`（同步用）、`sync.url/user/pass/path`、`ai.url/key/model/role`。
-`documents` 表记录 `path/title/pages/lastPage/lastOffset`（阅读位置 = 页码 + 页内比例）。
-
-## 6. 关键设计决策（以及为什么）
-
-1. **坐标与视图解耦**：标注只存页面坐标；`PageView::pageToView/viewToPage` 是唯一双向映射。
-   → 缩放/旋转/双页不错位的根因。`visualtest` 用像素断言"叠加层必须压在字上"。
-2. **单一真相源**：SQLite 是唯一真源，JSON 镜像是给人看/给 git 看的副产物，PDF annots 是导出。
-   → 参考产品是"PDF annots + markups.json 双写"，一致性靠自觉。
-3. **引擎可替换**：`IDocumentEngine` 11 个方法，MuPDF 只是第一个后端（AGPL，自用不分发无义务；
-   将来发布换 PDFium）。
-4. **同步用版本向量而非"最后写入胜"**：每条笔记一个 VV；并发时**保留双方**（副本 + `#conflict`），
-   删除是墓碑；合并后 VV 取 join 再 bump → **幂等**（第二轮 0 冲突）。
-   删除 vs 编辑的语义：**内容优先**（删除不生效，改过的留下并打标签）。
-5. **朗读降级**：`QTextToSpeech` 编译期可选（`ADAPT_HAVE_TTS`）；运行时无引擎就按字速逐句推进。
-6. **AI 走 OpenAI 兼容协议**：`baseUrl + /v1/chat/completions`，`stream:true`，解析
-   `choices[].delta.content` 与 `delta.reasoning_content`（思维链单列一个折叠区）。
-
-## 7. 踩过的坑（症状 → 根因 → 修复 → 覆盖它的测试）
-
-37. **`notes.tags` 触发 NOT NULL**：无标签时返回 `QString()`（null）→ Qt 绑成 SQL NULL。
-   修复：非空使用 `QString::fromLatin1("")`。→ exporttest
-36. **`.apkg` 里笔记挂错文档**：同步/导出载荷带了本机绝对路径 → 别的设备上 docPath 对不上。
-   修复：线格式剥离 `docPath`，落库时挂回本地路径。→ synctest（"B has 3 notes"）
-35. **`syncAll()` 拉不到新书**：只遍历"有笔记的文档"→ 新设备打开一本书永远空。
-   修复：`documentPath = documents ∪ markups`。→ synctest
-34. **测试互相污染**：demo.sh 共用 `XDG_DATA_HOME`，前一个用例的笔记串进后一个 → 假失败。
-   修复：每个用例 `XDG_DATA_HOME=$(mktemp -d)`。
-33. **墨迹没落库**：`ink` 字段没加数据库列 → 重开后点数 0、画面上看不见。
-   修复：加列 + 迁移 + 读写 JSON。→ featuretest / visualtest
-32. **`QRectF::united` 吞掉零尺寸矩形**：Qt 把零尺寸当 null，`united` 返回另一个零尺寸矩形
-   → 笔迹包围盒退化成 4×4，命中框/可视区都错。修复：手算 min/max。→ p5test（bounds 断言）
-31. **401 错误体读不到**：`readyRead` 已把响应体读进缓冲，`finished` 里再 `readAll()` 得到空。
-   修复：优先解析缓冲。→ aitest（"api error surfaced"）
-30. **412 前先读完请求体**：假 WebDAV 服务器在条件失败分支没读完 body → keep-alive 串包，
-   导致"正确的 If-Match"反而 412。修复：先读 body 再判断。→ synctest（If-Match 两项）
-29. **旋转后阅读位置丢失**：`setRotation` 只重排不修正滚动位置。修复：记页内比例 → 重排 → 回位。
-   → visualtest（"rotated overlay stays inside the viewport"）
-28. **CJK 康熙部首**：某些 PDF 字体无 ToUnicode，提取出 `⻚`/`⼆`。修复：NFKC 归一化（
-    Kangxi 区有效，Radicals Supplement 仍残留，见 §8）。
-27. **`const_cast` 调非 const 成员**：早期 `findMarkup` 只有非 const 版 → 改成 const/non-const 重载。
-26. **null QString 绑成 SQL NULL**：`searchMarkups(query, QString())` 里 `? = ''` 的守卫
-    在 NULL 下为假 → 跨库搜索与标签聚合全部返回空。修复：所有 scope 参数入口用 `nonNull()`
-    归一化，并把「空 scope」显式解释为「整个书库」（`tagCounts` 改走 `allMarkups`）。→ librarytest
-25. **分组节点排序把「无分组」排到最前**：早期排序直接按 `mindGroup` 字符串比较，空串排最前，导致页面桶盖在用户分组之上。修复：显式分组优先、页面桶在后。→ p5test
-24. **分组迁移的方向性**：v0.6 把组名直接写在 `markups.mindGroup` 里，实体化后该字段必须是 id；迁移时用 `sha1(docPath|name)` 生成确定性 id，两台设备各自迁移同一份数据会得到同一个 id，避免了「同步后出现两个同名组」。→ selftest（legacy 库迁移）、synctest
-23. **重构时用「区间替换」删掉了整段实现**：把 `upsertMarkupRow` 与 `markups()` 之间的代码整体替换，连带删掉了 `removeMarkup` / `deviceId` / `documents` / 分组 CRUD 等十几��函数 —— 编译能过是因为这些函数的**头文件声明还在**，直到链接测试目标才炸。教训：改这种大文件要么小步 edit，要么改完立刻用「头文件声明 vs cpp 实现」的脚本对账（我最后就是这么补回来的）。
-22. **批量插入慢的元凶是每行一次 FTS 查询**：`indexMarkup` 每次都在 trigram 虚拟表上 SELECT 一次，3000 条新笔记 = 3000 次全表探测。改成 open 时一次性载入已索引 id 集合后，首次插入从 451 条/秒回到 1218 条/秒。→ featuretest（缓存）/ bench
-21. **分组树的两个易错点**：① 环路——把 A 挂到自己的子孙下会让建树无限递归，`setMindGroupParent` 沿 `parentId` 向上走一遍做检查；② 叶子节点的 groupKey——页面桶里的笔记原本是 null groupKey，导致 `groupKeyAt` 命中叶子后返回空串，拖拽目标判断失效；现在叶子继承所属桶/组的 key。→ selftest / p5test
-20. **一次重排会改多条笔记**：普通 `MarkupCommand` 只能撤销一条，所以加了 `MultiMarkupCommand`（保存 before/after 列表，一步撤销）；重排算法抽成 `mind::planReorder()` 纯函数单独测试，顺带能验证「原位丢弃 = 无变化」。→ p5test / featuretest
-19. **Qt 会同时发 tablet 与 mouse 事件**：不处理就会一笔画两遍（一次压感、一次速度）。现在用 `stylusStroke_` 标记「这一笔归触控笔所有」，鼠标事件在笔画进行中被忽略。→ featuretest
-18. **测试里保存了指向临时容器的指针**：`const Markup*` 指向 `visibleMarkups()` 返回的临时 QVector，`settle()` 之后内容已失效，导致「鼠标笔迹压感 0.20」这种诡异断言失败。改成保存值拷贝 + 用 id 识别。
-17. **核心库不能依赖 Widgets**：导出器在 `adapt_core` 里，却想复用 `mind::buildFromNotes`，而 `mindmap.h` 会拉进 `QGraphicsView` → 编译失败。把纯树逻辑拆到 `mind/tree.{h,cpp}` 后，视图与导出共用同一套树构建，也顺带保证了「导出与界面看到的结构一致」。
-16. **OPML 叶子变自闭合标签后丢了元数据**：树形重写时笔记叶子不再带 `type/tags/_note`，独立校验脚本立刻抓到。修复：导出时按 markupId 回查笔记补属性（`mind::Node` 保持精简）。
-15. **写入 TEXT 标注时不能设 QuadPoints**：MuPDF 会让整条标注的写入抛异常，`/Contents` 因此丢失——读回来只有颜色没有批注。修法：Note 类型只设 Rect。
-14. **`$ORIGIN` 在 `set -u` 的 bash 里会被展开**：`echo "rpath ($ORIGIN/lib)"` 直接报 `ORIGIN: unbound variable`。用单引号或转义。
-13. **Qt 6.5.x 在 VS18（MSVC 14.51）上编不过**：`qvarlengtharray.h` 用了被移除的 `stdext::checked_array_iterator`（C3861）。升到 **Qt 6.8.3 / msvc2022_64** 即好。→ 版本搭配比代码更常见是“编译不过”的原因。
-12. **MuPDF 1.21.1 根本没有 `Makefile.nmake`**（那是老版本）：Windows 上要走 `platform\win32\mupdf.sln` + `msbuild /t:libmupdf`；而且它默认 `/MT`，与 Qt 的 `/MD` 在链接期直接 `LNK2038`，必须先批量改写 vcxproj 里的 `RuntimeLibrary`。另外链接时要带齐 `libmupdf/libthirdparty/libmuthreads/libresources` 四个 `.lib`。
-11. **Windows 上 Qt 完全不认 `XDG_DATA_HOME`**：便携包的 `.bat` 一直在设这个变量，Linux 上有效、Windows 上是死代码——数据实际写到 `%APPDATA%\AdaptNote`，“绿色便携”是假的（拷到 U 盘就找不到自己的笔记）。修法：新增 `src/core/paths.{h,cpp}`，优先级 `ADAPT_DATA_DIR` > exe 旁边的 `data\` > 系统默认；启动器同时设 `ADAPT_DATA_DIR`。→ selftest（三种优先级都有断言）
-10. **FTS 索引没有回填路径**：`notes_fts` 只由写入路径维护。旧库（或索引被重建）里的老笔记永远不在索引里，而搜索对 3 字以上的查询**只走 FTS、不看 LIKE 回退**，于是「搜不到旧笔记」且不报错。修法：`repairSearchIndex()` 在 `ensureSchema` 里比对行数并补录（注意它运行在 `open_=true` 之前，不能拿 `open_` 当守卫）。→ selftest（drop 掉 index 后重开再搜）
-9. **同步合并会造出 `parentId` 环**：设备 A 把 X 挂到 Y 下、设备 B 把 Y 挂到 X 下，合并后两边都成立。`setMindGroupParent()` 有防环检查，但 `mergeGroups()` 直接调 `upsertMindGroup()`，绕过了它。后果不是崩溃而是**静默丢数据**：环上的组分从根不可达，脑图与「按脑图导出」里连同其笔记一起消失。修法：写入时校验并解环（提升到顶层）+ 构建树时再防御一次（确定性选环内最小 id），两边都有回归。→ conflicttest / p5test
-8. **CI 上 offscreen 平台下弹窗会永久阻塞**：`QMessageBox::question` 没人点 → 测试进程挂死，第一次 Windows CI 在 `Run tests` 上挂了 13 分钟才被手动取消。修法：`ADAPT_HEADLESS=1` 时所有确认/输入走包装函数返回默认值；每个测试进程加 `WaitForExit(7min)` 超时；再加 `scripts/check_dialogs.py` 静态守卫（裸调 `QMessageBox::` 直接让 CI 失败）。教训：无头环境里**任何模态调用都是死锁**。
-7. **Windows 上 `QPdfWriter` 生成出来的 PDF 没有文本层**：`mkpdf` 用它造测试文档，Linux 上一切正常，Windows runner 上 11 套测试里只有 migratetest 挂——抽出来的页面要么没文本页，要么字符全丢。换字体（DejaVu → Arial、按 `QFontDatabase` 挑已装字体）都没用。根因是 Qt 在 Windows 上找不到可嵌入字体时会把文字**画成路径**。→ 结论：**测试 fixture 不能依赖 Qt 的 PDF 输出**；`migratetest` 现在自己手写 PDF（标准 Helvetica、不嵌入字体、手写 xref），跨平台字节级一致。教训：CI 上的失败先辨「被测代码」还是「测试自身」，否则会在错误的方向上改两轮。
-6. **MuPDF 的路径必须是 UTF-8**：`QFile::encodeName()` 在 Windows 返回 ANSI 代码页，中文书名直接打不开（Linux 上测不出来）。改成 `path.toUtf8()`，并用带空格的中文路径在 Linux 上做了回归。→ selftest / 手工验证
-5. **打包 GTK 平台主题会拖进整套桌面栈**：`libqgtk3.so` → gtk3/gio/gdk ≈15 MB；便携版只保留 Qt 原生主题即可（另外记得 strip 库）。68 MB → 61 MB zip。
-4. **`mutool insert` 在 Debian 的 mupdf-tools 里不存在**：想用它造「多一页」的修订版做回归，结果子进程失败、拿到的 PDF 打不开，测试直接段错误（`revised.textPage()` 返回空）。改用自家 `mkpdf --blank-first` 生成两版，稳定可控。教训：外部工具依赖要**先探测能力**，并且测试里对「生成失败」要有明确的短路，而不是继续往下解引用。→ migratetest
-3. **锚点在 CJK 文本上要按字符数而不是字节**：`anchorOffset` 用的是 `TextPage::chars` 的下标，和 `quadsForRange()` 同一套坐标，重建 quad 时用「原摘录的字符数」做跨度；若在两端用了不同口径，中文笔记会错位几个字。→ featuretest（重排后仍落在同一段文字上）
-2. **基准测量的三个陷阱**（本轮全踩了一遍）：① 重复测量写同一批 id → 测的其实是 UPDATE，跑出 14k 条/秒的假数字；② 重复插入不清库 → 表越写越大，后几轮更慢，混在一起取平均没有意义；③ 插入 A 批却在 B 批上测改写 → 行数翻倍，还把 INSERT 当成 UPDATE 计时。正确做法：每轮全新 id、改写测量复用刚插入的那批、报告单轮数字 + 中位数，并注明宿主机噪声。
-1. **无 TTS 引擎插件**：`qt6-speech-dev` 装了但 `/plugins/texttospeech` 为空 →
-    `availableEngines()` 空 → 走定时推进（测试显式断言该降级路径）。
-
-## 8. 已验证 vs 未验证（诚实清单）
-
-**已验证（自动化）**：渲染尺寸/旋转、字符级选择、双栏不越界、SQLite 往返 + 迁移、
-PDF annot 写入/重开/渲染可见、EPUB 重排版与目录、FTS5 中文子串、标签聚合、图片摘录、
-撤销重做、阅读位置跨进程恢复、5 种导出格式回读、真实 HTTP 双设备同步（含冲突/删除/幂等/412）、
-AI 流式（含鉴权头/请求体/取消/错误）、手写几何、脑图布局与渲染、朗读断句与推进。
-
-**未验证**：
-- **真实 Anki 客户端**导入 `.apkg`（只做了 schema/JSON/csum/integrity 校验）
-- **XMind 2020+/Zen** 打开（输出的是 XMind 8 `content.xml`）
-- **真实 DeepSeek/SiliconFlow** 回答质量（只用假端点验证协议层）
-- **真机双端同步**（只有本地两库 + 真 HTTP）
-- **真实语音朗读**（本机无引擎插件）
-- 带 `/Rotate` 的 PDF 标注贴字（做了 `pdf_page_transform` 换算，未逐页验证）
-- 大书性能（千页 PDF、上万条笔记未压测）
-
-**已知限制**：手写的压感仍是速度模拟（真实数位板压感未接）；笔迹擦除是「切成多段」而不是「删掉一段线段内部的点」，因此极短碎段会被丢弃（<2 pt）。
-脑图分组寄存在笔记上（无独立分组对象，删除最后一条笔记组即消失）；
-手写无真实压感（用速度模拟）、橡皮按轨迹切断（切点附近的采样点会一起消失）；**手写墨迹不写回 PDF**（MuPDF 1.21 能写合法 `/Subtype /Ink` + `/InkList`，
-但不生成外观流，任何 MuPDF 渲染下都不可见 → 因此刻意拒绝写入，墨迹只存在库里并参与同步/导出）；
-`docKey = 文件名:大小`（换版本=新书）；
-远端整本一个 JSON（无增量）；密码/Key 明文存库；冲突只做到"保留两份+标签"，无图形化合并；
-EPUB 各端页码可能偏移（字符级 quad 不受影响）；脑图只读；手写无橡皮/压感。
-
-## 9. 参考产品（BookxNote）反编译结论摘要
-
-- Qt5.15 Widgets + QSS，**无 QML 业务 UI**（Qml/Quick 只为 QtWebEngine 服务）
-- **静态链接 MuPDF**（PDF/EPUB 渲染、真 PDF annots：Highlight/Underline/Squiggly/FreeText/InkList）
-- **libgit2 仅 21 个 API**：本地 commit 快照（msg=时间戳），**没有 merge/fetch/push** →
-  跨设备不是 git，而是 WebDAV 文件级 + 应用层对象合并信号（`objMerged`）
-- 同步：PROPFIND（getetag/getlastmodified/getcontentlength）+ 自维护 `synccache` 表，
-  **无 If-Match**，出错靠"清理缓存/重新下载"按钮兜底
-- 内嵌 `webdav/GoWebDAV.exe`（Go 1.19，gogf/gf，端口 9999，默认口令 MD5("123456")）
-- AI：`api.deepseek.com` + `api.siliconflow.cn`，角色模板 JSON（用户可编辑）
-- OCR：百度 / 腾讯云；翻译：百度/Google/DeepL/iciba；TTS：Qt TextToSpeech + lame 出 MP3
-- 内嵌 markdown-it + highlight.js + MathJax2 + CodeMirror 主题，用 QWebChannel 驱动
-  `channel.objects.content`（只有 `text`/`baseUrl` 属性和 `textChanged` 信号，桥面极小）
-
-## 10. 后续优先级建议
-
-**已识别、值得做的（按性价比）**
-1. ~~墨迹写回 PDF~~ → **已试并放弃**（见 §8：MuPDF 1.21 不生成 ink 外观流）。
-   要恢复这条路，需要换引擎（PDFium 能写 ink appearance）或自己往内容流里画。
-2. ~~图片摘录参与同步~~ → **已完成**：线格式只带文件名，PNG 走 `<remote>/images/<name>`，双向补齐。
-3. ~~手写橡皮 + 速度调宽~~ → **已完成**（`E` 橡皮、速度→压感→笔锋、笔宽预设、可撤销）
-4. ~~AI 角色编辑器~~ → **已完成**（增删改角色，写回 `ai_roles.json`）
-5. ~~脑图节点点击跳回原文 / 导出 PNG~~ → **已完成**
-6. ~~朗读语速、跳过/重复本句~~ → **已完成**（朗读按钮右键菜单）
-7. ~~导出只导筛选结果~~ → **已完成**；~~多文档合并导出~~ → **已完成**（导出菜单 → 导出整个书库）
-8. ~~手写局部擦除~~ → **已完成**（`ink::splitStroke`，切点用二分插值落在橡皮边缘）；
-   ~~笔迹颜色独立~~ → **已完成**（`ink.color` 持久化，橡皮半径跟笔宽联动）
-9. 性能：千页 PDF 的渲染缓存上限、FTS 增量索引
-10. ~~脑图拖拽改结构~~ → **已完成**；~~新建/重命名/删除分组~~ → **已完成**（`mind_groups` 实体 + 迁移 + 同步）；仍待做：组内手动排序、多级嵌套
-11. ~~书库视图~~ → **已完成**；~~改名/删除文档/批量导出~~ → **已完成**；仍待做：拖拽批量整理、按阅读进度/标签的智能视图
-
-**不建议现在做**：可视化冲突合并 UI（成本高、自用频率低）、跨平台打包/签名、
-云端服务端（自用不需要）。
-
-## 11. 常用命令速查
+截图（固定尺寸，便于比较）：
 
 ```bash
-# 只看某一阶段是否还活着
-cd build && ctest -R 'selftest|visualtest' --output-on-failure
-
-# 生成一张界面截图（无头）
-QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1500x1000x24" \
-  ./build/adaptnote --doc build/test.pdf --demo --screenshot /tmp/shot.png
-
-# 只导出不打开界面
-./build/adaptnote --doc build/test.pdf --demo --export-dir /tmp/exports
-
-# 渲染脑图
-./build/adaptnote --doc build/test.pdf --demo --mindmap /tmp/map.png
-
-# 检查导出的 APKG 结构
-python3 scripts/validate_exports.py /tmp/exports
+QT_QPA_PLATFORM=offscreen ADAPT_HEADLESS=1 ADAPT_DATA_DIR=$(mktemp -d) \
+  ./adaptnote --doc test.pdf --demo --width 1360 --height 900 --screenshot out.png
 ```
+
+### CI 流程
+
+1. 触发构建：
+   `POST /repos/hartamanda58/AdaptNote/actions/workflows/windows-portable.yml/dispatches {"ref":"main"}`
+2. 构建成功后触发打包检查：
+   `POST .../inspect-win-artifact.yml/dispatches {"ref":"main","inputs":{"run_id":"<build run id>"}}`
+3. 读报告：
+   ```bash
+   git fetch -f origin ci-report:ci-report
+   git show ci-report:ci/windows-report.txt
+   ```
+4. 产物：Actions artifact `AdaptNote-windows-x64`（约 42MB zip），再嵌套一层 zip；
+   发布时用 Releases 上传，别放仓库。
+
+---
+
+## 3. 已完成（功能层面）
+
+### 3.1 阅读与标注
+
+- PDF / EPUB / XPS / CBZ / FB2 打开；连续/单页/双页、缩放、旋转、目录、页码跳转
+- 高亮 / 下划线 / 波浪线 / 批注 / 图片摘录 / 手写（压感、倾斜）/ 局部橡皮
+- **标注坐标存 PDF 页面坐标**，显示时乘 CTM；放大、旋转、双页都不错位
+- 标注写回 PDF（增量保存）；读取 PDF 内已有标注
+- 朗读（逐句高亮；有 TTS 引擎就发声）
+- 查找（页内、可切到主题笔记范围）
+
+### 3.2 PDF 清晰度（重要修复）
+
+历史 bug：全库从未读 `devicePixelRatio`，`fz_scale(scale, scale)` 后在 150% 缩放下把 1× 位图拉大。
+现在：`PageView::viewDpr()` / `imageFor()` 按 `scale * dpr` 渲染，缓存键含 DPR，
+开启 `SmoothPixmapTransform`，单页 40 Mpx 上限。打包验收固定 `--zoom 100 --render-probe` 断言 DPR2=2×。
+
+### 3.3 存储与同步
+
+- **SQLite 是唯一真相源**；墨迹不回写 PDF（MuPDF 1.21 不为 Ink 生成外观流）
+- FTS5 + trigram tokenizer，支持中文子串搜索
+- 派生 JSON 镜像（每本书一个）
+- WebDAV 同步：版本向量 + 墓碑；并发保留双方并打 `conflict` 标签
+- 文档身份 = **内容 SHA-1**（早期用「文件名+大小」会串库）
+- 主题同步：远端 `topics.json`（topics / topicDocs / mindLinks），wire 不含绝对路径
+
+### 3.4 导出
+
+MD / HTML / OPML / XMind / Anki(apkg)；可按脑图分组输出；可只导出筛选结果。
+笔记标题、层级（含笔记套笔记）会带进 OPML/XMind/MD。
+
+### 3.5 笔记本工作区
+
+- 应用级笔记本标签（关闭标签不删数据）
+- 新建空笔记本、添加多份资料、资料标签切换
+- 跨资料点击笔记跳回原文，保留整个笔记本大纲
+- 摘录编辑器：**我的标题 / 只读原文 / 个人批注** 分开存；保存可撤销
+- 自由笔记（无原文来源）
+- 大纲拖拽：上半区排序、下半区建父子；拒绝跨资料与成环
+- 分组层级拖动、全量撤销（删除分组撤销会恢复组内笔记归属与子分组）
+- 独立脑图窗口：连线、删除笔记、导出 PNG、分组右键菜单
+
+### 3.6 阅读主题（跨文档）
+
+- 表：`topics` / `topic_docs` / `mind_links`；`mind_groups.topicId`
+- 主题 CRUD、加/移资料、主题脑图（每本书一个分支）、主题内笔记搜索
+- 旧库自动迁移：确定性 topic id、事务、幂等（只覆盖「有笔记的文档」）
+
+### 3.7 脑图交互（近期反复修的区域）
+
+| 操作 | 行为 |
+| --- | --- |
+| 左键单击卡片 | 选中 + 定位原文（`markupActivated`） |
+| 双击卡片 | 编辑（`renameRequested`） |
+| 右键笔记 | 编辑 / 定位 / 删除 |
+| 右键页分支 | 在此页新建自由笔记 |
+| 右键分组 | 重命名 / 新建子分组 / 上移 / 删除 |
+| 左键拖卡片 | 换分组 / 排序 / 改父级 |
+| 中键拖、空白左拖 | 平移画布 |
+| 连线模式 | 依次点两张卡 |
+
+关键：卡片文字/装饰是**独立 scene item**，不是卡片子项。命中要沿 `data(4)`（nodeKey）回查，
+再映射到 tree 节点。`keyAt` / `groupKeyAt` / `dropTargetAt` 都按这个规则。
+
+### 3.8 UI（当前方向）
+
+参考 `03-mn-源码/mn/public/index.html` 的**深色三栏**：
+
+```text
+左：书架 / 笔记本 / 目录
+中：原始纸白 PDF/EPUB（不染色）
+右：摘录 / 笔记 / 生词 / 脑图
+```
+
+- 主题 QSS 资源别名已修（`QT_RESOURCE_ALIAS app.qss`）——此前主题**从未加载**过
+- 大纲行是自定义 delegate：标题 + 摘录/批注预览 + 页码
+- 生词标签目前是**诚实占位**（没有生词数据模型），不显示假数据
+
+### 3.9 划词翻译
+
+选中文字 → 浮出「翻译」→ 目标语言（简中/英/日/韩/繁中）→ 流式显示、可复制。
+复用 AI 设置的 OpenAI 兼容接口；未配 Key 时明确提示。
+顺带修了 `buildUserPrompt` 里 `%s` 不生效的旧 bug。
+
+---
+
+## 4. 未完成 / 已知问题
+
+1. **生词本**（查词、间隔重复、TSV/Anki 导出、发音）—— MN 有，AdaptNote 没有
+2. 笔记拖到另一笔记 **下半区改父级**的落点预览仍不完整
+3. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）
+4. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
+5. 大纲/脑图 **多选、批量操作、折叠按钮** 未做
+6. 真实数位板压感/倾斜、真实 Anki/XMind 客户端、真实 WebDAV 未人工验收
+7. PDF 目录/缩略图以外的增强（缩略图、双页对照、章节自动归类）未做
+8. 右侧面板在窄窗口偏窄；生词标签仍是占位
+
+---
+
+## 5. 已验证 vs 未验证（诚实清单）
+
+**已验证（自动化）**：11 套本地测试；Windows 构建与打包运行（导出、数据目录、截图、DPI）。
+
+**未验证（需要真人/真机）**：
+
+- 高分屏下的人眼观感（125%/150%/200%、多显示器）
+- 数位板真实压感与笔迹偏移
+- 两台真实设备之间的 WebDAV 同步（含断网恢复、ETag 变化）
+- Anki 桌面版导入 `.apkg`；XMind 桌面版打开 `.xmind`
+- 打字输入时的真实手感（大纲重命名、编辑器）
+
+> CI 全绿 ≠ 体验达标。之前多次把「自动化通过」当成「用户可用」，导致来回返工。
+
+---
+
+## 6. 关键代码坑（踩过的）
+
+- `QTreeWidget` 内部拖动会绕过 SQLite 与撤销栈 → 必须自定义 `startDrag`/`dropEvent` + mime
+- `QGraphicsView` 的鼠标事件必须发给 **viewport**，发给 view 无效
+- 脑图卡片文字是独立 item，不能假设 `parentItem()` 是卡片
+- `ensureSchema()` 里调用 Store 公开方法时 `open_` 还是 false
+- `repairSearchIndex` 操作的表是 `markups`；`notes_fts` 没有 `docName` 列（由 `docPath` 派生）
+- `setMindGroupTopic` 必须 `coalesce(topicId,'') <> ?`，否则 NULL 行匹配 0 行
+- headless 下不能 `exec()` 模态框；菜单也要 `if (!kHeadless) menu.exec(...)`
+- 编辑批注在 `kHeadless` 下直接返回，否则 CI 卡死
+- `mainwindow.cpp` 必须 `#include "core/paths.h"`
+- 页分组的 `mindOrder` 排序要用 `QMap`，Windows 上 `QHash` 迭代顺序不稳
+- `mkdir` 生成的多层 zip 会嵌套；发布前要解一层
+
+---
+
+## 7. 建议的下一步
+
+1. **生词本**（对齐 MN：本地词库优先 + AI 兜底 + 间隔重复 + Anki 导出）
+2. 脑图拖拽落点预览 + 多选批量操作
+3. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV、Anki/XMind）
+4. 主题同步补冲突/墓碑的集成测试（远端并发改名、远端删资料）
+5. 收紧右侧面板最小宽度；生词标签要么实现、要么在 UI 中移除
+
+---
+
+## 附录：历史交接（2026-10-27，已过期）
+
+以下内容记录当时的设计与坑，部分细节已被后续改动覆盖；仅在考古时参考。
+
+- 当时定位：对标 BookxNote Pro，约 9.7k 行，P0–P5 分阶段推进
+- 当时已有：阅读/标注/手写/朗读/AI、FTS5、五类导出、WebDAV 同步
+- 当时未做：主题、笔记本工作区、深色三栏 UI、划词翻译
+
+> 具体旧文见 git 历史：`git show ea38004^:HANDOVER.md`
