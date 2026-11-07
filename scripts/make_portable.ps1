@@ -123,6 +123,14 @@ if ($WithExtras) {
         foreach ($dll in (Get-ChildItem -Path $exe.DirectoryName -Filter *.dll)) {
             Copy-Item $dll.FullName $ocrStage -Force
         }
+        # The UB-Mannheim build carries ~97 MB of COFF debug symbols in
+        # libtesseract-5.dll (plus a little in the exe). Windows has no `strip` on the
+        # runners, so prune the symbol sections with our own PE rewriter.
+        $binaries = Get-ChildItem $ocrStage -File |
+                    Where-Object { $_.Extension -in ".dll", ".exe" } |
+                    ForEach-Object { $_.FullName }
+        & python $root\scripts\strip_coff_debug.py @binaries
+        if ($LASTEXITCODE -ne 0) { throw "stripping debug sections failed" }
         # Prune everything the CLI does not need: installer tessdata (legacy+LSTM, big),
         # docs and the D3D runtime some builds ship.
         foreach ($junk in @("d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "docs")) {
@@ -140,6 +148,14 @@ if ($WithExtras) {
         }
         $ocrExe = Join-Path $ocrStage "tesseract.exe"
         & $ocrExe --version | Select-Object -First 1 | ForEach-Object { Write-Host "   $_" }
+        # Loading the stripped DLL and finding both language packs: this is the smoke
+        # test that proves the bundled OCR actually runs, not just that files exist.
+        $languages = (& $ocrExe --list-langs 2>$null | Out-String).Trim()
+        if (-not $languages) { throw "bundled tesseract failed to start" }
+        if ($languages -notmatch "eng" -or $languages -notmatch "chi_sim") {
+            throw "bundled language packs missing: $languages"
+        }
+        Write-Host "   languages: $($languages -replace "\r?\n", ', ')"
     } catch {
         Write-Warning "bundled OCR skipped: $($_.Exception.Message)"
         if (Test-Path $ocrStage) { Remove-Item $ocrStage -Recurse -Force }
