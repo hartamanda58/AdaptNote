@@ -17,25 +17,30 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收
+### 最近一次验收（2026-11-07，合并版）
 
 ```text
-run 42248461529  Windows 构建   success
-run 42259336748  便携包运行验收 success
+run 42353005512  Windows 构建（main @ 900e60a）  success
+12/12 套测试在 Windows runner 上全部 PASSED（test-diagnostics 产物已核对，
+含新增 vocabtest：SigV4 官方向量 + 假 S3 双库推拉）
 ```
 
-报告分支：`ci-report` 的 `ci/windows-report.txt`；包含 PDF/EPUB 导出、便携数据目录、
-**直接双击 EXE 数据落包内**、窗口截图、200% DPI 渲染 ratio=2。
+便携包运行验收（inspect-win-artifact）本轮未触发；上一次全绿记录见 `ci-report` 的
+`ci/windows-report.txt`。12 套测试的 `.out.txt` 在 run 的 test-diagnostics artifact 里。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/mn-reference-ui-ea38004/AdaptNote-windows-x64-portable.zip
-sha256: f11d7910d5a874944bdfdf611d32f2e64ff7f546800c3203c7beabe16860ee81
+https://github.com/hartamanda58/AdaptNote/releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip
+sha256: 988a68df5b2269f77b4c7772767579118056df3590c89e78be65e214208f85da
 ```
 
-包内直接运行 `bin\adaptnote.exe` 即可；`portable.flag` 让它把数据写到包根 `data\`。
-`AdaptNote.bat` 仍然兼容。
+包含合并版全部功能（生词本/OCR/S3 同步/新 UI）。包内直接运行 `bin\adaptnote.exe` 即可；
+`portable.flag` 让它把数据写到包根 `data\`；`AdaptNote.bat` 仍然兼容。
+`ecdict.db`（可选查词）放包根 `data\`；tesseract 可装系统或用 `ADAPT_TESSERACT` 指定。
+
+注意：这版 CI 产出的 zip 内层文件名曾被 `make_portable.ps1` 的 `$name` 变量覆盖成
+`test.epub.zip`（已修复并提交）；发布包是解层重命名后的产物。
 
 ---
 

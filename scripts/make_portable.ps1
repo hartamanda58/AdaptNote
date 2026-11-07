@@ -76,11 +76,11 @@ foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
 Write-Host "== samples"
 $samples = Join-Path $stage "samples"
 $copied = 0
-foreach ($name in @("test.pdf", "test.epub")) {
-    $src = Join-Path $BuildDir $name
-    if (-not (Test-Path $src)) { $src = Join-Path "build" $name }   # fallback for old layouts
+foreach ($sample in @("test.pdf", "test.epub")) {
+    $src = Join-Path $BuildDir $sample
+    if (-not (Test-Path $src)) { $src = Join-Path "build" $sample }   # fallback for old layouts
     if (Test-Path $src) { Copy-Item $src $samples; $copied++ }
-    else { Write-Host "   (missing $name in $BuildDir)" }
+    else { Write-Host "   (missing $sample in $BuildDir)" }
 }
 if ($copied -eq 0) { Write-Host "   WARNING: no sample documents staged" }
 
