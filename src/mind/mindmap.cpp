@@ -6,6 +6,10 @@
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
+#include <QGraphicsTextItem>
+#include <QFocusEvent>
+#include <QMetaObject>
+#include <QTextCursor>
 #include <QPainter>
 #include <QPainterPath>
 #include <QCursor>
@@ -350,12 +354,133 @@ void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
         const QString key = keyAt(mapToScene(event->pos()));
         if (!key.isEmpty()) {
             setSelectedKey(key);
-            emit renameRequested(key);
+            beginInlineRename(key);
             event->accept();
             return;
         }
     }
     QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+namespace {
+// Editing happens on the card itself. Deleting a QGraphicsTextItem from inside its own
+// keyPressEvent would be use-after-free, so the item only hides and the commit is queued
+// on the view; by the time it runs the event has unwound and the scene can be rebuilt.
+class InlineCardEditor : public QGraphicsTextItem {
+public:
+    explicit InlineCardEditor(MindMapView* host)
+        : host_(host)
+    {
+    }
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            queueCommit(true);
+            return;
+        }
+        if (event->key() == Qt::Key_Escape) {
+            queueCommit(false);
+            return;
+        }
+        QGraphicsTextItem::keyPressEvent(event);
+    }
+    void focusOutEvent(QFocusEvent* event) override
+    {
+        QGraphicsTextItem::focusOutEvent(event);
+        queueCommit(true);
+    }
+
+private:
+    void queueCommit(bool commit)
+    {
+        if (queued_) return;
+        queued_ = true;
+        setVisible(false);
+        MindMapView* host = host_;
+        QMetaObject::invokeMethod(
+            host, [host, commit]() { host->commitInlineRename(commit); }, Qt::QueuedConnection);
+    }
+
+    MindMapView* host_ = nullptr;
+    bool queued_ = false;
+};
+}  // namespace
+
+QString MindMapView::nodeText(const QString& key) const
+{
+    QString result;
+    bool found = false;
+    std::function<void(const Node&)> walk = [&](const Node& node) {
+        if (found) return;
+        if (nodeKey(node) == key) {
+            result = node.text;
+            found = true;
+            return;
+        }
+        for (const Node& child : node.children) walk(child);
+    };
+    walk(root_);
+    return result;
+}
+
+void MindMapView::beginInlineRename(const QString& key)
+{
+    if (!scene_ || key.isEmpty()) return;
+    if (renameEditor_) commitInlineRename(true);
+    const QRectF rect = rectForKey(key);
+    if (rect.isEmpty()) return;
+
+    renameBackdrop_ = scene_->addRect(rect.adjusted(3, 3, -3, -3), QPen(QColor("#0a84ff"), 2),
+                                      QBrush(Qt::white));
+    renameBackdrop_->setZValue(100);
+
+    auto* editor = new InlineCardEditor(this);
+    editor->setPlainText(nodeText(key));
+    editor->setTextWidth(qMax(80.0, rect.width() - 20));
+    editor->setPos(rect.left() + 10, rect.top() + 6);
+    editor->setZValue(101);
+    editor->setDefaultTextColor(QColor("#1d1d1f"));
+    QFont font = editor->font();
+    font.setPointSizeF(10);
+    editor->setFont(font);
+    editor->setTextInteractionFlags(Qt::TextEditorInteraction);
+    scene_->addItem(editor);
+    editor->setFocus(Qt::MouseFocusReason);
+    QTextCursor cursor = editor->textCursor();
+    cursor.select(QTextCursor::Document);
+    editor->setTextCursor(cursor);
+
+    renameEditor_ = editor;
+    renameKey_ = key;
+}
+
+void MindMapView::setInlineRenameTextForTest(const QString& text)
+{
+    if (renameEditor_) renameEditor_->setPlainText(text);
+}
+
+void MindMapView::commitInlineRename(bool commit)
+{
+    QGraphicsTextItem* editor = renameEditor_;
+    QGraphicsItem* backdrop = renameBackdrop_;
+    const QString key = renameKey_;
+    renameEditor_ = nullptr;
+    renameBackdrop_ = nullptr;
+    renameKey_.clear();
+
+    const QString text = editor ? editor->toPlainText().trimmed() : QString();
+    if (editor) {
+        if (editor->scene()) editor->scene()->removeItem(editor);
+        delete editor;
+    }
+    if (backdrop) {
+        if (backdrop->scene()) backdrop->scene()->removeItem(backdrop);
+        delete backdrop;
+    }
+    if (commit && !key.isEmpty() && !text.isEmpty()) emit renameCommitted(key, text);
+    setFocus(Qt::OtherFocusReason);
 }
 
 void MindMapView::mouseReleaseEvent(QMouseEvent* event)
@@ -462,7 +587,7 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
     if (!selectedKey_.isEmpty()) {
         switch (event->key()) {
         case Qt::Key_F2:
-            emit renameRequested(selectedKey_);
+            beginInlineRename(selectedKey_);
             event->accept();
             return;
         case Qt::Key_Delete:
@@ -626,10 +751,11 @@ void MindMapView::fitToContent()
     const QRectF r = scene_->itemsBoundingRect();
     if (r.isEmpty()) return;
     fitInView(r.adjusted(-24, -24, 24, 24), Qt::KeepAspectRatio);
-    // Cards must stay readable: below 85% the titles start to blur, so scroll instead.
-    if (transform().m11() < 0.85) {
+    // Show the whole map whenever it is still legible; only stop shrinking at 60%
+    // (titles stay readable at that size and the user can Ctrl+wheel in).
+    if (transform().m11() < 0.60) {
         resetTransform();
-        scale(0.85, 0.85);
+        scale(0.60, 0.60);
     }
     zoom_ = transform().m11();
     didInitialFit_ = true;

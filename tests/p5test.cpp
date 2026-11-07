@@ -465,7 +465,8 @@ int main(int argc, char** argv)
             check(groupAtNote.startsWith(QStringLiteral("page:")),
                   QStringLiteral("a page-grouped note reports its group key (%1)").arg(groupAtNote));
 
-            int activated = 0, renamed = 0, noteMenus = 0, pageMenus = 0, containerDrops = 0;
+            int activated = 0, noteMenus = 0, pageMenus = 0, containerDrops = 0;
+            QString renamedKey, renamedText;
             QObject::connect(&view, &mind::MindMapView::pageMenuRequested,
                              [&pageMenus](const QString& key, const QString&, const QPoint&) { if (key.startsWith(QStringLiteral("page:"))) ++pageMenus; });
             QObject::connect(&view, &mind::MindMapView::containerReparentRequested,
@@ -478,9 +479,11 @@ int main(int argc, char** argv)
             QObject::connect(&view, &mind::MindMapView::markupActivated, [&activated](const QString& id) {
                 if (id == QStringLiteral("a")) ++activated;
             });
-            QObject::connect(&view, &mind::MindMapView::renameRequested, [&renamed](const QString& key) {
-                if (key == QStringLiteral("note:a")) ++renamed;
-            });
+            QObject::connect(&view, &mind::MindMapView::renameCommitted,
+                             [&renamedKey, &renamedText](const QString& key, const QString& text) {
+                                 renamedKey = key;
+                                 renamedText = text;
+                             });
             const QPoint start = view.mapFromScene(sceneCenter);
             auto sendMouse = [&](QEvent::Type type, const QPoint& pos, Qt::MouseButton button,
                                  Qt::MouseButtons buttons) {
@@ -494,7 +497,14 @@ int main(int argc, char** argv)
             check(activated == 1 && view.selectedKey() == QStringLiteral("note:a"),
                   QStringLiteral("single click selects and activates note card"));
             sendMouse(QEvent::MouseButtonDblClick, start, Qt::LeftButton, Qt::LeftButton);
-            check(renamed == 1, QStringLiteral("double click emits note edit request"));
+            check(view.inlineRenameActive() &&
+                      view.inlineRenameKeyForTest() == QStringLiteral("note:a"),
+                  QStringLiteral("double click opens the in-place card editor"));
+            view.setInlineRenameTextForTest(QStringLiteral("改名后的卡片"));
+            view.commitInlineRename(true);
+            check(renamedKey == QStringLiteral("note:a") &&
+                      renamedText == QStringLiteral("改名后的卡片"),
+                  QStringLiteral("in-place editor commits the edited text"));
             QContextMenuEvent context(QContextMenuEvent::Mouse, start, view.viewport()->mapToGlobal(start));
             QApplication::sendEvent(view.viewport(), &context);
             check(noteMenus == 1 && context.isAccepted(), QStringLiteral("right click on note opens its context menu request"));

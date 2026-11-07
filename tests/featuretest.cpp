@@ -128,6 +128,38 @@ int main(int argc, char** argv)
         check(false, QStringLiteral("excerpt card list exists"));
     }
 
+    // Inline excerpt editing: no modal dialog, one undo step for the session.
+    {
+        const QVector<Markup> beforeEdit = w.visibleMarkups();
+        if (!beforeEdit.isEmpty()) {
+            const QString editId = beforeEdit.first().id;
+            w.startExcerptEditForTest(editId);
+            auto* panel = w.findChild<QWidget*>(QStringLiteral("excerptEditor"));
+            auto* titleEdit = w.findChild<QLineEdit*>(QStringLiteral("excerptTitle"));
+            auto* commentEdit = w.findChild<QPlainTextEdit*>(QStringLiteral("excerptComment"));
+            check(panel && panel->isVisible() && titleEdit && commentEdit,
+                  QStringLiteral("inline excerpt editor opens inside the panel"));
+            if (titleEdit && commentEdit) {
+                titleEdit->setText(QStringLiteral("内联标题"));
+                commentEdit->setPlainText(QStringLiteral("内联批注"));
+                w.finishExcerptEditForTest(true);
+                bool applied = false;
+                for (const Markup& m : w.visibleMarkups())
+                    if (m.id == editId && m.title == QStringLiteral("内联标题") &&
+                        m.comment == QStringLiteral("内联批注"))
+                        applied = true;
+                check(applied, QStringLiteral("inline editor saves title and comment without a dialog"));
+                check(w.undoTextForTest() == QStringLiteral("编辑摘录"),
+                      QStringLiteral("inline editing pushes one undo step"));
+                w.undoForTest();
+                bool reverted = false;
+                for (const Markup& m : w.visibleMarkups())
+                    if (m.id == editId && m.title == beforeEdit.first().title) reverted = true;
+                check(reverted, QStringLiteral("undo restores the excerpt edited inline"));
+            }
+        }
+    }
+
     // ---- 1. demo data: 4 text markups + 1 image excerpt ----
     const QVector<Markup> demo = w.visibleMarkups();
     check(demo.size() == 6,
@@ -1404,11 +1436,11 @@ int main(int argc, char** argv)
                 // have to be addressed there (sending them to the view does nothing).
                 QWidget* vp = mv->viewport();
                 int clickActivations = 0;
-                int doubleClickEdits = 0;
+                QString renamedKey;
                 QObject::connect(mv, &mind::MindMapView::markupActivated, &w,
                                  [&clickActivations, noteId](const QString& id) { if (id == noteId) ++clickActivations; });
-                QObject::connect(mv, &mind::MindMapView::renameRequested, &w,
-                                 [&doubleClickEdits, noteId](const QString& key) { if (key == QStringLiteral("note:") + noteId) ++doubleClickEdits; });
+                QObject::connect(mv, &mind::MindMapView::renameCommitted, &w,
+                                 [&renamedKey](const QString& key, const QString&) { renamedKey = key; });
                 const QPoint start = vp->mapFrom(mv, mv->mapFromScene(from.center()));
                 QMouseEvent clickPress(QEvent::MouseButtonPress, start, vp->mapToGlobal(start), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
                 QApplication::sendEvent(vp, &clickPress);
@@ -1417,7 +1449,16 @@ int main(int argc, char** argv)
                 check(clickActivations == 1, QStringLiteral("real viewport click activates the note card"));
                 QMouseEvent doubleClick(QEvent::MouseButtonDblClick, start, vp->mapToGlobal(start), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
                 QApplication::sendEvent(vp, &doubleClick);
-                check(doubleClickEdits == 1, QStringLiteral("real viewport double click requests note edit"));
+                check(mv->inlineRenameActive() &&
+                          mv->inlineRenameKeyForTest() == QStringLiteral("note:") + noteId,
+                      QStringLiteral("real viewport double click opens the in-place editor"));
+                mv->setInlineRenameTextForTest(QStringLiteral("viewport rename"));
+                mv->commitInlineRename(true);
+                bool renamedTitle = false;
+                for (const Markup& m : w.visibleMarkups())
+                    if (m.id == noteId && m.title == QStringLiteral("viewport rename")) renamedTitle = true;
+                check(renamedKey == QStringLiteral("note:") + noteId && renamedTitle,
+                      QStringLiteral("in-place rename updates the note title"));
                 const QPoint mid =
                     vp->mapFrom(mv, mv->mapFromScene((from.center() + to.center()) / 2.0));
                 const QPoint end = vp->mapFrom(mv, mv->mapFromScene(to.center()));

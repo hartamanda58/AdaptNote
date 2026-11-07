@@ -11,6 +11,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QStandardPaths>
 #include <QTimer>
 
@@ -40,6 +42,8 @@ int main(int argc, char** argv)
     const QCommandLineOption optFind("find", "run an in-document search before screenshotting", "text");
     // Screenshot hook, same spirit as --find: seed a selection so the floating pill is visible.
     const QCommandLineOption optSelect("selection", "seed a text selection before screenshotting", "text");
+    const QCommandLineOption optExcerptEdit(
+        "excerpt-edit", "open the inline excerpt editor on the first note (screenshots)");
     const QCommandLineOption optExportDir("export-dir", "export all formats into DIR", "dir");
     const QCommandLineOption optMindMap("mindmap", "render the note mind map to a PNG and exit", "png");
     const QCommandLineOption optLibrary("library", "screenshot the library window to PNG and exit",
@@ -62,6 +66,7 @@ int main(int argc, char** argv)
     parser.addOption(optRotate);
     parser.addOption(optFind);
     parser.addOption(optSelect);
+    parser.addOption(optExcerptEdit);
     parser.addOption(optExportDir);
     parser.addOption(optMindMap);
     parser.addOption(optLibrary);
@@ -128,6 +133,20 @@ int main(int argc, char** argv)
             return page.isNull() ? 3 : 0;
         }
         if (parser.isSet(optFind)) w.findText(parser.value(optFind));
+        if (parser.isSet(optExcerptEdit)) {
+            const auto notes = w.visibleMarkups();
+            QString editTarget;
+            for (const auto& note : notes)
+                if (!note.text.trimmed().isEmpty()) { editTarget = note.id; break; }
+            if (editTarget.isEmpty() && !notes.isEmpty()) editTarget = notes.first().id;
+            if (!editTarget.isEmpty()) {
+                w.startExcerptEditForTest(editTarget);
+                if (auto* title = w.findChild<QLineEdit*>(QStringLiteral("excerptTitle")))
+                    title->setText(QStringLiteral("这一章的核心问题"));
+                if (auto* comment = w.findChild<QPlainTextEdit*>(QStringLiteral("excerptComment")))
+                    comment->setPlainText(QStringLiteral("作者把阅读拆成三步：标注、复述、连接。"));
+            }
+        }
         if (parser.isSet(optSelect) && !parser.value(optSelect).isEmpty()) {
             an::Selection selection;
             selection.page = w.view()->currentPage();

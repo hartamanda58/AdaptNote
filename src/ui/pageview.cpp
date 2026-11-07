@@ -4,6 +4,7 @@
 #include "ink/ink.h"
 
 #include <QLineF>
+#include <QNativeGestureEvent>
 #include <QTabletEvent>
 #include <QtMath>
 #include <QMouseEvent>
@@ -795,6 +796,13 @@ void PageView::paintEvent(QPaintEvent*)
 
 void PageView::mousePressEvent(QMouseEvent* e)
 {
+    if (e->button() == Qt::MiddleButton) {
+        panning_ = true;
+        panLast_ = e->position().toPoint();
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        e->accept();
+        return;
+    }
     if (e->button() != Qt::LeftButton || !engine_ || !engine_->isOpen()) {
         QAbstractScrollArea::mousePressEvent(e);
         return;
@@ -845,6 +853,13 @@ void PageView::mousePressEvent(QMouseEvent* e)
 
 void PageView::mouseMoveEvent(QMouseEvent* e)
 {
+    if (panning_) {
+        const QPoint delta = e->position().toPoint() - panLast_;
+        panLast_ = e->position().toPoint();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        return;
+    }
     if (erasing_) {
         erasePath_.append(e->position() + QPointF(horizontalScrollBar()->value(),
                                                  verticalScrollBar()->value()));
@@ -894,6 +909,11 @@ void PageView::mouseMoveEvent(QMouseEvent* e)
 
 void PageView::mouseReleaseEvent(QMouseEvent* e)
 {
+    if (panning_ && e->button() == Qt::MiddleButton) {
+        panning_ = false;
+        viewport()->unsetCursor();
+        return;
+    }
     if (erasing_) {
         erasing_ = false;
         const int page = erasePage_;
@@ -934,11 +954,63 @@ void PageView::wheelEvent(QWheelEvent* e)
 {
     if (e->modifiers() & Qt::ControlModifier) {
         const double factor = e->angleDelta().y() > 0 ? 1.1 : 1 / 1.1;
-        setZoom(static_cast<float>(scale_ * factor));
+        zoomAtViewportPos(e->position().toPoint(), factor);
         e->accept();
         return;
     }
     QAbstractScrollArea::wheelEvent(e);
+}
+
+bool PageView::handleGesture(QEvent* e)
+{
+    if (e->type() != QEvent::NativeGesture) return false;
+    auto* gesture = static_cast<QNativeGestureEvent*>(e);
+    if (gesture->gestureType() != Qt::ZoomNativeGesture) return false;
+    const double factor = 1.0 + gesture->value();
+    if (factor <= 0.2 || factor >= 5.0) return false;
+    zoomAtViewportPos(gesture->position().toPoint(), factor);
+    e->accept();
+    return true;
+}
+
+bool PageView::event(QEvent* e)
+{
+    if (handleGesture(e)) return true;
+    return QAbstractScrollArea::event(e);
+}
+
+bool PageView::viewportEvent(QEvent* e)
+{
+    if (handleGesture(e)) return true;
+    return QAbstractScrollArea::viewportEvent(e);
+}
+
+void PageView::zoomAtViewportPos(const QPoint& pos, double factor)
+{
+    if (!engine_ || !engine_->isOpen()) return;
+    const int page = pageAt(pos);
+    const QRectF before = page >= 0 ? pageRectInViewport(page) : QRectF();
+    double fx = 0.5;
+    double fy = 0.5;
+    if (!before.isEmpty()) {
+        fx = qBound(0.0, (pos.x() - before.left()) / before.width(), 1.0);
+        fy = qBound(0.0, (pos.y() - before.top()) / before.height(), 1.0);
+    }
+
+    setZoom(static_cast<float>(scale_ * factor));
+
+    if (page >= 0) {
+        const QRectF after = pageRectInViewport(page);
+        if (!after.isEmpty()) {
+            // Keep the page point that was under the cursor under the cursor.
+            const QPointF target(after.left() + fx * after.width(),
+                                 after.top() + fy * after.height());
+            horizontalScrollBar()->setValue(horizontalScrollBar()->value() +
+                                            qRound(target.x() - pos.x()));
+            verticalScrollBar()->setValue(verticalScrollBar()->value() +
+                                          qRound(target.y() - pos.y()));
+        }
+    }
 }
 
 void PageView::gotoPage(int page)

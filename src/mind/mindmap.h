@@ -9,6 +9,8 @@
 #include <QString>
 #include <QVector>
 
+class QGraphicsTextItem;
+
 namespace an {
 namespace mind {
 
@@ -32,6 +34,15 @@ public:
     void fitToContent();
 
     QImage renderToImage(const QSize& size);
+
+    // In-place card rename (double-click / F2). commitInlineRename is invoked through the
+    // event loop by the editor item, so callers never see a deleted item mid-event.
+    void beginInlineRename(const QString& key);
+    void commitInlineRename(bool commit);
+    // Test seams for the in-place card editor.
+    bool inlineRenameActive() const { return renameEditor_ != nullptr; }
+    QString inlineRenameKeyForTest() const { return renameKey_; }
+    void setInlineRenameTextForTest(const QString& text);
 
     // Collapse/expand a group (or a page bucket) by nodeKey(); the selection is the card
     // that gets the accent outline.
@@ -65,6 +76,8 @@ signals:
     // Keyboard / double-click editing requests; the window owns the dialogs and the undo
     // stack, so the view only reports intent.
     void renameRequested(const QString& key);
+    // In-place rename finished (Enter or click away). The window applies it to the model.
+    void renameCommitted(const QString& key, const QString& text);
     void deleteRequested(const QString& key);
     void childRequested(const QString& key);
     void siblingRequested(const QString& key);
@@ -98,6 +111,11 @@ protected:
 
 private:
     void rebuild();
+    QString nodeText(const QString& key) const;
+
+    QGraphicsTextItem* renameEditor_ = nullptr;
+    QGraphicsItem* renameBackdrop_ = nullptr;
+    QString renameKey_;
 
     Node root_;
     double zoom_ = 1.0;

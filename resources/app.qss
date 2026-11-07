@@ -265,3 +265,25 @@ QDialogButtonBox QPushButton { min-width: 72px; padding: 6px 14px; }
 QToolTip {
     background: #2c2c2e; color: #ffffff; border: 0; border-radius: 6px; padding: 5px 8px;
 }
+
+/* ---------------------------------------------------------------- inline editor */
+QWidget#excerptEditor {
+    background: #ffffff;
+    border: 1px solid #dcdce0;
+    border-radius: 10px;
+}
+QWidget#excerptEditor QLineEdit, QWidget#excerptEditor QPlainTextEdit {
+    background: #ffffff;
+    border: 1px solid #e2e2e6;
+}
+QWidget#excerptEditor QLineEdit:focus, QWidget#excerptEditor QPlainTextEdit:focus {
+    border-color: #0a84ff;
+}
+QLabel#excerptQuote {
+    color: #5b5b60;
+    background: #f4f5f7;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+}

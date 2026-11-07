@@ -22,6 +22,7 @@ class QSplitter;
 class QToolBar;
 class QDockWidget;
 class QMenu;
+class QPlainTextEdit;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -81,6 +82,9 @@ public:
     void setWorkspaceMode(int mode);
     int workspaceMode() const { return workspaceMode_; }
     bool notesDockVisibleForTest() const;
+    // Test hooks: open/commit the inline excerpt editor without a real mouse.
+    void startExcerptEditForTest(const QString& id) { startExcerptEdit(id); }
+    void finishExcerptEditForTest(bool commit) { finishExcerptEdit(commit); }
     bool aiDockVisibleForTest() const;
     void translateSelectionForTest();
     QString translationForTest() const;
@@ -206,10 +210,15 @@ private:
     void updateStatus();
     void addMarkupFromSelection(MarkupType type);
     void editMarkupComment(const QString& id);
+    // Inline editor in the excerpt panel (no modal dialog; the page stays visible).
+    void startExcerptEdit(const QString& id);
+    void applyExcerptEdit();
+    void finishExcerptEdit(bool commit);
     void editMarkupTags(const QString& id);
     void jumpToMarkup(const QString& id);
     void saveAnnotationsToPdf();
     void showViewContextMenu(const QPoint& pos);
+    void applyInlineRename(const QString& key, const QString& text);
     void changePage(int delta);
 
     void doExport(const QString& format);
@@ -290,6 +299,18 @@ private:
     QString parentGroupOfNote(const QString& key) const;
     QTreeWidget* outlineTree_ = nullptr;
     QListWidget* notesList_ = nullptr;
+    QWidget* excerptsTab_ = nullptr;
+    QWidget* excerptEditor_ = nullptr;
+    QLabel* excerptMeta_ = nullptr;
+    QLabel* excerptQuote_ = nullptr;
+    QLineEdit* excerptTitle_ = nullptr;
+    QPlainTextEdit* excerptComment_ = nullptr;
+    QLineEdit* excerptTags_ = nullptr;
+    QTimer* excerptSaveTimer_ = nullptr;
+    QString excerptEditId_;
+    Markup excerptEditBefore_;
+    Markup excerptEditAfter_;
+    bool excerptEditDirty_ = false;
     QTabWidget* leftTabs_ = nullptr;
     QLineEdit* noteSearchEdit_ = nullptr;
     QComboBox* tagFilter_ = nullptr;

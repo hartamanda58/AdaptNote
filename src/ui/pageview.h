@@ -110,6 +110,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent* e) override;
     void tabletEvent(QTabletEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
+    bool event(QEvent* e) override;
+    bool viewportEvent(QEvent* e) override;
 
 private:
     struct PageGeom {
@@ -207,6 +209,12 @@ private:
     int rubberPage_ = -1;
     QPointF rubberStart_;
     QPointF rubberCur_;
+
+    // Trackpad / middle-button panning and cursor-anchored zoom.
+    bool panning_ = false;
+    QPoint panLast_;
+    void zoomAtViewportPos(const QPoint& pos, double factor);
+    bool handleGesture(QEvent* e);
 };
 
 }  // namespace an

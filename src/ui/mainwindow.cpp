@@ -53,6 +53,7 @@
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QStandardPaths>
 #include <QCheckBox>
 #include <QInputDialog>
@@ -1193,7 +1194,10 @@ void MainWindow::buildToolbar()
         a->setActionGroup(modeGroup);
         a->setData(def.mode);
         if (def.mode == workspaceMode_) a->setChecked(true);
-        connect(a, &QAction::triggered, this, [this, mode = def.mode]() { setWorkspaceMode(mode); });
+        connect(a, &QAction::triggered, this, [this, mode = def.mode]() {
+            store_.setSetting(QStringLiteral("ui.workspaceMode"), QString::number(mode));
+            setWorkspaceMode(mode);
+        });
         // Named modes read better than three abstract glyphs (MarginNote uses words too).
         if (auto* modeButton = qobject_cast<QToolButton*>(tb->widgetForAction(a))) {
             modeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -1741,6 +1745,69 @@ void MainWindow::buildDocks()
     notesList_->setAlternatingRowColors(false);
     vbox->addWidget(notesList_, 1);
 
+    // ---- inline excerpt editor: edit in place, page stays visible ----
+    excerptsTab_ = notesTab;
+    excerptEditor_ = new QWidget(notesTab);
+    excerptEditor_->setObjectName("excerptEditor");
+    auto* editLayout = new QVBoxLayout(excerptEditor_);
+    editLayout->setContentsMargins(10, 8, 10, 8);
+    editLayout->setSpacing(6);
+    auto* editHead = new QHBoxLayout;
+    auto* editorHeading = new QLabel(QStringLiteral("编辑摘录"), excerptEditor_);
+    editorHeading->setObjectName("panelTitle");
+    excerptMeta_ = new QLabel(excerptEditor_);
+    excerptMeta_->setObjectName("panelHint");
+    auto* doneButton = new QToolButton(excerptEditor_);
+    doneButton->setText(QStringLiteral("完成"));
+    doneButton->setToolTip(QStringLiteral("Ctrl+Enter 保存并关闭；Esc 放弃本次修改"));
+    editHead->addWidget(editorHeading);
+    editHead->addWidget(excerptMeta_, 1);
+    editHead->addWidget(doneButton);
+    editLayout->addLayout(editHead);
+
+    excerptQuote_ = new QLabel(excerptEditor_);
+    excerptQuote_->setObjectName("excerptQuote");
+    excerptQuote_->setWordWrap(true);
+    excerptQuote_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    excerptQuote_->setMaximumHeight(70);
+    editLayout->addWidget(excerptQuote_);
+
+    excerptTitle_ = new QLineEdit(excerptEditor_);
+    excerptTitle_->setObjectName("excerptTitle");
+    excerptTitle_->setPlaceholderText(QStringLiteral("我的标题（显示在脑图卡片上）"));
+    editLayout->addWidget(excerptTitle_);
+    excerptComment_ = new QPlainTextEdit(excerptEditor_);
+    excerptComment_->setObjectName("excerptComment");
+    excerptComment_->setPlaceholderText(QStringLiteral("批注：写自己的理解、疑问或联系…"));
+    excerptComment_->setMinimumHeight(82);
+    editLayout->addWidget(excerptComment_);
+    excerptTags_ = new QLineEdit(excerptEditor_);
+    excerptTags_->setObjectName("excerptTags");
+    excerptTags_->setPlaceholderText(QStringLiteral("标签，空格或逗号分隔"));
+    editLayout->addWidget(excerptTags_);
+    excerptEditor_->hide();
+    vbox->addWidget(excerptEditor_);
+
+    excerptSaveTimer_ = new QTimer(this);
+    excerptSaveTimer_->setSingleShot(true);
+    excerptSaveTimer_->setInterval(900);
+    connect(excerptSaveTimer_, &QTimer::timeout, this, [this]() { applyExcerptEdit(); });
+    auto markExcerptDirty = [this]() {
+        if (excerptEditId_.isEmpty()) return;
+        excerptEditDirty_ = true;
+        excerptSaveTimer_->start();
+    };
+    connect(excerptTitle_, &QLineEdit::textChanged, this, markExcerptDirty);
+    connect(excerptTags_, &QLineEdit::textChanged, this, markExcerptDirty);
+    connect(excerptComment_, &QPlainTextEdit::textChanged, this, markExcerptDirty);
+    connect(doneButton, &QToolButton::clicked, this, [this]() { finishExcerptEdit(true); });
+    auto* saveShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), excerptEditor_);
+    saveShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(saveShortcut, &QShortcut::activated, this, [this]() { finishExcerptEdit(true); });
+    auto* cancelShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), excerptEditor_);
+    cancelShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(cancelShortcut, &QShortcut::activated, this, [this]() { finishExcerptEdit(false); });
+
     connect(noteSearchEdit_, &QLineEdit::textChanged, this, [this](const QString&) {
         updateNotesPanel();
     });
@@ -1758,12 +1825,14 @@ void MainWindow::buildDocks()
     connect(notesList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
         if (!item) return;
         const QString id = item->data(Qt::UserRole).toString();
+        if (excerptEditor_ && excerptEditor_->isVisible() && id != excerptEditId_)
+            finishExcerptEdit(true);
         jumpToMarkup(id);
         // Reverse direction: the mind map should follow the annotation the user picked.
         if (mindView_ && mindPanel_->isVisible()) mindView_->selectForMarkup(id);
     });
     connect(notesList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
-        if (item) editMarkupComment(item->data(Qt::UserRole).toString());
+        if (item) startExcerptEdit(item->data(Qt::UserRole).toString());
     });
     notesList_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(notesList_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
@@ -1810,6 +1879,16 @@ void MainWindow::buildDocks()
     mapTabLayout->addWidget(rightMindView, 1);
     connect(mapFit, &QPushButton::clicked, rightMindView, &mind::MindMapView::fitToContent);
     connect(mapOpen, &QPushButton::clicked, this, &MainWindow::showNotebookMindMap);
+    connect(rightMindView, &mind::MindMapView::markupActivated, this,
+            [this](const QString& id) { jumpToMarkup(id); });
+    connect(rightMindView, &mind::MindMapView::nodeActivated, this, [this](int page) {
+        if (page >= 0) {
+            view_->gotoPage(page);
+            updateStatus();
+        }
+    });
+    connect(rightMindView, &mind::MindMapView::renameCommitted, this,
+            &MainWindow::applyInlineRename);
     leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
     // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
     // The page-outline tree is constructed before the excerpt list, so move it behind.
@@ -1864,6 +1943,15 @@ bool MainWindow::openDocument(const QString& path)
     }
     store_.setDocumentFileIdentity(docPath_, QFileInfo(path).size(),
                                    QFileInfo(path).lastModified().toMSecsSinceEpoch());
+
+    // Returning to a book that already has notes opens the MarginNote-style
+    // document + mind map layout; a fresh book stays focused on the page.
+    if (!kHeadless) {
+        const QString savedMode = store_.setting(QStringLiteral("ui.workspaceMode"));
+        int mode = savedMode.isEmpty() ? (markups_.isEmpty() ? 0 : 1) : savedMode.toInt();
+        if (mode == 2 && markups_.isEmpty()) mode = 0;
+        setWorkspaceMode(qBound(0, mode, 2));
+    }
     restoreReadingState();
 
     // Offer to pull in annotations that are already inside the PDF (once per revision).
@@ -2592,13 +2680,15 @@ void MainWindow::addMarkupFromSelection(MarkupType type)
     }
 
     if (type == MarkupType::Note) {
-        m.comment = askText(this, QStringLiteral("批注"), QStringLiteral("批注内容："));
-        if (m.comment.isNull()) return;
+        // The inline editor below is the place to type the note; no modal dialog.
+        m.comment = QString();
     }
 
     undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), m, QStringLiteral("添加%1").arg(markupTypeLabel(type))));
     view_->clearSelection();
     statusBar()->showMessage(QStringLiteral("已添加%1（共 %2 条）").arg(markupTypeLabel(type)).arg(markups_.size()), 2500);
+    // MarginNote flow: the excerpt appears and the cursor is already in the editor.
+    startExcerptEdit(m.id);
 }
 
 void MainWindow::deleteMarkupById(const QString& id)
@@ -2616,6 +2706,130 @@ void MainWindow::deleteMarkupById(const QString& id)
     if (!found) return;
     undo_->push(new MarkupCommand(this, CmdKind::Remove, before, Markup(), QStringLiteral("删除标注")));
     statusBar()->showMessage(QStringLiteral("已删除 1 条标注"), 2000);
+}
+
+void MainWindow::startExcerptEdit(const QString& id)
+{
+    if (id.isEmpty() || !excerptEditor_) return;
+    Markup* m = findMarkup(id);
+    if (!m) {
+        statusBar()->showMessage(QStringLiteral("请先打开这条笔记所属的文档"), 3000);
+        return;
+    }
+    if (!excerptEditId_.isEmpty() && excerptEditId_ != id) finishExcerptEdit(true);
+
+    excerptEditId_ = id;
+    excerptEditBefore_ = *m;
+    excerptEditDirty_ = false;
+    if (excerptSaveTimer_) excerptSaveTimer_->stop();
+
+    excerptMeta_->setText(QStringLiteral("%1 · 第 %2 页")
+                              .arg(QFileInfo(m->docPath).fileName())
+                              .arg(m->page + 1));
+    QString quote = m->text.trimmed();
+    if (quote.isEmpty()) {
+        if (m->type == MarkupType::Image) quote = QStringLiteral("图片摘录");
+        else if (m->type == MarkupType::Ink) quote = QStringLiteral("手写标注");
+        else quote = QStringLiteral("自由笔记（无原文）");
+    }
+    excerptQuote_->setText(quote.left(400));
+    {
+        const QSignalBlocker blockTitle(excerptTitle_);
+        const QSignalBlocker blockComment(excerptComment_);
+        const QSignalBlocker blockTags(excerptTags_);
+        excerptTitle_->setText(m->title);
+        excerptComment_->setPlainText(m->comment);
+        excerptTags_->setText(m->tags.join(QLatin1Char(' ')));
+    }
+
+    if (leftTabs_ && excerptsTab_) leftTabs_->setCurrentWidget(excerptsTab_);
+    if (notesDock_) notesDock_->show();
+    // Reflect the edited card in the list (without firing itemClicked, which would jump).
+    if (notesList_) {
+        for (int row = 0; row < notesList_->count(); ++row) {
+            QListWidgetItem* item = notesList_->item(row);
+            if (item->data(Qt::UserRole).toString() != id) continue;
+            notesList_->setCurrentItem(item);
+            notesList_->scrollToItem(item, QAbstractItemView::EnsureVisible);
+            break;
+        }
+    }
+    excerptEditor_->show();
+    excerptTitle_->setFocus();
+    excerptTitle_->selectAll();
+}
+
+void MainWindow::applyExcerptEdit()
+{
+    if (excerptEditId_.isEmpty() || !excerptEditor_) return;
+    if (excerptSaveTimer_) excerptSaveTimer_->stop();
+    Markup* current = findMarkup(excerptEditId_);
+    if (!current) return;
+
+    Markup after = *current;
+    after.title = excerptTitle_->text().trimmed();
+    after.comment = excerptComment_->toPlainText();
+    QStringList tags;
+    const QStringList raw = excerptTags_->text().split(
+        QRegularExpression(QStringLiteral("[,，\\s]+")), Qt::SkipEmptyParts);
+    for (QString tag : raw) {
+        tag.remove(QLatin1Char('#'));
+        if (!tag.isEmpty() && !tags.contains(tag)) tags.append(tag);
+    }
+    after.tags = tags;
+
+    const bool changed = after.title != current->title || after.comment != current->comment ||
+                         after.tags != current->tags;
+    excerptEditDirty_ = false;
+    if (!changed) return;
+
+    after.updated = QDateTime::currentMSecsSinceEpoch();
+    after = store_.stampForLocalWrite(after);
+    store_.upsertMarkup(after);
+    *current = after;
+    view_->setMarkups(markups_);
+    updateNotesPanel();
+    if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
+}
+
+void MainWindow::finishExcerptEdit(bool commit)
+{
+    if (excerptEditId_.isEmpty()) {
+        if (excerptEditor_) excerptEditor_->hide();
+        return;
+    }
+    const QString id = excerptEditId_;
+    if (excerptSaveTimer_) excerptSaveTimer_->stop();
+
+    if (commit) {
+        applyExcerptEdit();
+        Markup* current = findMarkup(id);
+        if (current) {
+            const bool changed = current->title != excerptEditBefore_.title ||
+                                 current->comment != excerptEditBefore_.comment ||
+                                 current->tags != excerptEditBefore_.tags;
+            if (changed) {
+                // One undo step for the whole editing session, even though idle
+                // autosave may have written intermediate states to SQLite.
+                undo_->push(new MarkupCommand(this, CmdKind::Modify, excerptEditBefore_,
+                                              *current, QStringLiteral("编辑摘录")));
+            }
+        }
+    } else if (Markup* current = findMarkup(id)) {
+        Markup restore = excerptEditBefore_;
+        restore.updated = QDateTime::currentMSecsSinceEpoch();
+        store_.upsertMarkup(store_.stampForLocalWrite(restore));
+        *current = restore;
+        view_->setMarkups(markups_);
+        updateNotesPanel();
+        if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
+    }
+
+    excerptEditId_.clear();
+    excerptEditDirty_ = false;
+    excerptEditor_->hide();
+    statusBar()->showMessage(commit ? QStringLiteral("摘录已保存") : QStringLiteral("已放弃本次修改"),
+                             2000);
 }
 
 void MainWindow::editMarkupComment(const QString& id)
@@ -4642,7 +4856,7 @@ void MainWindow::ensureMindPanel()
     vbox->addWidget(mindView_, 1);
 
     auto* hint = new QLabel(
-        QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：编辑　·　右键：菜单"),
+        QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：直接改名（Enter 保存）　·　右键：菜单"),
         mindPanel_);
     hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:11px;padding:2px 8px 4px;"));
     hint->setWordWrap(true);
@@ -4816,6 +5030,8 @@ void MainWindow::ensureMindPanel()
                 if (!kHeadless) menu.exec(globalPos);
             });
     // ---- editing requests from the map: the window owns dialogs and undo ----
+    connect(mindView_, &mind::MindMapView::renameCommitted, this,
+            &MainWindow::applyInlineRename);
     connect(mindView_, &mind::MindMapView::renameRequested, this, [this](const QString& key) {
         if (key.startsWith(QStringLiteral("group:"))) {
             QString name;
@@ -4937,10 +5153,55 @@ QString MainWindow::parentGroupOfNote(const QString& key) const
     return {};
 }
 
+void MainWindow::applyInlineRename(const QString& key, const QString& text)
+{
+    const QString name = text.trimmed();
+    if (name.isEmpty() || key.isEmpty()) return;
+
+    if (key.startsWith(QStringLiteral("group:"))) {
+        const QString id = key.mid(6);
+        const QVector<MindGroup> groups = currentTopic_.isEmpty()
+                                              ? store_.mindGroups(docPath_)
+                                              : store_.mindGroupsForTopic(currentTopic_);
+        for (const MindGroup& group : groups) {
+            if (group.id != id) continue;
+            MindGroup updated = group;
+            updated.name = name;
+            if (!store_.upsertMindGroup(store_.stampGroupForLocalWrite(updated))) return;
+            rebuildMindMap();
+            refreshNotebookWorkspace();
+            updateNotesPanel();
+            statusBar()->showMessage(QStringLiteral("分组已改名"), 2000);
+            return;
+        }
+        return;
+    }
+
+    const QString id = key.startsWith(QStringLiteral("note:")) ? key.mid(5) : key;
+    if (id.isEmpty()) return;
+    Markup before;
+    bool found = false;
+    for (const Markup& m : markups_)
+        if (m.id == id) { before = m; found = true; break; }
+    if (!found) {
+        // Topic maps show notes from other documents; a rename must still work.
+        for (const Markup& m : store_.allMarkups(100000))
+            if (m.id == id) { before = m; found = true; break; }
+    }
+    if (!found) return;
+    Markup after = before;
+    after.title = name;
+    after.updated = QDateTime::currentMSecsSinceEpoch();
+    undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after,
+                                  QStringLiteral("重命名卡片")));
+}
+
 void MainWindow::rebuildMindMap()
 {
     if (!mindView_) return;
 
+    const QString scope = mindScopeKey();
+    mind::Node root;
     if (!currentTopic_.isEmpty()) {
         // Topic view: one branch per document, so several books share a single map.
         QString topicName;
@@ -4958,20 +5219,23 @@ void MainWindow::rebuildMindMap()
             in.markups = (d.docPath == docPath_) ? markups_ : store_.markups(d.docPath);
             docs.append(in);
         }
-        mindView_->setLinks(store_.mindLinks(currentTopic_));
-        mindView_->setTree(mind::buildFromTopic(topicName, docs,
-                                                store_.mindGroupsForTopic(currentTopic_)));
-        return;
+        root = mind::buildFromTopic(topicName, docs, store_.mindGroupsForTopic(currentTopic_));
+    } else if (!engine_.isOpen() || markups_.isEmpty()) {
+        root = mind::Node();
+    } else {
+        root = mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
+                                    store_.mindGroups(docPath_), true, docPath_);
     }
 
-    if (!engine_.isOpen() || markups_.isEmpty()) {
-        mind::Node empty;
-        mindView_->setTree(empty);
-        return;
+    const QVector<MindLink> links = store_.mindLinks(scope);
+    mindView_->setLinks(links);
+    mindView_->setTree(root);
+    // The right-dock "脑图" tab shows the same map; keep both in sync (it used to stay
+    // empty forever, which made the tab look broken).
+    if (shelfMindView_) {
+        shelfMindView_->setLinks(links);
+        shelfMindView_->setTree(root);
     }
-    mindView_->setLinks(store_.mindLinks(mindScopeKey()));
-    mindView_->setTree(mind::buildFromNotes(QFileInfo(docPath_).completeBaseName(), markups_,
-                                            store_.mindGroups(docPath_), true, docPath_));
 }
 
 bool MainWindow::removeMindLinkForTest(const QString& id)
@@ -5041,8 +5305,8 @@ void MainWindow::setWorkspaceMode(int mode)
         mindPanel_->show();
         if (!mindPanel_->isVisible() || splitter_->sizes().value(0) < 200) {
             const int total = qMax(600, splitter_->width());
-            // the page keeps the larger share; the map can be widened by dragging
-            splitter_->setSizes({total * 62 / 100, total * 38 / 100});
+            // MarginNote puts the map next to the page, not in a narrow rail.
+            splitter_->setSizes({total * 55 / 100, total * 45 / 100});
         }
         rebuildMindMap();
     }
@@ -5051,7 +5315,9 @@ void MainWindow::setWorkspaceMode(int mode)
         const QString scope = mindScopeKey();
         if (scope != mindFittedScope_) {
             mindFittedScope_ = scope;
-            QTimer::singleShot(0, mindView_, [this]() {
+            // Let the splitter lay the panel out first; fitting inside a 0-width
+            // viewport put the whole map off-screen.
+            QTimer::singleShot(120, mindView_, [this]() {
                 if (mindView_) mindView_->fitToContent();
             });
         }
@@ -5081,6 +5347,8 @@ void MainWindow::showNotebookMindMap()
         layout->addWidget(interactionHint);
         notebookMindView_ = new mind::MindMapView(notebookMindWindow_);
         notebookMindView_->setObjectName("notebookMindCanvas");
+        connect(notebookMindView_, &mind::MindMapView::renameCommitted, this,
+                &MainWindow::applyInlineRename);
         layout->addWidget(notebookMindView_, 1);
         connect(fit, &QPushButton::clicked, notebookMindView_, &mind::MindMapView::fitToContent);
         connect(link, &QPushButton::toggled, notebookMindView_, &mind::MindMapView::setLinkMode);
