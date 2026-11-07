@@ -3,7 +3,13 @@
 #include "core/textselect.h"
 #include "ink/ink.h"
 
+#include <QApplication>
 #include <QLineF>
+#include <QDrag>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMimeData>
 #include <QNativeGestureEvent>
 #include <QTabletEvent>
 #include <QtMath>
@@ -838,6 +844,14 @@ void PageView::mousePressEvent(QMouseEvent* e)
         return;
     }
 
+    // Dragging inside an existing selection lifts it: drop on the mind map to make a card.
+    if (!sel_.text.trimmed().isEmpty() && pointInSelection(e->position().toPoint())) {
+        dragPending_ = true;
+        dragStartPos_ = e->position().toPoint();
+        e->accept();
+        return;
+    }
+
     if (page < 0) {
         clearSelection();
         return;
@@ -851,8 +865,66 @@ void PageView::mousePressEvent(QMouseEvent* e)
     viewport()->update();
 }
 
+QByteArray PageView::selectionPayload() const
+{
+    if (!sel_.isValid() || !engine_) return {};
+    QJsonObject root;
+    root["text"] = sel_.text;
+    root["page"] = sel_.page;
+    root["docPath"] = engine_->path();
+    QJsonArray quads;
+    for (const Quad& quad : sel_.quads) quads.append(quad.toJson());
+    root["quads"] = quads;
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+bool PageView::pointInSelection(const QPoint& viewportPos) const
+{
+    if (!sel_.isValid()) return false;
+    for (const Quad& quad : sel_.quads)
+        if (quadToView(sel_.page, quad).contains(viewportPos)) return true;
+    return false;
+}
+
+void PageView::startSelectionDrag()
+{
+    const QByteArray payload = selectionPayload();
+    if (payload.isEmpty()) return;
+    auto* mime = new QMimeData;
+    mime->setData("application/x-adaptnote-excerpt", payload);
+
+    auto* drag = new QDrag(this);
+    drag->setMimeData(mime);
+
+    QPixmap preview(280, 46);
+    preview.fill(Qt::transparent);
+    QPainter painter(&preview);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(QColor("#c9d3e2"), 1));
+    painter.setBrush(QColor(255, 255, 255, 244));
+    painter.drawRoundedRect(QRectF(0.5, 0.5, 279, 45), 10, 10);
+    painter.setPen(QColor("#1d1d1f"));
+    QFont font = painter.font();
+    font.setPointSizeF(9.5);
+    painter.setFont(font);
+    painter.drawText(QRect(12, 0, 254, 46), Qt::AlignVCenter | Qt::AlignLeft,
+                     painter.fontMetrics().elidedText(sel_.text.simplified(), Qt::ElideRight, 248));
+    painter.end();
+    drag->setPixmap(preview);
+    drag->setHotSpot(QPoint(16, 23));
+    drag->exec(Qt::CopyAction);
+}
+
 void PageView::mouseMoveEvent(QMouseEvent* e)
 {
+    if (dragPending_) {
+        if ((e->position().toPoint() - dragStartPos_).manhattanLength() <
+            QApplication::startDragDistance())
+            return;
+        dragPending_ = false;
+        startSelectionDrag();
+        return;
+    }
     if (panning_) {
         const QPoint delta = e->position().toPoint() - panLast_;
         panLast_ = e->position().toPoint();
@@ -909,6 +981,10 @@ void PageView::mouseMoveEvent(QMouseEvent* e)
 
 void PageView::mouseReleaseEvent(QMouseEvent* e)
 {
+    if (dragPending_) {
+        dragPending_ = false;
+        return;
+    }
     if (panning_ && e->button() == Qt::MiddleButton) {
         panning_ = false;
         viewport()->unsetCursor();

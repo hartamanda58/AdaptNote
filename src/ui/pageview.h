@@ -4,6 +4,7 @@
 #include "render/engine.h"
 
 #include <QAbstractScrollArea>
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QImage>
@@ -84,6 +85,8 @@ public:
     Selection selection() const { return sel_; }
     void clearSelection();
     void setSelection(const Selection& sel);
+    // JSON payload for dragging an excerpt onto the mind map.
+    QByteArray selectionPayload() const;
 
     int pageAt(const QPoint& viewPos) const;
     QImage renderPageToImage(int page);  // for tests / export
@@ -181,6 +184,10 @@ private:
     bool selecting_ = false;
     int selPage_ = -1;
     QPointF selAnchor_;
+    bool dragPending_ = false;
+    QPoint dragStartPos_;
+    bool pointInSelection(const QPoint& viewportPos) const;
+    void startSelectionDrag();
 
     QVector<TextHit> hits_;
     int hitCurrent_ = -1;

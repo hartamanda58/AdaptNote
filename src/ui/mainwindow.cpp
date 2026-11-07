@@ -781,7 +781,13 @@ void MainWindow::buildUi()
     // Reading area and mind map live side by side instead of in a modal dialog: jumping to
     // the source must not throw away the map the user is working in.
     splitter_ = new QSplitter(Qt::Horizontal, this);
-    splitter_->addWidget(view_);
+    pageSplitter_ = new QSplitter(Qt::Horizontal, this);
+    pageSplitter_->setObjectName(QStringLiteral("pageSplitter"));
+    pageSplitter_->addWidget(view_);
+    buildReferencePanel();
+    pageSplitter_->setStretchFactor(0, 1);
+    pageSplitter_->setStretchFactor(1, 0);
+    splitter_->addWidget(pageSplitter_);
     auto* workspace = new QWidget(this);
     auto* workspaceLayout = new QVBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
@@ -848,9 +854,44 @@ void MainWindow::buildUi()
     auto* mindWindowButton = new QToolButton(documentStrip);
     mindWindowButton->setText(QStringLiteral("脑图 ↗"));
     mindWindowButton->setToolTip(QStringLiteral("在独立窗口查看当前笔记本脑图"));
+    referenceButton_ = new QToolButton(documentStrip);
+    referenceButton_->setText(QStringLiteral("参考 ▾"));
+    referenceButton_->setToolTip(QStringLiteral("在右侧并排打开另一份资料（只读参考）"));
+    referenceButton_->setPopupMode(QToolButton::InstantPopup);
+    auto* referenceMenu = new QMenu(referenceButton_);
+    connect(referenceMenu, &QMenu::aboutToShow, this, [this, referenceMenu]() {
+        referenceMenu->clear();
+        QVector<QPair<QString, QString>> docs;
+        if (!currentTopic_.isEmpty()) {
+            for (const TopicDoc& doc : store_.topicDocs(currentTopic_)) {
+                QString title = QFileInfo(doc.docPath).completeBaseName();
+                for (const DocRow& row : store_.documents())
+                    if (row.path == doc.docPath && !row.title.isEmpty()) title = row.title;
+                docs.append({doc.docPath, title});
+            }
+        } else {
+            for (const DocRow& row : store_.documents()) docs.append({row.path, row.title});
+        }
+        for (const auto& doc : docs) {
+            if (doc.first == docPath_ || doc.first == referencePath_) continue;
+            const QString path = doc.first;
+            referenceMenu->addAction(doc.second.isEmpty() ? QFileInfo(path).completeBaseName()
+                                                          : doc.second,
+                                     [this, path]() { openReference(path); });
+        }
+        if (referenceMenu->isEmpty())
+            referenceMenu->addAction(QStringLiteral("没有其它资料"))->setEnabled(false);
+        if (!referencePath_.isEmpty()) {
+            referenceMenu->addSeparator();
+            referenceMenu->addAction(QStringLiteral("关闭参考窗格"),
+                                     [this]() { closeReference(); });
+        }
+    });
+    referenceButton_->setMenu(referenceMenu);
     documentStripLayout->addWidget(newNotebookButton);
     documentStripLayout->addWidget(addDocumentButton);
     documentStripLayout->addWidget(mindWindowButton);
+    documentStripLayout->addWidget(referenceButton_);
     auto* appearance = new QComboBox(documentStrip);
     appearance->setObjectName("readerAppearance");
     appearance->addItems({QStringLiteral("纸白"), QStringLiteral("暖纸"), QStringLiteral("夜间")});
@@ -934,6 +975,10 @@ void MainWindow::buildUi()
     auto* barLayout = new QHBoxLayout(selectionBar_);
     barLayout->setContentsMargins(6, 5, 6, 5);
     barLayout->setSpacing(2);
+    auto* grip = new QLabel(QStringLiteral("⠿"), selectionBar_);
+    grip->setObjectName(QStringLiteral("selectionBarGrip"));
+    grip->setToolTip(QStringLiteral("按住选中的文字拖动，可直接放进右侧脑图"));
+    barLayout->addWidget(grip);
     auto addBarButton = [&](const QString& label, const QString& tip,
                             const std::function<void()>& fn) -> QToolButton* {
         auto* b = new QToolButton(selectionBar_);
@@ -1005,6 +1050,133 @@ void MainWindow::buildUi()
         readAction_->setChecked(false);
         statusBar()->showMessage(QStringLiteral("朗读结束"), 3000);
     });
+}
+
+void MainWindow::buildReferencePanel()
+{
+    referencePanel_ = new QWidget(this);
+    referencePanel_->setObjectName(QStringLiteral("referencePanel"));
+
+    auto* layout = new QVBoxLayout(referencePanel_);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    auto* bar = new QWidget(referencePanel_);
+    bar->setObjectName(QStringLiteral("referenceBar"));
+    auto* row = new QHBoxLayout(bar);
+    row->setContentsMargins(10, 4, 8, 4);
+    row->setSpacing(6);
+    auto* tag = new QLabel(QStringLiteral("参考"), bar);
+    tag->setObjectName(QStringLiteral("panelHint"));
+    referenceTitle_ = new QLabel(bar);
+    referenceTitle_->setObjectName(QStringLiteral("referenceTitle"));
+    referenceCapture_ = new QToolButton(bar);
+    referenceCapture_->setText(QStringLiteral("摘录选中"));
+    referenceCapture_->setToolTip(
+        QStringLiteral("把参考窗格里选中的原文做成一条摘录（也可以在选中后直接拖到脑图）"));
+    referenceCapture_->setEnabled(false);
+    auto* fit = new QToolButton(bar);
+    fit->setText(QStringLiteral("适配"));
+    auto* close = new QToolButton(bar);
+    close->setText(QStringLiteral("关闭"));
+    row->addWidget(tag);
+    row->addWidget(referenceTitle_, 1);
+    row->addWidget(referenceCapture_);
+    row->addWidget(fit);
+    row->addWidget(close);
+    layout->addWidget(bar);
+
+    referenceView_ = new PageView(referencePanel_);
+    referenceView_->setObjectName(QStringLiteral("referencePage"));
+    referenceView_->setEngine(&referenceEngine_);
+    layout->addWidget(referenceView_, 1);
+
+    connect(close, &QToolButton::clicked, this, &MainWindow::closeReference);
+    connect(fit, &QToolButton::clicked, this,
+            [this]() { referenceView_->setZoomMode(ZoomMode::FitWidth); });
+    connect(referenceCapture_, &QToolButton::clicked, this,
+            &MainWindow::addMarkupFromReference);
+    connect(referenceView_, &PageView::selectionChanged, this, [this]() {
+        const Selection sel = referenceView_->selection();
+        referenceCapture_->setEnabled(sel.isValid() && !sel.text.trimmed().isEmpty());
+    });
+
+    referencePanel_->hide();
+    pageSplitter_->addWidget(referencePanel_);
+}
+
+void MainWindow::openReference(const QString& path)
+{
+    if (path.isEmpty()) return;
+    const QString absolute = QFileInfo(path).absoluteFilePath();
+    if (absolute == docPath_) {
+        statusBar()->showMessage(QStringLiteral("参考窗格里不能再打开当前文档"), 3000);
+        return;
+    }
+    QString error;
+    if (!referenceEngine_.open(absolute, &error)) {
+        warnUser(this, QStringLiteral("参考窗格打开失败"), error);
+        return;
+    }
+    referencePath_ = absolute;
+    referenceView_->setEngine(&referenceEngine_);
+    referenceView_->setAppearanceTheme(view_->appearanceTheme());
+    referenceView_->setMarkups(store_.markups(absolute));
+    referenceTitle_->setText(QFileInfo(absolute).completeBaseName());
+    referencePanel_->show();
+    const int total = qMax(500, pageSplitter_->width());
+    // Keep the book you are annotating larger than the reference.
+    pageSplitter_->setSizes({total * 60 / 100, total * 40 / 100});
+    QTimer::singleShot(0, referenceView_,
+                       [this]() { referenceView_->setZoomMode(ZoomMode::FitWidth); });
+    referenceCapture_->setEnabled(false);
+    statusBar()->showMessage(
+        QStringLiteral("参考：%1（选中原文可直接拖到脑图）").arg(QFileInfo(absolute).fileName()),
+        4000);
+}
+
+void MainWindow::closeReference()
+{
+    if (!referencePanel_ || referencePanel_->isHidden()) return;
+    referencePanel_->hide();
+    referenceEngine_.close();
+    referencePath_.clear();
+    referenceTitle_->clear();
+    referenceView_->setMarkups({});
+    referenceCapture_->setEnabled(false);
+}
+
+void MainWindow::addMarkupFromReference()
+{
+    const Selection sel = referenceView_ ? referenceView_->selection() : Selection();
+    if (!sel.isValid() || referencePath_.isEmpty()) return;
+    if (currentTopic_.isEmpty() && referencePath_ != docPath_) {
+        statusBar()->showMessage(
+            QStringLiteral("跨文档摘录需要先打开一个笔记本（阅读主题）"), 5000);
+        return;
+    }
+
+    Markup markup;
+    markup.id = newId();
+    markup.docPath = referencePath_;
+    markup.page = sel.page;
+    markup.type = MarkupType::Highlight;
+    markup.color = markupColor_;
+    markup.quads = sel.quads;
+    markup.text = sel.text;
+    if (referenceEngine_.supportsAnchors() && sel.startChar >= 0) {
+        const int chapter = referenceEngine_.chapterOfPage(sel.page);
+        const int offset = referenceEngine_.chapterOffsetOf(sel.page, sel.startChar);
+        if (chapter >= 0 && offset >= 0) {
+            markup.anchorChapter = QString::number(chapter);
+            markup.anchorOffset = offset;
+        }
+    }
+    markup.created = markup.updated = QDateTime::currentMSecsSinceEpoch();
+    undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), markup,
+                                  QStringLiteral("从参考窗格摘录")));
+    referenceView_->clearSelection();
+    if (mindView_) mindView_->selectForMarkup(markup.id);
+    statusBar()->showMessage(QStringLiteral("已从参考窗格摘录 %1 字").arg(sel.text.size()), 3000);
 }
 
 void MainWindow::buildToolbar()
@@ -1889,6 +2061,7 @@ void MainWindow::buildDocks()
     });
     connect(rightMindView, &mind::MindMapView::renameCommitted, this,
             &MainWindow::applyInlineRename);
+    wireMindBatch(rightMindView);
     leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
     // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
     // The page-outline tree is constructed before the excerpt list, so move it behind.
@@ -1908,6 +2081,7 @@ void MainWindow::buildStatusBar()
     statusBar()->addPermanentWidget(infoLabel_);
     statusBar()->showMessage(
         QStringLiteral("拖选文字：浮出高亮/下划线/批注/查词/翻译/AI/OCR；"
+                       "按住选中文字拖到脑图即可成为卡片；"
                        "Ctrl+F 查找；Ctrl+Z 撤销；Ctrl+1/2/3 切换阅读/整理/脑图"));
     updateStatus();
 }
@@ -1935,6 +2109,7 @@ bool MainWindow::openDocument(const QString& path)
     view_->setSearchHits({}, -1);
     if (findLabel_) findLabel_->setText(QStringLiteral("0/0"));
 
+    if (!referencePath_.isEmpty() && referencePath_ == docPath_) closeReference();
     setWindowTitle(QStringLiteral("AdaptNote — %1").arg(QFileInfo(path).fileName()));
     if (engine_.supportsAnchors()) {
         relocateAnchors();
@@ -4854,6 +5029,7 @@ void MainWindow::ensureMindPanel()
 
     mindView_ = new mind::MindMapView(mindPanel_);
     vbox->addWidget(mindView_, 1);
+    wireMindBatch(mindView_);
 
     auto* hint = new QLabel(
         QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：直接改名（Enter 保存）　·　右键：菜单"),
@@ -5153,6 +5329,169 @@ QString MainWindow::parentGroupOfNote(const QString& key) const
     return {};
 }
 
+Markup MainWindow::markupById(const QString& id) const
+{
+    if (id.isEmpty()) return {};
+    for (const Markup& m : markups_)
+        if (m.id == id) return m;
+    // Topic maps show notes from several documents; batch actions still need them.
+    for (const Markup& m : store_.allMarkups(100000))
+        if (m.id == id) return m;
+    return {};
+}
+
+void MainWindow::deleteMarkupsBatch(const QStringList& ids)
+{
+    if (ids.isEmpty()) return;
+    undo_->beginMacro(QStringLiteral("删除 %1 条摘录").arg(ids.size()));
+    int removed = 0;
+    for (const QString& id : ids) {
+        const Markup before = markupById(id);
+        if (before.id.isEmpty()) continue;
+        undo_->push(new MarkupCommand(this, CmdKind::Remove, before, before,
+                                      QStringLiteral("删除摘录")));
+        ++removed;
+    }
+    undo_->endMacro();
+    statusBar()->showMessage(
+        QStringLiteral("已删除 %1 条摘录（Ctrl+Z 可整批撤销）").arg(removed), 3000);
+}
+
+void MainWindow::moveMarkupsToGroupBatch(const QStringList& ids, const QString& groupId)
+{
+    if (ids.isEmpty()) return;
+    undo_->beginMacro(QStringLiteral("移到分组"));
+    int moved = 0;
+    for (const QString& id : ids) {
+        const Markup before = markupById(id);
+        if (before.id.isEmpty() || before.mindGroup == groupId) continue;
+        Markup after = before;
+        after.mindGroup = groupId;
+        after.updated = QDateTime::currentMSecsSinceEpoch();
+        undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after,
+                                      QStringLiteral("移到分组")));
+        ++moved;
+    }
+    undo_->endMacro();
+    statusBar()->showMessage(QStringLiteral("已移动 %1 条摘录").arg(moved), 2500);
+}
+
+void MainWindow::colorMarkupsBatch(const QStringList& ids, const QColor& color)
+{
+    if (ids.isEmpty() || !color.isValid()) return;
+    undo_->beginMacro(QStringLiteral("设置颜色"));
+    for (const QString& id : ids) {
+        const Markup before = markupById(id);
+        if (before.id.isEmpty() || before.color == color) continue;
+        Markup after = before;
+        after.color = color;
+        after.updated = QDateTime::currentMSecsSinceEpoch();
+        undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after,
+                                      QStringLiteral("设置颜色")));
+    }
+    undo_->endMacro();
+}
+
+void MainWindow::showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos)
+{
+    QStringList ids;
+    for (const QString& key : keys)
+        if (key.startsWith(QStringLiteral("note:"))) ids.append(key.mid(5));
+    if (ids.isEmpty()) return;
+
+    QMenu menu(this);
+    menu.addAction(QStringLiteral("删除所选（%1）").arg(ids.size()),
+                   [this, ids]() { deleteMarkupsBatch(ids); });
+
+    QMenu* move = menu.addMenu(QStringLiteral("移到分组"));
+    move->addAction(QStringLiteral("（按页分组）"),
+                    [this, ids]() { moveMarkupsToGroupBatch(ids, QString()); });
+    const QVector<MindGroup> groups = currentTopic_.isEmpty()
+                                          ? store_.mindGroups(docPath_)
+                                          : store_.mindGroupsForTopic(currentTopic_);
+    for (const MindGroup& group : groups) {
+        const QString groupId = group.id;
+        move->addAction(group.name.isEmpty() ? QStringLiteral("(未命名分组)") : group.name,
+                        [this, ids, groupId]() { moveMarkupsToGroupBatch(ids, groupId); });
+    }
+
+    QMenu* colorMenu = menu.addMenu(QStringLiteral("颜色"));
+    for (const char* hex : kColors) {
+        const QColor color(QString::fromLatin1(hex));
+        QAction* action = colorMenu->addAction(color.name());
+        action->setData(color);
+        connect(action, &QAction::triggered, this,
+                [this, ids, color]() { colorMarkupsBatch(ids, color); });
+    }
+
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("取消选择"), [this]() {
+        if (mindView_) mindView_->clearSelectionKeys();
+        if (shelfMindView_) shelfMindView_->clearSelectionKeys();
+        if (notebookMindView_) notebookMindView_->clearSelectionKeys();
+    });
+    if (!kHeadless) menu.exec(globalPos);
+}
+
+void MainWindow::wireMindBatch(mind::MindMapView* view)
+{
+    if (!view) return;
+    connect(view, &mind::MindMapView::deleteManyRequested, this,
+            &MainWindow::deleteMarkupsBatch);
+    connect(view, &mind::MindMapView::selectionReparentRequested, this,
+            [this](const QStringList& ids, const QString& groupKey) {
+                moveMarkupsToGroupBatch(ids, groupIdOf(groupKey));
+            });
+    connect(view, &mind::MindMapView::selectionMenuRequested, this,
+            &MainWindow::showMapSelectionMenu);
+    connect(view, &mind::MindMapView::excerptDropped, this, &MainWindow::dropExcerpt);
+}
+
+void MainWindow::dropExcerpt(const QByteArray& payload, const QString& groupKey)
+{
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(payload, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) return;
+    const QJsonObject object = doc.object();
+    const QString rawPath = object.value(QStringLiteral("docPath")).toString();
+    // Engine paths can be relative (CLI tests open "test.pdf"); compare canonically.
+    const QString path = rawPath.isEmpty() ? QString() : QFileInfo(rawPath).absoluteFilePath();
+    const int page = object.value(QStringLiteral("page")).toInt(-1);
+    QVector<Quad> quads;
+    for (const QJsonValue& value : object.value(QStringLiteral("quads")).toArray())
+        quads.append(Quad::fromJson(value.toObject()));
+    if (path.isEmpty() || page < 0 || quads.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("拖拽内容缺少原文位置，未创建摘录"), 3000);
+        return;
+    }
+    if (currentTopic_.isEmpty() && path != docPath_) {
+        statusBar()->showMessage(
+            QStringLiteral("跨文档摘录需要先打开一个笔记本（阅读主题），否则只能留在原书里"),
+            5000);
+        return;
+    }
+
+    Markup markup;
+    markup.id = newId();
+    markup.docPath = path;
+    markup.page = page;
+    markup.type = MarkupType::Highlight;
+    markup.color = markupColor_;
+    markup.quads = quads;
+    markup.text = object.value(QStringLiteral("text")).toString();
+    if (groupKey.startsWith(QStringLiteral("group:")))
+        markup.mindGroup = groupIdOf(groupKey);
+    markup.created = markup.updated = QDateTime::currentMSecsSinceEpoch();
+    undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), markup,
+                                  QStringLiteral("从原文摘录")));
+    if (mindView_) mindView_->selectForMarkup(markup.id);
+    statusBar()->showMessage(
+        QStringLiteral("已从 %1 第 %2 页摘录到脑图")
+            .arg(QFileInfo(path).fileName())
+            .arg(page + 1),
+        3000);
+}
+
 void MainWindow::applyInlineRename(const QString& key, const QString& text)
 {
     const QString name = text.trimmed();
@@ -5306,7 +5645,7 @@ void MainWindow::setWorkspaceMode(int mode)
         if (!mindPanel_->isVisible() || splitter_->sizes().value(0) < 200) {
             const int total = qMax(600, splitter_->width());
             // MarginNote puts the map next to the page, not in a narrow rail.
-            splitter_->setSizes({total * 55 / 100, total * 45 / 100});
+            splitter_->setSizes({total * 58 / 100, total * 42 / 100});
         }
         rebuildMindMap();
     }
@@ -5349,6 +5688,7 @@ void MainWindow::showNotebookMindMap()
         notebookMindView_->setObjectName("notebookMindCanvas");
         connect(notebookMindView_, &mind::MindMapView::renameCommitted, this,
                 &MainWindow::applyInlineRename);
+        wireMindBatch(notebookMindView_);
         layout->addWidget(notebookMindView_, 1);
         connect(fit, &QPushButton::clicked, notebookMindView_, &mind::MindMapView::fitToContent);
         connect(link, &QPushButton::toggled, notebookMindView_, &mind::MindMapView::setLinkMode);

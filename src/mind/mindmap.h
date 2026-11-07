@@ -50,6 +50,12 @@ public:
     bool isCollapsed(const QString& key) const { return collapsed_.contains(key); }
     void setSelectedKey(const QString& key);
     QString selectedKey() const { return selectedKey_; }
+    // Multi-selection (Ctrl+click toggles, Shift+drag draws a band, Ctrl+A selects notes).
+    void toggleSelectedKey(const QString& key);
+    void clearSelectionKeys();
+    QStringList selectedKeys() const { return selectedKeys_; }
+    bool isKeySelected(const QString& key) const { return selectedKeys_.contains(key); }
+    void selectAllForTest() { selectAllNotes(); }
     bool hasDropIndicator() const { return dropIndicator_ != nullptr; }
 
     // Hit testing helpers (also used by tests).
@@ -78,6 +84,12 @@ signals:
     void renameRequested(const QString& key);
     // In-place rename finished (Enter or click away). The window applies it to the model.
     void renameCommitted(const QString& key, const QString& text);
+    // Batch operations started from the selection (notes only; groups keep single actions).
+    void deleteManyRequested(const QStringList& markupIds);
+    void selectionMenuRequested(const QStringList& keys, const QPoint& globalPos);
+    void selectionReparentRequested(const QStringList& markupIds, const QString& groupKey);
+    // An excerpt dragged out of the document was dropped on a group/page/empty canvas.
+    void excerptDropped(const QByteArray& payload, const QString& groupKey);
     void deleteRequested(const QString& key);
     void childRequested(const QString& key);
     void siblingRequested(const QString& key);
@@ -106,12 +118,29 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     void handleCanvasContextMenu(QContextMenuEvent* event);
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void rebuild();
     QString nodeText(const QString& key) const;
+    QStringList selectedNoteIds() const;
+    void syncSelectionBorders();
+    void selectAllNotes();
+
+    QVector<QString> selectedKeys_;
+    QGraphicsRectItem* bandItem_ = nullptr;
+    bool bandActive_ = false;
+    bool bandAdditive_ = false;
+    QPointF bandStart_;
+    QVector<QString> bandBase_;
+    // External (document -> map) drag in progress; updateDropIndicator uses it to draw
+    // feedback for a drag that has no internal dragMarkupId_.
+    bool externalDropActive_ = false;
 
     QGraphicsTextItem* renameEditor_ = nullptr;
     QGraphicsItem* renameBackdrop_ = nullptr;

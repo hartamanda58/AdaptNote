@@ -85,6 +85,22 @@ public:
     // Test hooks: open/commit the inline excerpt editor without a real mouse.
     void startExcerptEditForTest(const QString& id) { startExcerptEdit(id); }
     void finishExcerptEditForTest(bool commit) { finishExcerptEdit(commit); }
+    void deleteMarkupsBatchForTest(const QStringList& ids) { deleteMarkupsBatch(ids); }
+    void moveMarkupsToGroupBatchForTest(const QStringList& ids, const QString& groupId)
+    {
+        moveMarkupsToGroupBatch(ids, groupId);
+    }
+    int mapSelectionCountForTest() const
+    {
+        return mindView_ ? mindView_->selectedKeys().size() : 0;
+    }
+    void dropExcerptForTest(const QByteArray& payload, const QString& groupKey)
+    {
+        dropExcerpt(payload, groupKey);
+    }
+    void openReferenceForTest(const QString& path) { openReference(path); }
+    void closeReferenceForTest() { closeReference(); }
+    PageView* referenceViewForTest() const { return referenceView_; }
     bool aiDockVisibleForTest() const;
     void translateSelectionForTest();
     QString translationForTest() const;
@@ -261,6 +277,19 @@ private:
     SyncManager sync_{store_};
     PageView* view_ = nullptr;
     QSplitter* splitter_ = nullptr;
+    // Reference pane: a second, read-only document next to the main one.
+    QSplitter* pageSplitter_ = nullptr;
+    QWidget* referencePanel_ = nullptr;
+    PageView* referenceView_ = nullptr;
+    MuPdfEngine referenceEngine_;
+    QLabel* referenceTitle_ = nullptr;
+    QToolButton* referenceCapture_ = nullptr;
+    QToolButton* referenceButton_ = nullptr;
+    QString referencePath_;
+    void buildReferencePanel();
+    void openReference(const QString& path);
+    void closeReference();
+    void addMarkupFromReference();
     QToolBar* mainToolbar_ = nullptr;
     QMenu* moreMenu_ = nullptr;
     QTabBar* notebookTabs_ = nullptr;
@@ -295,6 +324,14 @@ private:
     void rebuildMindMap();
     QStringList currentTopicDocPaths() const;   // documents of the open topic (empty = none)
     QString mindScopeKey() const;   // reading topic id, else the current document path
+    // Batch operations over a mind-map selection (notes from any document).
+    void deleteMarkupsBatch(const QStringList& ids);
+    void moveMarkupsToGroupBatch(const QStringList& ids, const QString& groupId);
+    void colorMarkupsBatch(const QStringList& ids, const QColor& color);
+    Markup markupById(const QString& id) const;
+    void wireMindBatch(mind::MindMapView* view);
+    void showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos);
+    void dropExcerpt(const QByteArray& payload, const QString& groupKey);
     static QString noteIdOfKey(const QString& key);
     QString parentGroupOfNote(const QString& key) const;
     QTreeWidget* outlineTree_ = nullptr;

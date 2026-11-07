@@ -44,6 +44,10 @@ int main(int argc, char** argv)
     const QCommandLineOption optSelect("selection", "seed a text selection before screenshotting", "text");
     const QCommandLineOption optExcerptEdit(
         "excerpt-edit", "open the inline excerpt editor on the first note (screenshots)");
+    const QCommandLineOption optReference("reference", "open a second document in the reference pane",
+                                          "file");
+    const QCommandLineOption optMultiSelect(
+        "multi-select", "select every note card in the mind map (screenshots)");
     const QCommandLineOption optExportDir("export-dir", "export all formats into DIR", "dir");
     const QCommandLineOption optMindMap("mindmap", "render the note mind map to a PNG and exit", "png");
     const QCommandLineOption optLibrary("library", "screenshot the library window to PNG and exit",
@@ -67,6 +71,8 @@ int main(int argc, char** argv)
     parser.addOption(optFind);
     parser.addOption(optSelect);
     parser.addOption(optExcerptEdit);
+    parser.addOption(optReference);
+    parser.addOption(optMultiSelect);
     parser.addOption(optExportDir);
     parser.addOption(optMindMap);
     parser.addOption(optLibrary);
@@ -133,6 +139,11 @@ int main(int argc, char** argv)
             return page.isNull() ? 3 : 0;
         }
         if (parser.isSet(optFind)) w.findText(parser.value(optFind));
+        if (parser.isSet(optReference)) w.openReferenceForTest(parser.value(optReference));
+        if (parser.isSet(optMultiSelect)) {
+            w.setWorkspaceMode(1);
+            if (auto* map = w.mindMapView()) map->selectAllForTest();
+        }
         if (parser.isSet(optExcerptEdit)) {
             const auto notes = w.visibleMarkups();
             QString editTarget;

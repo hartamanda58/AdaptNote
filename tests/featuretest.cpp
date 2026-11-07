@@ -1532,6 +1532,86 @@ int main(int argc, char** argv)
             settle();
         }
 
+    // Multi-select and batch operations on the mind map.
+    {
+        const QVector<Markup> notes = w.visibleMarkups();
+        QStringList ids;
+        for (const Markup& m : notes) {
+            if (m.type == MarkupType::Image || m.type == MarkupType::Ink) continue;
+            ids << m.id;
+            if (ids.size() == 2) break;
+        }
+        if (ids.size() == 2 && w.mindMapView()) {
+            QHash<QString, QString> beforeGroups;
+            for (const Markup& m : notes)
+                if (ids.contains(m.id)) beforeGroups.insert(m.id, m.mindGroup);
+            w.mindMapView()->setSelectedKey(QStringLiteral("note:") + ids.at(0));
+            w.mindMapView()->toggleSelectedKey(QStringLiteral("note:") + ids.at(1));
+            check(w.mapSelectionCountForTest() == 2,
+                  QStringLiteral("multi-select tracks two cards"));
+            const QString groupId = w.createMindGroupForTest(QStringLiteral("批量组"));
+            check(!groupId.isEmpty(), QStringLiteral("create a group for batch move"));
+            w.moveMarkupsToGroupBatchForTest(ids, groupId);
+            bool grouped = true;
+            for (const Markup& m : w.visibleMarkups())
+                if (ids.contains(m.id) && m.mindGroup != groupId) grouped = false;
+            check(grouped, QStringLiteral("batch move puts both notes in the group"));
+            w.undoForTest();
+            bool ungrouped = true;
+            for (const Markup& m : w.visibleMarkups())
+                if (beforeGroups.contains(m.id) && m.mindGroup != beforeGroups.value(m.id))
+                    ungrouped = false;
+            check(ungrouped, QStringLiteral("batch move is a single undo step"));
+            w.deleteMarkupsBatchForTest(ids);
+            check(w.visibleMarkups().size() == notes.size() - 2,
+                  QStringLiteral("batch delete removes both notes"));
+            w.undoForTest();
+            check(w.visibleMarkups().size() == notes.size(),
+                  QStringLiteral("batch delete undoes as one step"));
+        }
+    }
+
+
+    // Dragging an excerpt out of the page and dropping it on the mind map.
+    {
+        w.view()->setSelection(Selection{0, 0, 6,
+                                         {Quad::fromRect(QRectF(80, 120, 120, 18))},
+                                         QStringLiteral("dragged excerpt")});
+        const QByteArray payload = w.view()->selectionPayload();
+        check(!payload.isEmpty() && payload.contains("dragged excerpt") &&
+                  payload.contains("quads"),
+              QStringLiteral("selection produces a drag payload with text and geometry"));
+        const QString groupId = w.createMindGroupForTest(QStringLiteral("拖拽组"));
+        const int before = w.visibleMarkups().size();
+        w.dropExcerptForTest(payload, QStringLiteral("group:") + groupId);
+        bool dropped = false;
+        for (const Markup& m : w.visibleMarkups())
+            if (m.text == QStringLiteral("dragged excerpt") && m.mindGroup == groupId)
+                dropped = true;
+        check(dropped && w.visibleMarkups().size() == before + 1,
+              QStringLiteral("dropping an excerpt creates a card in the target group"));
+        w.undoForTest();
+        check(w.visibleMarkups().size() == before,
+              QStringLiteral("a dropped excerpt is one undo step"));
+        w.view()->clearSelection();
+    }
+
+    // Side-by-side reference pane for a second document.
+    {
+        w.openReferenceForTest(epub);
+        settle();
+        auto* reference = w.findChild<PageView*>(QStringLiteral("referencePage"));
+        check(reference && reference->isVisible(),
+              QStringLiteral("reference pane opens beside the main document"));
+        check(reference && reference->engine() && reference->engine()->isOpen() &&
+                  reference->engine()->pageCount() > 0,
+              QStringLiteral("reference pane renders the second document"));
+        w.closeReferenceForTest();
+        settle();
+        check(reference && !reference->isVisible(),
+              QStringLiteral("reference pane closes without touching the main document"));
+    }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

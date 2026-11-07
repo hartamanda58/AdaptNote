@@ -9,6 +9,11 @@
 #include <QGraphicsTextItem>
 #include <QFocusEvent>
 #include <QMetaObject>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDragLeaveEvent>
+#include <QDropEvent>
 #include <QTextCursor>
 #include <QPainter>
 #include <QPainterPath>
@@ -64,6 +69,7 @@ MindMapView::MindMapView(QWidget* parent)
     setDragMode(QGraphicsView::NoDrag);
     setBackgroundBrush(QColor(0xfa, 0xfb, 0xfd));
     setFrameShape(QFrame::NoFrame);
+    setAcceptDrops(true);
 }
 
 void MindMapView::setTree(const Node& root)
@@ -255,7 +261,9 @@ void MindMapView::clearDropIndicator()
 void MindMapView::updateDropIndicator(const QPointF& scenePos)
 {
     clearDropIndicator();
-    if (!scene_ || dragMarkupId_.isEmpty() || !dragMoved_) return;
+    if (!scene_ || (dragMarkupId_.isEmpty() && !externalDropActive_) ||
+        (!dragMoved_ && !externalDropActive_))
+        return;
 
     QString group;
     QString beforeId;
@@ -303,6 +311,23 @@ void MindMapView::updateDropIndicator(const QPointF& scenePos)
 
 void MindMapView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (bandActive_ && bandItem_ && scene_) {
+        const QRectF band = QRectF(bandStart_, mapToScene(event->pos())).normalized();
+        bandItem_->setRect(band);
+        selectedKeys_ = bandAdditive_ ? bandBase_ : QVector<QString>();
+        for (QGraphicsItem* item : scene_->items()) {
+            const QString key = item->data(4).toString();
+            if (!key.startsWith(QStringLiteral("note:"))) continue;
+            auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
+            if (!card || !card->data(7).toBool()) continue;
+            if (band.intersects(rectForKey(key)) && !selectedKeys_.contains(key))
+                selectedKeys_.append(key);
+        }
+        selectedKey_ = selectedKeys_.isEmpty() ? QString() : selectedKeys_.last();
+        syncSelectionBorders();
+        event->accept();
+        return;
+    }
     if (!panActive_ && event->buttons().testFlag(Qt::MiddleButton)) {
         panActive_ = true;
         panStart_ = event->pos();
@@ -486,6 +511,18 @@ void MindMapView::commitInlineRename(bool commit)
 void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 {
     clearDropIndicator();
+    if (bandActive_) {
+        bandActive_ = false;
+        if (bandItem_) {
+            if (bandItem_->scene()) bandItem_->scene()->removeItem(bandItem_);
+            delete bandItem_;
+            bandItem_ = nullptr;
+        }
+        unsetCursor();
+        emit nodeSelected(selectedKey_);
+        event->accept();
+        return;
+    }
     if (panActive_) {
         panActive_ = false;
         setCursor(linkMode_ ? Qt::CrossCursor : Qt::ArrowCursor);
@@ -498,7 +535,7 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
         pressKey_.clear();
         dragMarkupId_.clear();
         if (!key.isEmpty()) {
-            setSelectedKey(key);
+            if (!isKeySelected(key)) setSelectedKey(key);
             emit nodeSelected(key);
             if (key.startsWith(QStringLiteral("note:"))) emit markupActivated(key.mid(5));
             else emit nodeActivated(pageByKey_.value(key, -1));
@@ -509,6 +546,23 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
     if (!dragMarkupId_.isEmpty() && dragMoved_) {
         const QString id = dragMarkupId_;
         const QPointF scenePos = mapToScene(event->pos());
+
+        // Dragging one card of a multi-selection moves every selected note into the
+        // target group (positions inside the group are re-laid out).
+        const QStringList batch = selectedNoteIds();
+        if (batch.size() > 1 && batch.contains(id)) {
+            QString targetGroup;
+            QString before;
+            const bool hasTarget = dropTargetAt(scenePos, &targetGroup, &before);
+            dragMarkupId_.clear();
+            dragMoved_ = false;
+            nodePressActive_ = false;
+            pressKey_.clear();
+            dragContainerKey_.clear();
+            if (hasTarget && !targetGroup.isEmpty())
+                emit selectionReparentRequested(batch, targetGroup);
+            return;
+        }
 
         // Resolve the target *before* clearing the drag state: dropTargetAt() skips the
         // card being dragged, and that card sits under the cursor at release time.
@@ -549,6 +603,16 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 
 void MindMapView::keyPressEvent(QKeyEvent* event)
 {
+    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_A) {
+        selectAllNotes();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_Escape) {
+        clearSelectionKeys();
+        event->accept();
+        return;
+    }
     // Alt+Up / Alt+Down: move the focused note inside its group.
     if ((event->modifiers() & Qt::AltModifier) &&
         (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
@@ -591,10 +655,13 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         case Qt::Key_Delete:
-        case Qt::Key_Backspace:
-            emit deleteRequested(selectedKey_);
+        case Qt::Key_Backspace: {
+            const QStringList batch = selectedNoteIds();
+            if (batch.size() > 1) emit deleteManyRequested(batch);
+            else emit deleteRequested(selectedKey_);
             event->accept();
             return;
+        }
         case Qt::Key_Tab:
             emit childRequested(selectedKey_);
             event->accept();
@@ -653,7 +720,36 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
         }
 
         const QString key = keyAt(scenePos);
+        const bool ctrl = (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) != 0;
+        const bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
+        if (key.isEmpty() && shift && scene_) {
+            // Shift+drag draws a selection band; plain empty drag still pans.
+            bandActive_ = true;
+            bandAdditive_ = true;
+            bandBase_ = selectedKeys_;
+            bandStart_ = scenePos;
+            bandItem_ = scene_->addRect(QRectF(scenePos, scenePos),
+                                        QPen(QColor("#0a84ff"), 1, Qt::DashLine),
+                                        QBrush(QColor(10, 132, 255, 30)));
+            bandItem_->setZValue(90);
+            setCursor(Qt::CrossCursor);
+            event->accept();
+            return;
+        }
         if (!key.isEmpty()) {
+            if (ctrl) {
+                toggleSelectedKey(key);
+                event->accept();
+                return;
+            }
+            if (shift && !isKeySelected(key)) {
+                selectedKeys_.append(key);
+                selectedKey_ = key;
+                syncSelectionBorders();
+                event->accept();
+                return;
+            }
+            if (!isKeySelected(key)) setSelectedKey(key);
             pressKey_ = key;
             pressStart_ = event->pos();
             nodePressActive_ = true;
@@ -671,7 +767,6 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             dragContainerPath_ = sourceNode ? sourceNode->docPath : root_.docPath;
             dragStartScene_ = scenePos;
             dragMoved_ = false;
-            setSelectedKey(key);
             event->accept();
             return;
         }
@@ -687,13 +782,63 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
     QGraphicsView::mousePressEvent(event);
 }
 
+void MindMapView::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (event->mimeData()->hasFormat(QStringLiteral("application/x-adaptnote-excerpt"))) {
+        externalDropActive_ = true;
+        event->acceptProposedAction();
+        return;
+    }
+    QGraphicsView::dragEnterEvent(event);
+}
+
+void MindMapView::dragMoveEvent(QDragMoveEvent* event)
+{
+    if (!event->mimeData()->hasFormat(QStringLiteral("application/x-adaptnote-excerpt"))) {
+        QGraphicsView::dragMoveEvent(event);
+        return;
+    }
+    externalDropActive_ = true;
+    updateDropIndicator(mapToScene(event->position().toPoint()));
+    event->acceptProposedAction();
+}
+
+void MindMapView::dragLeaveEvent(QDragLeaveEvent* event)
+{
+    externalDropActive_ = false;
+    clearDropIndicator();
+    QGraphicsView::dragLeaveEvent(event);
+}
+
+void MindMapView::dropEvent(QDropEvent* event)
+{
+    if (!event->mimeData()->hasFormat(QStringLiteral("application/x-adaptnote-excerpt"))) {
+        QGraphicsView::dropEvent(event);
+        return;
+    }
+    const QPointF scenePos = mapToScene(event->position().toPoint());
+    QString group;
+    QString before;
+    dropTargetAt(scenePos, &group, &before);
+    externalDropActive_ = false;
+    clearDropIndicator();
+    const QByteArray payload =
+        event->mimeData()->data(QStringLiteral("application/x-adaptnote-excerpt"));
+    event->acceptProposedAction();
+    emit excerptDropped(payload, group);
+}
+
 void MindMapView::contextMenuEvent(QContextMenuEvent* event)
 {
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
         const QString key = keyAt(scenePos);
         if (key.startsWith(QStringLiteral("note:"))) {
-            emit noteMenuRequested(key.mid(5), event->globalPos());
+            if (selectedNoteIds().size() > 1 && isKeySelected(key)) {
+                emit selectionMenuRequested(selectedKeys(), event->globalPos());
+            } else {
+                emit noteMenuRequested(key.mid(5), event->globalPos());
+            }
             event->accept();
             return;
         }
@@ -864,27 +1009,77 @@ void MindMapView::setCollapsed(const QString& key, bool collapsed)
 
 void MindMapView::setSelectedKey(const QString& key)
 {
-    if (selectedKey_ == key) return;
-    const QString oldKey = selectedKey_;
-    const QRectF oldRect = rectForKey(oldKey);
-    const QRectF newRect = rectForKey(key);
+    if (selectedKeys_.size() == 1 && selectedKeys_.first() == key) return;
+    const QString oldPrimary = selectedKey_;
+    selectedKeys_.clear();
+    if (!key.isEmpty()) selectedKeys_.append(key);
     selectedKey_ = key;
-    auto updateBorder = [this](const QString& target, const QColor& color, qreal width) {
-        if (target.isEmpty()) return;
-        for (QGraphicsItem* item : scene_->items()) {
-            if (item->data(4).toString() != target) continue;
-            auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
-            if (!card || card->data(7).toBool()) continue;
-            QPen pen = card->pen();
-            pen.setColor(color);
-            pen.setWidthF(width);
-            card->setPen(pen);
-        }
-    };
-    updateBorder(oldKey, QColor(0xe3, 0xe7, 0xee), 1.0);
-    updateBorder(selectedKey_, QColor(0x2f, 0x6b, 0xd8), 2.4);
+    syncSelectionBorders();
+    const QRectF oldRect = rectForKey(oldPrimary);
+    const QRectF newRect = rectForKey(key);
     if (!oldRect.isNull()) viewport()->update(mapFromScene(oldRect).boundingRect());
     if (!newRect.isNull()) viewport()->update(mapFromScene(newRect).boundingRect());
+}
+
+void MindMapView::toggleSelectedKey(const QString& key)
+{
+    if (key.isEmpty()) return;
+    const int index = selectedKeys_.indexOf(key);
+    if (index >= 0) {
+        selectedKeys_.removeAt(index);
+        selectedKey_ = selectedKeys_.isEmpty() ? QString() : selectedKeys_.last();
+    } else {
+        selectedKeys_.append(key);
+        selectedKey_ = key;
+    }
+    syncSelectionBorders();
+    emit nodeSelected(selectedKey_);
+}
+
+void MindMapView::clearSelectionKeys()
+{
+    if (selectedKeys_.isEmpty()) return;
+    selectedKeys_.clear();
+    selectedKey_.clear();
+    syncSelectionBorders();
+}
+
+QStringList MindMapView::selectedNoteIds() const
+{
+    QStringList ids;
+    for (const QString& key : selectedKeys_)
+        if (key.startsWith(QStringLiteral("note:"))) ids.append(key.mid(5));
+    ids.removeDuplicates();
+    return ids;
+}
+
+void MindMapView::syncSelectionBorders()
+{
+    if (!scene_) return;
+    for (QGraphicsItem* item : scene_->items()) {
+        const QString key = item->data(4).toString();
+        if (key.isEmpty()) continue;
+        auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
+        // data(7) marks the card background; text/decoration items are separate.
+        if (!card || !card->data(7).toBool()) continue;
+        const bool selected = selectedKeys_.contains(key);
+        QPen pen = card->pen();
+        pen.setColor(selected ? QColor(0x2f, 0x6b, 0xd8) : QColor(0xe3, 0xe7, 0xee));
+        pen.setWidthF(selected ? 1.6 : 1.0);
+        card->setPen(pen);
+    }
+}
+
+void MindMapView::selectAllNotes()
+{
+    selectedKeys_.clear();
+    std::function<void(const Node&)> walk = [&](const Node& node) {
+        if (!node.markupId.isEmpty()) selectedKeys_.append(QStringLiteral("note:") + node.markupId);
+        for (const Node& child : node.children) walk(child);
+    };
+    walk(root_);
+    selectedKey_ = selectedKeys_.isEmpty() ? QString() : selectedKeys_.last();
+    syncSelectionBorders();
 }
 
 void MindMapView::setLinks(const QVector<MindLink>& links)
@@ -1030,7 +1225,7 @@ void MindMapView::rebuild()
         const QFontMetricsF titleFm(titleFont);
         const QFontMetricsF bodyFm(bodyFont);
 
-        const bool selected = selectedKey_ == key;
+        const bool selected = isKeySelected(key);
         QPen border(selected ? QColor(0x2f, 0x6b, 0xd8) : QColor(0xe3, 0xe7, 0xee),
                     selected ? 1.6 : 1.0);
         QColor fill = QColor(0xff, 0xff, 0xff);
