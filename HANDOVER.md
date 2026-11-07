@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,26 +17,28 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-07，就地编辑版）
+### 最近一次验收（2026-11-07，多选/拖拽/双文档版）
 
 ```text
-run 42387890013  Windows 构建（main @ 01c238b）  success
-12/12 套测试在 Windows runner 上全部 PASSED（含就地编辑/就地改名/单步撤销断言）
-自带 tesseract --list-langs 通过（chi_sim + eng），ecdict 43,823 条 / 8 MB，zip 76.0 MB
+run 42393475215  Windows 构建（main @ 818dcfb）  success
+12/12 套测试在 Windows runner 上全部 PASSED
+新增断言：多选计数、批量移组/删除的单步撤销、拖拽载荷、拖放建卡、参考窗格开关
+自带 tesseract --list-langs 通过，ecdict 43,823 条 / 8 MB，zip 76.0 MB
 ```
 
-之前全绿记录：42373627839（58efc35，自带 OCR/词典）、42353005512（900e60a）。
+之前全绿：42387890013（01c238b）、42373627839（58efc35）、42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/ux-direct-01c238b/AdaptNote-windows-x64-ux.zip
-sha256: dca9f1603bf703f6791f175d2c4b1065e19f566a787a4cf0fa16808b0a71715a
+https://github.com/hartamanda58/AdaptNote/releases/download/multi-doc-818dcfb/AdaptNote-windows-x64-multidoc.zip
+sha256: aca160e6b647492f3a04b3a3b20f6ff24ff8e8ec8da6a11e2c8d30e71635af9f
 ```
 
-**直接操作版**（压缩 76 MB / 解压 145 MB）：摘录面板就地编辑、脑图双击直接改名、
-回到有笔记的书默认「整理」布局、Ctrl+滚轮光标锚定缩放/捏合/中键平移。
+**多选 / 拖拽 / 双文档版**（压缩 76 MB / 解压 145 MB）：脑图 Ctrl/Shift 多选与批量删除、
+移组、改色（单步撤销），按住原文选区拖进脑图生成卡片，文档栏「参考 ▾」并排打开第二本书；
+另有就地编辑、双击改名、光标锚定缩放/捏合/中键平移。
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -47,7 +49,9 @@ sha256: dca9f1603bf703f6791f175d2c4b1065e19f566a787a4cf0fa16808b0a71715a
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（58efc35，同样的 OCR/词典，但没有就地编辑）：
+上一个版本（01c238b，就地编辑但无多选/拖拽/双文档）：
+`releases/download/ux-direct-01c238b/AdaptNote-windows-x64-ux.zip`
+更早的 58efc35（自带 OCR/词典）：
 `releases/download/bundled-ocr-dict-58efc35/AdaptNote-windows-x64-ocr-dict.zip`
 更早的不带 OCR/词典版（43 MB）：
 `releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip`
@@ -261,7 +265,7 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 5. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）；本地目录/S3 也只在测试里验过
 6. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
 7. 脑图**折叠按钮**仍只在 ⋯ 菜单里；多选与批量操作已实现
-8. 双文档并排只在同一窗口内，未做“两本书各自独立滚动进度”；真实数位板/Anki/XMind/WebDAV 仍未人工验收
+8. 参考窗格是只读的，且关闭后不会在重启时恢复；真实数位板/Anki/XMind/WebDAV 仍未人工验收
 9. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
 
 ---
