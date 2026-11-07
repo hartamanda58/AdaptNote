@@ -6,6 +6,7 @@
 **WebDAV / 本地目录 / S3（MinIO）双向同步（版本向量合并 + 冲突保留）**、手写笔迹、脑图、逐句朗读、AI 助手、
 **生词本（五盒复习 + 查词 + 发音 + TSV/Anki/.apkg 导出 + 同步）**、
 **OCR（tesseract / 视觉模型）**、页面缩略图、摘录卡片。
+Windows 便携包自带本地 tesseract（eng+chi_sim）与精简版 ECDICT，离线即可 OCR 和查词。
 
 界面为浅色三栏（左书架/大纲，中原文，右 摘录/笔记/生词/脑图/AI），以 ReaderNote 为主、
 参考 macOS 版 MarginNote。合并来源、复用了哪些代码、什么没合并，见

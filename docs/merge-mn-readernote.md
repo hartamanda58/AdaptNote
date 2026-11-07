@@ -84,7 +84,9 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 
 1. 选中一个词 → 浮出条「查词」，或在右侧「生词」标签直接输入。
 2. 查找顺序：`<数据目录>/ecdict.db` → AI（OpenAI 兼容）。
-   - ECDICT 是可选文件，放到数据目录即可（表 `stardict(word, phonetic, translation, definition)`）。
+   - Windows 便携包**自带精简版 ECDICT**（`data\ecdict.db`，约 4.4 万常用词条、
+     8 MB；由 `scripts/make_ecdict.py` 从 ecdict-sqlite-28 按词频/Collins/Oxford
+     评级裁剪生成）。想要全量词典时，下载 ecdict-sqlite-28.zip 解压替换同名文件即可。
    - 没有词典也没配 Key 时，词仍会进生词本，释义留待补全，不丢词。
 3. 「开始复习」进入专注复习：空格显示答案，`1` 不认识、`2` 认识，Esc 关闭；
    答对进下一盒，答错回第 0 盒。
@@ -102,8 +104,12 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 
 - 选中一块区域 → 浮出条「OCR」；没有选区时使用剪贴板图片，或选择图片文件。
 - 「更多 → 整页 OCR」识别当前页；「OCR 设置…」可改语言包（如 `eng+chi_sim`）。
-- 优先本机 `tesseract`（PATH、`C:/Program Files/Tesseract-OCR/`，或 `ADAPT_TESSERACT`）。
-- 没装 tesseract 且配置了 AI Key → 自动走视觉模型（`AiClient::sendVision`）。
+- 优先级：便携包自带的 `ocr\tesseract.exe` → 系统安装（PATH、
+  `C:/Program Files/Tesseract-OCR/`）→ `ADAPT_TESSERACT` 指定的路径。
+- Windows 便携包**自带 tesseract 5.4**（UB-Mannheim 构建）与
+  `tessdata_fast` 的 `eng` + `chi_sim` 语言包；`ocr.cpp` 会把
+  `--tessdata-dir` 指到包内 `ocr\tessdata`。
+- 完全没有 tesseract 且配置了 AI Key → 自动走视觉模型（`AiClient::sendVision`）。
 - 识别结果可复制，或「插入为摘录」成为一条笔记。
 
 ## 6.1 第二轮 UI 改进

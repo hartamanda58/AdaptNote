@@ -1,6 +1,7 @@
 #include "ocr/ocr.h"
 
 #include <QBuffer>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
@@ -14,6 +15,13 @@ QString tesseractExecutable()
     QStringList candidates;
     const QByteArray override = qgetenv("ADAPT_TESSERACT");
     if (!override.isEmpty()) candidates << QString::fromLocal8Bit(override);
+#ifdef Q_OS_WIN
+    // Portable bundle layout: <bundle>/bin/adaptnote.exe + <bundle>/ocr/tesseract.exe.
+    // The bundled copy wins over the machine install so a packaged OCR build stays
+    // self-contained.
+    candidates << QCoreApplication::applicationDirPath() +
+                      QStringLiteral("/../ocr/tesseract.exe");
+#endif
     const QString onPath = QStandardPaths::findExecutable(QStringLiteral("tesseract"));
     if (!onPath.isEmpty()) candidates << onPath;
 #ifdef Q_OS_WIN
@@ -69,8 +77,14 @@ Result recognize(const QImage& image, const QString& lang, int timeoutMs)
     }
 
     QProcess proc;
-    proc.start(exe, {png, QStringLiteral("stdout"), QStringLiteral("-l"), lang,
-                     QStringLiteral("--psm"), QStringLiteral("6")});
+    QStringList args{png, QStringLiteral("stdout")};
+    // Bundled installs keep tessdata next to the exe; make that explicit so the
+    // language packs are found even when TESSDATA_PREFIX is not set.
+    const QString tessdata = QFileInfo(exe).absolutePath() + QStringLiteral("/tessdata");
+    if (QFileInfo::exists(tessdata))
+        args << QStringLiteral("--tessdata-dir") << tessdata;
+    args << QStringLiteral("-l") << lang << QStringLiteral("--psm") << QStringLiteral("6");
+    proc.start(exe, args);
     if (!proc.waitForStarted(5000)) {
         out.error = QStringLiteral("无法启动 tesseract：%1").arg(proc.errorString());
         return out;

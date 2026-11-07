@@ -4053,9 +4053,9 @@ void MainWindow::openOcrSettings()
 
     auto* hint = new QLabel(QStringLiteral(
         "语言包写法例如 eng+chi_sim（英文+简体）、chi_sim+eng、jpn、kor。\n"
-        "Windows 默认安装在 C:/Program Files/Tesseract-OCR；其他位置可用环境变量\n"
-        "ADAPT_TESSERACT 指向 tesseract 可执行文件。没有 tesseract 时，会在配置了\n"
-        "AI Key 的前提下自动走视觉模型。"), &dlg);
+        "查找顺序：便携包自带的 ocr\\tesseract.exe → 系统安装（默认\n"
+        "C:/Program Files/Tesseract-OCR）→ 环境变量 ADAPT_TESSERACT 指定的路径。\n"
+        "都没有时，会在配置了 AI Key 的前提下自动走视觉模型。"), &dlg);
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:12px;"));
     form->addRow(hint);

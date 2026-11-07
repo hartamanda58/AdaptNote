@@ -19,7 +19,10 @@ param(
     [string]$QtDir   = $env:QTDIR,
     [string]$Version = "0.22",
     [string]$BuildDir = "build-win",
-    [string]$MuPdfRoot = ""
+    [string]$MuPdfRoot = "",
+    # Bundle a local tesseract (UB-Mannheim build + tessdata_fast eng/chi_sim) and a
+    # trimmed ECDICT into the portable folder. Downloads ~270 MB during packaging.
+    [bool]$WithExtras = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +87,88 @@ foreach ($sample in @("test.pdf", "test.epub")) {
 }
 if ($copied -eq 0) { Write-Host "   WARNING: no sample documents staged" }
 
+# ------------------------------------------------------------------ bundled extras
+# Layout inside the bundle:
+#   ocr\tesseract.exe + dlls + ocr\tessdata\{eng,chi_sim}.traineddata
+#   data\ecdict.db                     (word -> phonetic/translation/definition)
+# The app finds the portable copy before any machine install (see ocr.cpp).
+if ($WithExtras) {
+    $downloads = Join-Path $dist "downloads"
+    New-Item -ItemType Directory -Path $downloads -Force | Out-Null
+
+    function Get-FileFromWeb([string]$Url, [string]$Dest) {
+        if (Test-Path $Dest) { return $true }
+        Write-Host "   downloading $(Split-Path -Leaf $Dest)"
+        & curl.exe -sSL --retry 3 -o $Dest $Url
+        return ($LASTEXITCODE -eq 0 -and (Test-Path $Dest))
+    }
+
+    Write-Host "== bundled OCR (tesseract 5.4 + eng/chi_sim)"
+    $ocrStage = Join-Path $stage "ocr"
+    try {
+        $setup = Join-Path $downloads "tesseract-ocr-w64-setup-5.4.0.20240606.exe"
+        if (-not (Get-FileFromWeb "https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe" $setup)) {
+            throw "tesseract setup download failed"
+        }
+        $extract = Join-Path $dist "tesseract-extract"
+        if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+        New-Item -ItemType Directory -Path $extract -Force | Out-Null
+        & 7z x $setup "-o$extract" -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7z extraction failed (is 7-Zip installed?)" }
+        $exe = Get-ChildItem -Path $extract -Recurse -Filter tesseract.exe |
+               Select-Object -First 1
+        if (-not $exe) { throw "tesseract.exe not found inside the installer" }
+        New-Item -ItemType Directory -Path $ocrStage -Force | Out-Null
+        Copy-Item $exe.FullName (Join-Path $ocrStage "tesseract.exe") -Force
+        foreach ($dll in (Get-ChildItem -Path $exe.DirectoryName -Filter *.dll)) {
+            Copy-Item $dll.FullName $ocrStage -Force
+        }
+        # Prune everything the CLI does not need: installer tessdata (legacy+LSTM, big),
+        # docs and the D3D runtime some builds ship.
+        foreach ($junk in @("d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "docs")) {
+            $p = Join-Path $ocrStage $junk
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+        }
+        $tessdata = Join-Path $ocrStage "tessdata"
+        New-Item -ItemType Directory -Path $tessdata -Force | Out-Null
+        foreach ($lang in @("eng", "chi_sim")) {
+            $pack = Join-Path $downloads "$lang.traineddata"
+            if (-not (Get-FileFromWeb "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata" $pack)) {
+                throw "$lang.traineddata download failed"
+            }
+            Copy-Item $pack (Join-Path $tessdata "$lang.traineddata") -Force
+        }
+        $ocrExe = Join-Path $ocrStage "tesseract.exe"
+        & $ocrExe --version | Select-Object -First 1 | ForEach-Object { Write-Host "   $_" }
+    } catch {
+        Write-Warning "bundled OCR skipped: $($_.Exception.Message)"
+        if (Test-Path $ocrStage) { Remove-Item $ocrStage -Recurse -Force }
+    }
+
+    Write-Host "== bundled dictionary (ECDICT, top entries)"
+    try {
+        $ecdictZip = Join-Path $downloads "ecdict-sqlite-28.zip"
+        if (-not (Get-FileFromWeb "https://github.com/skywind3000/ECDICT/releases/download/1.0.28/ecdict-sqlite-28.zip" $ecdictZip)) {
+            throw "ecdict download failed"
+        }
+        New-Item -ItemType Directory -Path (Join-Path $stage "data") -Force | Out-Null
+        $ecdictOut = Join-Path $stage "data\ecdict.db"
+        & python $root\scripts\make_ecdict.py $ecdictZip $ecdictOut
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ecdictOut)) {
+            throw "ecdict.db build failed"
+        }
+        Get-Item $ecdictOut | ForEach-Object { Write-Host ("   {0:N1} MB" -f ($_.Length / 1MB)) }
+        # The unpacked full dictionary is ~780 MB of scratch; drop it once done.
+        $scratch = Join-Path $dist "ecdict-extract"
+        if (Test-Path $scratch) { Remove-Item $scratch -Recurse -Force }
+    } catch {
+        Write-Warning "bundled dictionary skipped: $($_.Exception.Message)"
+        if (Test-Path (Join-Path $stage "data\ecdict.db")) {
+            Remove-Item (Join-Path $stage "data\ecdict.db") -Force
+        }
+    }
+}
+
 Write-Host "== verify the staged tree"
 # Fail here rather than shipping a zip that cannot start: a missing platform plugin makes
 # Qt abort with "could not find or load the Qt platform plugin windows".
@@ -125,6 +210,9 @@ AdaptNote（Windows 便携版）
 数据：全部在 data\ 目录里（笔记库 data\library.db，图片 data\images\）；
       整个文件夹拷到 U 盘即可带走，删掉 data\ 恢复出厂状态。
 示例：samples\test.pdf / samples\test.epub
+OCR：包内自带 tesseract（ocr\ 目录，eng+chi_sim）；语言包可在「更多 → OCR 设置…」改。
+查词：包内自带 ECDICT 精简版（data\ecdict.db，按词频取常用词条）；
+      想要全量词典时下载 ecdict-sqlite-28.zip 解压后替换同名文件即可。
 
 提示：首次打开 PDF 若发现内嵌标注，会问一次是否读成笔记；
       快捷键 Ctrl+O 打开 · Ctrl+F 查找 · H/U/S/N 标注 · X 摘录图 · P 手写 · E 橡皮
