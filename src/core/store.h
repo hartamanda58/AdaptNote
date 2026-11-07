@@ -119,6 +119,17 @@ public:
     void syncDocumentGroupTopic(const QString& docPath);
     QVector<MindGroup> mindGroupsForTopic(const QString& topicId) const;   // live only
 
+    // ---- vocabulary book ----
+    QVector<WordEntry> words(bool includeDeleted = false) const;
+    // Case-insensitive lookup of a live card; returns an empty id when absent.
+    WordEntry wordByText(const QString& word) const;
+    // Inserts or updates by id, reviving a tombstone with the same spelling instead of
+    // creating a duplicate (the table has a unique, case-insensitive word index).
+    bool upsertWord(WordEntry w, QString* error = nullptr, bool allowTombstone = false);
+    bool removeWord(const QString& id);
+    // Five-box spaced repetition: correct -> next box, wrong -> back to box 0.
+    bool reviewWord(const QString& id, bool remembered, qint64 nowMs = 0);
+
     // ---- free-form links between nodes ----
     QVector<MindLink> mindLinks(const QString& topicId = QString(), bool includeDeleted = false) const;
     bool upsertMindLink(const MindLink& l, QString* error = nullptr);

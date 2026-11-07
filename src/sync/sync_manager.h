@@ -10,7 +10,8 @@
 namespace an {
 
 struct SyncSettings {
-    QString url;                              // e.g. https://dav.example.com/dav
+    QString backend = QStringLiteral("webdav");   // webdav | folder
+    QString url;                              // WebDAV URL or a local folder
     QString user;
     QString password;
     QString remotePath = QStringLiteral("adaptnote");
@@ -101,6 +102,18 @@ public:
                                         const QVector<MindLink>& localLinks,
                                         const QVector<MindLink>& remoteLinks,
                                         const QString& deviceId, qint64 nowMs);
+
+    // ---- vocabulary sync ----
+    struct WordMergeResult {
+        QVector<WordEntry> merged;
+        int pulled = 0;
+        int pushed = 0;
+        int conflicts = 0;
+    };
+    static QByteArray wordsJson(const QVector<WordEntry>& words);
+    static QVector<WordEntry> parseWords(const QByteArray& json, QString* error);
+    static WordMergeResult mergeWords(const QVector<WordEntry>& local,
+                                      const QVector<WordEntry>& remote, qint64 nowMs);
 
 
 private:

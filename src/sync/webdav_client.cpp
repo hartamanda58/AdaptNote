@@ -1,6 +1,10 @@
 #include "sync/webdav_client.h"
 
 #include <QEventLoop>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -56,8 +60,50 @@ QString WebDavClient::urlFor(const QString& relPath) const
     return baseUrl_ + QLatin1Char('/') + p;
 }
 
+void WebDavClient::setLocalRoot(const QString& root)
+{
+    localRoot_ = root.trimmed();
+    while (localRoot_.endsWith(QLatin1Char('/'))) localRoot_.chop(1);
+}
+
+QString WebDavClient::localPath(const QString& relPath) const
+{
+    QString p = relPath;
+    while (p.startsWith(QLatin1Char('/'))) p.remove(0, 1);
+    return localRoot_ + QLatin1Char('/') + p;
+}
+
+QString WebDavClient::localEtag(const QString& path) const
+{
+    const QFileInfo info(path);
+    return QStringLiteral("%1-%2").arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
+}
+
 bool WebDavClient::list(const QString& relPath, QVector<DavEntry>* out, QString* error)
 {
+    if (isLocal()) {
+        QDir dir(localPath(relPath));
+        if (!dir.exists()) {
+            if (error) *error = QStringLiteral("PROPFIND %1 -> 404").arg(relPath);
+            return false;
+        }
+        if (out) {
+            out->clear();
+            const QFileInfoList entries = dir.entryInfoList(
+                QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name);
+            for (const QFileInfo& info : entries) {
+                DavEntry entry;
+                entry.name = info.fileName();
+                entry.href = relPath + QLatin1Char('/') + entry.name;
+                entry.isCollection = info.isDir();
+                entry.contentLength = info.isDir() ? -1 : info.size();
+                entry.etag = localEtag(info.absoluteFilePath());
+                entry.lastModified = info.lastModified();
+                out->append(entry);
+            }
+        }
+        return true;
+    }
     QNetworkRequest req(QUrl(urlFor(relPath)));
     req.setRawHeader("Depth", "1");
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/xml; charset=utf-8"));
@@ -136,6 +182,22 @@ bool WebDavClient::get(const QString& relPath, QByteArray* out, QString* etag, Q
                        bool* notFound)
 {
     if (notFound) *notFound = false;
+    if (isLocal()) {
+        const QString path = localPath(relPath);
+        QFile file(path);
+        if (!file.exists()) {
+            if (notFound) *notFound = true;
+            if (error) *error = QStringLiteral("404 not found: %1").arg(relPath);
+            return false;
+        }
+        if (!file.open(QIODevice::ReadOnly)) {
+            if (error) *error = file.errorString();
+            return false;
+        }
+        if (out) *out = file.readAll();
+        if (etag) *etag = localEtag(path);
+        return true;
+    }
     QNetworkRequest req(QUrl(urlFor(relPath)));
     if (!user_.isEmpty())
         req.setRawHeader("Authorization",
@@ -174,6 +236,25 @@ bool WebDavClient::put(const QString& relPath, const QByteArray& data, const QSt
                        QString* error, bool* preconditionFailed)
 {
     if (preconditionFailed) *preconditionFailed = false;
+    if (isLocal()) {
+        const QString path = localPath(relPath);
+        if (!ifMatchEtag.isEmpty() && QFileInfo::exists(path) && localEtag(path) != ifMatchEtag) {
+            if (preconditionFailed) *preconditionFailed = true;
+            if (error) *error = QStringLiteral("412 precondition failed: %1").arg(relPath);
+            return false;
+        }
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            if (error) *error = file.errorString();
+            return false;
+        }
+        if (file.write(data) != data.size()) {
+            if (error) *error = QStringLiteral("写入不完整：%1").arg(path);
+            return false;
+        }
+        return true;
+    }
     QNetworkRequest req(QUrl(urlFor(relPath)));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json; charset=utf-8"));
     if (!user_.isEmpty())
@@ -207,6 +288,11 @@ bool WebDavClient::put(const QString& relPath, const QByteArray& data, const QSt
 
 bool WebDavClient::mkcol(const QString& relPath, QString* error)
 {
+    if (isLocal()) {
+        if (QDir().mkpath(localPath(relPath))) return true;
+        if (error) *error = QStringLiteral("无法创建目录：%1").arg(localPath(relPath));
+        return false;
+    }
     QNetworkRequest req(QUrl(urlFor(relPath)));
     if (!user_.isEmpty())
         req.setRawHeader("Authorization",
@@ -232,6 +318,14 @@ bool WebDavClient::mkcol(const QString& relPath, QString* error)
 
 bool WebDavClient::remove(const QString& relPath, QString* error)
 {
+    if (isLocal()) {
+        const QString path = localPath(relPath);
+        const QFileInfo info(path);
+        if (!info.exists()) return true;
+        const bool ok = info.isDir() ? QDir(path).removeRecursively() : QFile::remove(path);
+        if (!ok && error) *error = QStringLiteral("无法删除：%1").arg(path);
+        return ok;
+    }
     QNetworkRequest req(QUrl(urlFor(relPath)));
     if (!user_.isEmpty())
         req.setRawHeader("Authorization",

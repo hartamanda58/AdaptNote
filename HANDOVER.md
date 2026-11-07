@@ -5,12 +5,16 @@
 
 ---
 
-## 0. 当前状态（2026-11）
+## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`，最新提交 `ea38004`（`style(workspace): align reader shell with self-hosted MN reference layout`）
-- 本地 11 套测试全绿；Windows 构建 + 便携包运行验收全绿
-- 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1 万行，自用、不分发
+- 分支 `main`，合并前最新提交 `ea38004`；本次合并（AdaptNote × MN × ReaderNote）尚未提交
+- 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows 构建脚本未改动
+- 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.7 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
+- **本次合并说明见 `docs/merge-mn-readernote.md`**：以 AdaptNote 为底座，吸收 MN 的
+  生词本 / OCR / 查词 / 自由 AI 提问 / 本地目录同步，UI 改为浅色 MarginNote/macOS 三栏
+
+> ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
 ### 最近一次验收
 
@@ -75,7 +79,7 @@ python3 scripts/check_dialogs.py                  # 禁止 headless 下裸模态
 cmake --build build -j2
 ```
 
-11 套测试（**每个测试必须独立数据目录**，共用会互相污染）：
+12 套测试（**每个测试必须独立数据目录**，共用会互相污染）：
 
 ```bash
 cd build
@@ -92,6 +96,7 @@ run librarytest
 run migratetest  test.pdf
 run importtest   test.pdf
 run conflicttest
+run vocabtest
 ```
 
 截图（固定尺寸，便于比较）：
@@ -181,19 +186,29 @@ MD / HTML / OPML / XMind / Anki(apkg)；可按脑图分组输出；可只导出�
 关键：卡片文字/装饰是**独立 scene item**，不是卡片子项。命中要沿 `data(4)`（nodeKey）回查，
 再映射到 tree 节点。`keyAt` / `groupKeyAt` / `dropTargetAt` 都按这个规则。
 
-### 3.8 UI（当前方向）
+### 3.8 UI（合并后）
 
-参考 `03-mn-源码/mn/public/index.html` 的**深色三栏**：
+UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 已整体重写。
 
 ```text
 左：书架 / 笔记本 / 目录
-中：原始纸白 PDF/EPUB（不染色）
-右：摘录 / 笔记 / 生词 / 脑图
+中：原始纸白 PDF/EPUB（不染色）+ 文档标签
+右：摘录 / 笔记 / 生词 / 脑图 / AI（五标签，记住上次选择）
 ```
 
-- 主题 QSS 资源别名已修（`QT_RESOURCE_ALIAS app.qss`）——此前主题**从未加载**过
+- 主题 QSS 资源别名已修（`QT_RESOURCE_ALIAS app.qss`）
 - 大纲行是自定义 delegate：标题 + 摘录/批注预览 + 页码
-- 生词标签目前是**诚实占位**（没有生词数据模型），不显示假数据
+- 顶部工具栏保留高频动作；模式按钮带文字（阅读/整理/脑图）
+- 选中文字后浮出 pill：高亮 / 下划线 / 批注 / 查词 / 翻译 / AI / OCR
+- AI 从独立 dock 合并进右侧标签，不再挤掉笔记面板
+
+### 3.10 合并新增（来自 MN）
+
+- 生词本：本地 ECDICT 优先、AI 兜底、五盒间隔重复、发音、TSV/Anki 导出、
+  `words.json` 随同步走（墓碑传播）
+- 划词浮出条：高亮 / 下划线 / 批注 / 查词 / 翻译 / AI / OCR
+- OCR：选中区域或剪贴板图片 → tesseract；没有 tesseract 时走视觉模型
+- 本地目录同步（U 盘/NAS），与 WebDAV 共用版本向量合并
 
 ### 3.9 划词翻译
 
@@ -205,22 +220,29 @@ MD / HTML / OPML / XMind / Anki(apkg)；可按脑图分组输出；可只导出�
 
 ## 4. 未完成 / 已知问题
 
-1. **生词本**（查词、间隔重复、TSV/Anki 导出、发音）—— MN 有，AdaptNote 没有
-2. 笔记拖到另一笔记 **下半区改父级**的落点预览仍不完整
-3. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）
-4. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
-5. 大纲/脑图 **多选、批量操作、折叠按钮** 未做
-6. 真实数位板压感/倾斜、真实 Anki/XMind 客户端、真实 WebDAV 未人工验收
-7. PDF 目录/缩略图以外的增强（缩略图、双页对照、章节自动归类）未做
-8. 右侧面板在窄窗口偏窄；生词标签仍是占位
+1. **S3/MinIO 同步未合并**：MN 有，合并版只有 WebDAV + 本地目录（SigV4 未实现）
+2. **ReaderNote 白板 / Excalidraw 未合并**：手写层 + 脑图覆盖主路径，白板另算一个大工程
+3. OCR 依赖外部 `tesseract`，没有随包分发；没有 tesseract 时必须配视觉模型
+4. 生词的**原文回链**只传书名，不传绝对路径；换设备后词还能看，但“回原文”要重新定位
+5. 笔记拖到另一笔记 **下半区改父级**的落点预览仍不完整
+6. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）；本地目录同步也只在测试里验过
+7. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
+8. 大纲/脑图 **多选、批量操作、折叠按钮** 未做
+9. 真实数位板压感/倾斜、真实 Anki/XMind 客户端、真实 WebDAV 未人工验收
+10. PDF 缩略图、双页对照、章节自动归类未做
 
 ---
 
 ## 5. 已验证 vs 未验证（诚实清单）
 
-**已验证（自动化）**：11 套本地测试；Windows 构建与打包运行（导出、数据目录、截图、DPI）。
+**已验证（自动化）**：12 套本地测试（新增 `vocabtest`）；Windows 构建与打包运行（导出、数据目录、截图、DPI）。
 
 **未验证（需要真人/真机）**：
+
+- 新的浅色 UI 在 125%/150%/200% 缩放下的观感（只有 100% 截图）
+- 浮出 pill 在触控板/触屏上的手感
+- 真实 tesseract 安装后的识别质量（本机无 tesseract；已用假 exe 验证进程管线与失败分支，视觉模型只验了请求体）
+- 本地目录同步接真实 NAS/U 盘（测试用临时目录）
 
 - 高分屏下的人眼观感（125%/150%/200%、多显示器）
 - 数位板真实压感与笔迹偏移
@@ -250,11 +272,11 @@ MD / HTML / OPML / XMind / Anki(apkg)；可按脑图分组输出；可只导出�
 
 ## 7. 建议的下一步
 
-1. **生词本**（对齐 MN：本地词库优先 + AI 兜底 + 间隔重复 + Anki 导出）
+1. **S3/MinIO 同步**（SigV4）与白板/Excalidraw：合并后仍缺的两块
 2. 脑图拖拽落点预览 + 多选批量操作
-3. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV、Anki/XMind）
+3. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV/本地目录、Anki/XMind、tesseract）
 4. 主题同步补冲突/墓碑的集成测试（远端并发改名、远端删资料）
-5. 收紧右侧面板最小宽度；生词标签要么实现、要么在 UI 中移除
+5. 生词“回原文”跨设备定位（现在只传书名）；右侧面板在窄窗口下的最小宽度
 
 ---
 

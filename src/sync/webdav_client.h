@@ -26,6 +26,10 @@ public:
     ~WebDavClient();
 
     void setBaseUrl(const QString& url);
+    // Local-folder transport: the same snapshot layout, backed by the filesystem.
+    // Useful for USB drives and NAS mounts, and it keeps the merge logic untouched.
+    void setLocalRoot(const QString& root);
+    bool isLocal() const { return !localRoot_.isEmpty(); }
     QString baseUrl() const { return baseUrl_; }
     void setCredentials(const QString& user, const QString& password);
     void setTimeoutMs(int ms) { timeoutMs_ = ms; }
@@ -40,9 +44,12 @@ public:
 
 private:
     QString urlFor(const QString& relPath) const;
+    QString localPath(const QString& relPath) const;
+    QString localEtag(const QString& path) const;
 
     QNetworkAccessManager* nam_ = nullptr;
     QString baseUrl_;
+    QString localRoot_;
     QString user_;
     QString password_;
     int timeoutMs_ = 20000;

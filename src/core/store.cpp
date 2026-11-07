@@ -1,6 +1,7 @@
 #include "core/store.h"
 
 #include "sync/vv.h"
+#include "vocab/vocab.h"
 
 #include <QAtomicInt>
 #include <QCryptographicHash>
@@ -358,6 +359,13 @@ bool Store::ensureSchema(QString* error)
         " points text, arrow text, label text,"
         " updated integer, deleted integer default 0, vv text, deviceId text)",
         "create index if not exists idx_links_topic on mind_links(topicId)",
+        // 生词本：五盒间隔重复 + 原文回链。word 唯一（忽略大小写），tombstone 行保留。
+        "create table if not exists words ("
+        " id text primary key, word text not null, phonetic text, meaning text, example text,"
+        " docPath text, page integer default -1, box integer default 0, dueAt integer,"
+        " created integer, updated integer, deleted integer default 0)",
+        "create unique index if not exists idx_words_word on words(word collate nocase)",
+        "create index if not exists idx_words_due on words(deleted, dueAt)",
     };
     for (const QString& s : ddl) {
         if (!q.exec(s)) {
@@ -779,6 +787,165 @@ QVector<QPair<QString, int>> Store::tagCounts(const QString& docPathIn) const
         return a.first < b.first;
     });
     return out;
+}
+
+namespace {
+WordEntry readWord(const QSqlQuery& q)
+{
+    WordEntry w;
+    w.id = q.value(0).toString();
+    w.word = q.value(1).toString();
+    w.phonetic = q.value(2).toString();
+    w.meaning = q.value(3).toString();
+    w.example = q.value(4).toString();
+    w.docPath = q.value(5).toString();
+    w.page = q.value(6).toInt();
+    w.box = q.value(7).toInt();
+    w.dueAt = q.value(8).toLongLong();
+    w.created = q.value(9).toLongLong();
+    w.updated = q.value(10).toLongLong();
+    w.deleted = q.value(11).toInt() != 0;
+    return w;
+}
+}  // namespace
+
+QVector<WordEntry> Store::words(bool includeDeleted) const
+{
+    QVector<WordEntry> out;
+    if (!open_) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    const QString sql = QStringLiteral("select id,word,phonetic,meaning,example,docPath,page,"
+                                       "box,dueAt,created,updated,deleted from words %1")
+                            .arg(includeDeleted ? QString() : QStringLiteral("where deleted=0")) +
+                        QStringLiteral(" order by dueAt asc, word collate nocase asc");
+    q.prepare(sql);
+    if (!q.exec()) return out;
+    while (q.next()) out.append(readWord(q));
+    return out;
+}
+
+WordEntry Store::wordByText(const QString& word) const
+{
+    WordEntry out;
+    if (!open_ || word.trimmed().isEmpty()) return out;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare(QStringLiteral("select id,word,phonetic,meaning,example,docPath,page,box,dueAt,"
+                             "created,updated,deleted from words "
+                             "where word = ? collate nocase limit 1"));
+    q.addBindValue(word.trimmed());
+    if (q.exec() && q.next()) out = readWord(q);
+    return out;
+}
+
+namespace {
+// Deterministic identity: two devices that add the same spelling independently must
+// converge on one card without relying on a server-side merge.
+QString canonicalWordId(const QString& word)
+{
+    return QStringLiteral("w") +
+           QString::fromLatin1(QCryptographicHash::hash(word.trimmed().toLower().toUtf8(),
+                                                       QCryptographicHash::Sha1)
+                                   .toHex()
+                                   .left(16));
+}
+}  // namespace
+
+bool Store::upsertWord(WordEntry w, QString* error, bool allowTombstone)
+{
+    if (!open_ || w.word.trimmed().isEmpty()) {
+        if (error) *error = QStringLiteral("空的生词");
+        return false;
+    }
+    w.word = w.word.trimmed();
+    if (w.id.isEmpty()) {
+        const WordEntry existing = wordByText(w.word);
+        if (!existing.id.isEmpty()) {
+            // Re-adding an existing spelling must not wipe what lookup already collected,
+            // and it must not reset spaced-repetition progress. Editing a card passes an
+            // id explicitly and therefore keeps full control of every field.
+            w.id = existing.id;
+            if (w.phonetic.isEmpty()) w.phonetic = existing.phonetic;
+            if (w.meaning.isEmpty()) w.meaning = existing.meaning;
+            if (w.example.isEmpty()) w.example = existing.example;
+            if (w.docPath.isEmpty()) {
+                w.docPath = existing.docPath;
+                if (w.page < 0) w.page = existing.page;
+            }
+            if (w.box == 0 && existing.box > 0) w.box = existing.box;
+            if (w.created <= 0) w.created = existing.created;
+            if (w.dueAt <= 0) w.dueAt = existing.dueAt;
+        } else {
+            w.id = canonicalWordId(w.word);
+        }
+    } else {
+        // A synced card from another device may carry a different id for the same
+        // spelling. Collapse it onto the local id, keeping the newer content.
+        const WordEntry same = wordByText(w.word);
+        if (!same.id.isEmpty() && same.id != w.id) {
+            if (w.updated > 0 && w.updated < same.updated) return true;  // local wins
+            w.id = same.id;
+        }
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (w.updated <= 0) w.updated = now;
+    if (w.created <= 0) w.created = w.updated;
+    if (w.dueAt <= 0) w.dueAt = w.updated;
+    if (!allowTombstone) w.deleted = false;
+
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("insert into words(id,word,phonetic,meaning,example,docPath,page,box,dueAt,"
+              "created,updated,deleted) values(?,?,?,?,?,?,?,?,?,?,?,?) "
+              "on conflict(id) do update set word=excluded.word, phonetic=excluded.phonetic,"
+              "meaning=excluded.meaning, example=excluded.example, docPath=excluded.docPath,"
+              "page=excluded.page, box=excluded.box, dueAt=excluded.dueAt,"
+              "updated=excluded.updated, deleted=excluded.deleted");
+    q.addBindValue(w.id);
+    q.addBindValue(w.word);
+    q.addBindValue(w.phonetic);
+    q.addBindValue(w.meaning);
+    q.addBindValue(w.example);
+    q.addBindValue(w.docPath);
+    q.addBindValue(w.page);
+    q.addBindValue(w.box);
+    q.addBindValue(w.dueAt);
+    q.addBindValue(w.created);
+    q.addBindValue(w.updated);
+    q.addBindValue(w.deleted ? 1 : 0);
+    if (!q.exec()) {
+        if (error) *error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Store::removeWord(const QString& id)
+{
+    if (!open_ || id.isEmpty()) return false;
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("update words set deleted=1, updated=? where id=?");
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(id);
+    return q.exec();
+}
+
+bool Store::reviewWord(const QString& id, bool remembered, qint64 nowMs)
+{
+    if (!open_ || id.isEmpty()) return false;
+    const qint64 now = nowMs > 0 ? nowMs : QDateTime::currentMSecsSinceEpoch();
+    QSqlQuery read(QSqlDatabase::database(conn_));
+    read.prepare("select box from words where id=? and deleted=0");
+    read.addBindValue(id);
+    if (!read.exec() || !read.next()) return false;
+    const int box = remembered ? qMin(read.value(0).toInt() + 1, 5) : 0;
+    const qint64 due = now + static_cast<qint64>(vocab::gapDaysForBox(box)) * 86400000LL;
+
+    QSqlQuery q(QSqlDatabase::database(conn_));
+    q.prepare("update words set box=?, dueAt=?, updated=? where id=?");
+    q.addBindValue(box);
+    q.addBindValue(due);
+    q.addBindValue(now);
+    q.addBindValue(id);
+    return q.exec();
 }
 
 bool Store::setWrittenToPdf(const QString& id, bool written)

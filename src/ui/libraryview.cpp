@@ -207,10 +207,12 @@ LibraryView::LibraryView(Store& store, QWidget* parent)
     docs_->setSelectionBehavior(QAbstractItemView::SelectRows);
     docs_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     docs_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    docs_->horizontalHeader()->setStretchLastSection(true);
-    docs_->setColumnWidth(0, 240);
-    docs_->setColumnWidth(1, 60);
-    docs_->setColumnWidth(2, 60);
+    docs_->horizontalHeader()->setStretchLastSection(false);
+    docs_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    docs_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    docs_->setColumnWidth(1, 44);
+    docs_->setColumnWidth(2, 44);
+    docs_->setColumnWidth(3, 86);
     docsBox->addWidget(docs_, 1);
 
     auto* manageRow = new QHBoxLayout;

@@ -9,12 +9,14 @@
 #include "mind/mindmap.h"
 #include "ui/libraryview.h"
 #include "sync/sync_manager.h"
+#include "vocab/vocab.h"
 
 #include <QColor>
 #include <QHash>
 #include <QMainWindow>
 #include <QVector>
 
+class QCheckBox;
 class QComboBox;
 class QSplitter;
 class QToolBar;
@@ -36,6 +38,7 @@ class QPushButton;
 namespace an {
 
 class PageView;
+class VocabPanel;
 
 class MindGroupCommand;
 class MindLinkCommand;
@@ -216,8 +219,16 @@ private:
     void editAiRoles();
     void buildReaderMenu();
     void runAiWithSelection();
+    void askAiQuestion();
     void showSelectionTranslation();
     void updateSelectionTranslationAction();
+    // Vocabulary: local ECDICT first, then the OpenAI-compatible model.
+    void lookupSelectionWord();
+    void lookupWordForVocab(const QString& raw);
+    void saveVocabDefinition(const vocab::Definition& def);
+    // OCR: selected region (or clipboard image) -> tesseract, vision model fallback.
+    void ocrSelection();
+    void showOcrResult(const QString& text);
     void insertAiAsNote();
     void onInkStroke(int page, const QVector<InkPoint>& points);
     void onReaderSentence(const an::read::Sentence& sentence);
@@ -252,7 +263,8 @@ private:
     QTreeWidget* pageOutlineOnShelf_ = nullptr;
     mind::MindMapView* shelfMindView_ = nullptr;
     QTabWidget* readerSideTabs_ = nullptr;
-    QDockWidget* aiDock_ = nullptr;
+    QWidget* aiPanel_ = nullptr;
+    QWidget* selectionBar_ = nullptr;
     QToolBar* findBar_ = nullptr;
     QDialog* notebookMindWindow_ = nullptr;
     mind::MindMapView* notebookMindView_ = nullptr;
@@ -260,6 +272,7 @@ private:
     mind::MindMapView* mindView_ = nullptr;
     int workspaceMode_ = 0;
     QString currentTopic_;   // non-empty = the mind map shows that reading topic
+    QString mindFittedScope_;   // scope whose map was already fitted into the viewport
     void ensureMindPanel();
     void rebuildMindMap();
     QStringList currentTopicDocPaths() const;   // documents of the open topic (empty = none)
@@ -300,13 +313,19 @@ private:
     QLineEdit* aiExtraEdit_ = nullptr;
     QTextBrowser* aiOutput_ = nullptr;
     QTextBrowser* aiReasoning_ = nullptr;
-    QToolButton* aiReasoningToggle_ = nullptr;
+    QCheckBox* aiReasoningToggle_ = nullptr;
     QPushButton* aiRunButton_ = nullptr;
     QPushButton* aiInsertButton_ = nullptr;
     QToolButton* translateSelectionButton_ = nullptr;
     QDialog* translationDialog_ = nullptr;
     QTextBrowser* translationOutput_ = nullptr;
     bool translationRequest_ = false;
+    // A lookup/OCR request owns the next AI reply, so the generic answer pane is not fed
+    // with dictionary prose.
+    QString pendingWord_;
+    bool pendingOcr_ = false;
+    QLineEdit* aiQuestionEdit_ = nullptr;
+    VocabPanel* vocabPanel_ = nullptr;
     QString aiContent_;
     QString aiReasoningText_;
     bool exportFiltered_ = false;

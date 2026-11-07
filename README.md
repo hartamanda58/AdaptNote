@@ -3,7 +3,12 @@
 对标 BookxNote Pro 的自用实现。**P0–P5 全部完成并通过自动化验收**：
 能打开 PDF/EPUB、连续/双页/单页、缩放旋转、拖选文本、五类标注（含图片摘录）、写入原 PDF、
 全文搜索（FTS5）、标签与颜色筛选、撤销/重做、精细阅读位置记忆、导出 MD/HTML/OPML/XMind/Anki、
-**WebDAV 双向同步（版本向量合并 + 冲突保留）**、手写笔迹、脑图、逐句朗读、AI 助手。
+**WebDAV / 本地目录双向同步（版本向量合并 + 冲突保留）**、手写笔迹、脑图、逐句朗读、AI 助手、
+**生词本（五盒间隔重复 + 查词 + 发音 + Anki 导出）**、**OCR（tesseract / 视觉模型）**。
+
+界面为浅色三栏（左书架/大纲，中原文，右 摘录/笔记/生词/脑图/AI），以 ReaderNote 为主、
+参考 macOS 版 MarginNote。合并来源、复用了哪些代码、什么没合并，见
+[`docs/merge-mn-readernote.md`](docs/merge-mn-readernote.md)。
 
 设计上刻意做了三处不同（相对参考产品）：
 

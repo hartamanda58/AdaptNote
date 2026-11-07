@@ -81,6 +81,8 @@ add_library(adapt_core STATIC
   src/core/paths.cpp
   src/core/store.cpp
   src/core/textselect.cpp
+  src/vocab/vocab.cpp
+  src/ocr/ocr.cpp
   src/sync/vv.cpp
   src/ai/ai_client.cpp
   src/ai/prompts.cpp
@@ -142,6 +144,7 @@ add_library(adapt_ui STATIC
   src/ui/pageview.cpp
   src/ui/libraryview.cpp
   src/ui/conflictdialog.cpp
+  src/ui/vocabpanel.cpp
   src/mind/mindmap.cpp
 )
 target_link_libraries(adapt_ui PUBLIC adapt_core Qt6::Widgets Qt6::Gui)
@@ -196,6 +199,9 @@ target_link_libraries(importtest PRIVATE adapt_core)
 add_executable(conflicttest tests/conflicttest.cpp)
 target_link_libraries(conflicttest PRIVATE adapt_ui)
 
+add_executable(vocabtest tests/vocabtest.cpp)
+target_link_libraries(vocabtest PRIVATE adapt_core)
+
 enable_testing()
 add_test(NAME selftest COMMAND selftest test.pdf test.epub WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(NAME visualtest COMMAND visualtest test.pdf WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -208,6 +214,7 @@ add_test(NAME librarytest COMMAND librarytest WORKING_DIRECTORY ${CMAKE_BINARY_D
 add_test(NAME migratetest COMMAND migratetest test.pdf WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(NAME importtest COMMAND importtest test.pdf WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(NAME conflicttest COMMAND conflicttest WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(NAME vocabtest COMMAND vocabtest WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 set_tests_properties(selftest visualtest featuretest exporttest synctest aitest p5test librarytest
-                     migratetest importtest conflicttest
+                     migratetest importtest conflicttest vocabtest
                      PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/testhome")

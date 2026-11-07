@@ -177,6 +177,24 @@ struct MindLink {
     static MindLink fromJson(const QJsonObject& o);
 };
 
+// A vocabulary card. Merged from MN's word book: the five-box schedule keeps the
+// whole algorithm in one place (see vocab.h) and the source anchor keeps the
+// context sentence reachable from the reader.
+struct WordEntry {
+    QString id;
+    QString word;
+    QString phonetic;
+    QString meaning;
+    QString example;
+    QString docPath;     // where it was collected (may be empty)
+    int page = -1;
+    int box = 0;         // 0..5, see vocab::kReviewGapsDays
+    qint64 dueAt = 0;    // ms since epoch
+    qint64 created = 0;
+    qint64 updated = 0;
+    bool deleted = false;
+};
+
 struct OutlineItem {
     QString title;
     int page = -1;

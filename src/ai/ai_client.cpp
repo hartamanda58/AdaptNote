@@ -1,5 +1,6 @@
 #include "ai/ai_client.h"
 
+#include <QBuffer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -54,6 +55,43 @@ QByteArray AiClient::buildBody(const QString& model, const QString& systemRole,
     QJsonObject user;
     user["role"] = "user";
     user["content"] = userPrompt;
+    messages.append(user);
+
+    root["messages"] = messages;
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+QByteArray AiClient::buildVisionBody(const QString& model, const QString& systemRole,
+                                      const QString& prompt, const QStringList& dataUrls)
+{
+    QJsonObject root;
+    root["model"] = model;
+    root["stream"] = false;
+    root["max_tokens"] = 2000;
+
+    QJsonArray messages;
+    if (!systemRole.trimmed().isEmpty()) {
+        QJsonObject sys;
+        sys["role"] = "system";
+        sys["content"] = systemRole;
+        messages.append(sys);
+    }
+    QJsonArray chunks;
+    QJsonObject textPart;
+    textPart["type"] = "text";
+    textPart["text"] = prompt;
+    chunks.append(textPart);
+    for (const QString& url : dataUrls) {
+        QJsonObject imagePart;
+        imagePart["type"] = "image_url";
+        QJsonObject imageUrl;
+        imageUrl["url"] = url;
+        imagePart["image_url"] = imageUrl;
+        chunks.append(imagePart);
+    }
+    QJsonObject user;
+    user["role"] = "user";
+    user["content"] = chunks;
     messages.append(user);
 
     root["messages"] = messages;
@@ -174,6 +212,71 @@ void AiClient::handleBuffer()
             }
         }
     }
+}
+
+void AiClient::sendVision(const QString& prompt, const QList<QImage>& images,
+                          const QString& systemRole)
+{
+    if (busy()) cancel();
+
+    content_.clear();
+    reasoning_.clear();
+    buffer_.clear();
+
+    QStringList dataUrls;
+    for (const QImage& image : images) {
+        if (image.isNull()) continue;
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+        dataUrls << QStringLiteral("data:image/png;base64,") +
+                        QString::fromLatin1(png.toBase64());
+    }
+    if (dataUrls.isEmpty()) {
+        emit finished(QString(), QString(), QStringLiteral("没有可发送的图片"));
+        return;
+    }
+
+    QNetworkRequest req{QUrl(endpointFor(settings_.baseUrl))};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (!settings_.apiKey.isEmpty())
+        req.setRawHeader("Authorization", "Bearer " + settings_.apiKey.toUtf8());
+    req.setTransferTimeout(settings_.timeoutMs);
+
+    const QString role = systemRole.isEmpty() ? settings_.systemRole : systemRole;
+    reply_ = nam_->post(req, buildVisionBody(settings_.model, role, prompt, dataUrls));
+
+    connect(reply_, &QNetworkReply::finished, this, [this]() {
+        if (!reply_) return;
+        const QByteArray body = reply_->readAll();
+        const int status = reply_->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netErr = reply_->error();
+        QString err;
+
+        QJsonParseError parseErr;
+        const QJsonObject obj = QJsonDocument::fromJson(body, &parseErr).object();
+        if (netErr != QNetworkReply::NoError && status != 200) {
+            err = reply_->errorString();
+            const QString apiErr =
+                obj.value("error").toObject().value("message").toString();
+            if (!apiErr.isEmpty()) err = QStringLiteral("HTTP %1：%2").arg(status).arg(apiErr);
+            else if (status > 0) err = QStringLiteral("HTTP %1：%2").arg(status).arg(err);
+        } else if (parseErr.error != QJsonParseError::NoError) {
+            err = QStringLiteral("无法解析返回内容");
+        } else {
+            content_ = obj.value("choices").toArray().first().toObject()
+                           .value("message").toObject()
+                           .value("content").toString().trimmed();
+            if (content_.isEmpty()) err = QStringLiteral("模型返回了空内容");
+        }
+
+        reply_->deleteLater();
+        reply_ = nullptr;
+        emit finished(content_, reasoning_, err);
+    });
+
+    emit started();
 }
 
 void AiClient::cancel()

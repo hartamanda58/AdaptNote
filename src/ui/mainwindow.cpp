@@ -15,6 +15,8 @@
 #include "ui/conflictdialog.h"
 #include "ui/libraryview.h"
 #include "ui/pageview.h"
+#include "ui/vocabpanel.h"
+#include "ocr/ocr.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -33,8 +35,11 @@
 #include <QFormLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFrame>
+#include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QImage>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -93,8 +98,8 @@ public:
         const bool selected = option.state & QStyle::State_Selected;
         const bool hovered = option.state & QStyle::State_MouseOver;
         if (selected || hovered) {
-            QColor bg = selected ? QColor("#22304a") : QColor("#1e222b");
-            painter->setPen(selected ? QColor("#35507d") : Qt::NoPen);
+            QColor bg = selected ? QColor("#dfeaff") : QColor("#f2f4f7");
+            painter->setPen(selected ? QColor("#b9d4ff") : Qt::NoPen);
             painter->setBrush(bg);
             painter->drawRoundedRect(row, 8, 8);
         }
@@ -111,7 +116,7 @@ public:
         const QString preview = index.data(Qt::UserRole + 6).toString();
         const QString source = index.data(Qt::UserRole + 7).toString();
         const bool group = index.data(Qt::UserRole + 8).toBool();
-        const QColor primary = selected ? QColor("#a9cbff") : QColor("#e6e9ef");
+        const QColor primary = selected ? QColor("#0a5bd3") : QColor("#1d1d1f");
         painter->setPen(primary);
         QFont titleFont = option.font;
         titleFont.setPointSizeF(group ? 10.5 : 10.0);
@@ -128,13 +133,13 @@ public:
             QFont metaFont = option.font;
             metaFont.setPointSizeF(8.5);
             painter->setFont(metaFont);
-            painter->setPen(QColor("#b1bac8"));
+            painter->setPen(QColor("#6b6b70"));
             const QString sub = preview.isEmpty() ? QStringLiteral("自由笔记") : preview;
             painter->drawText(previewRect, Qt::AlignLeft | Qt::AlignVCenter,
                               painter->fontMetrics().elidedText(sub, Qt::ElideRight, previewRect.width()));
             if (!source.isEmpty()) {
                 QRect sourceRect(option.rect.right() - 62, option.rect.top() + 27, 54, 16);
-                painter->setPen(QColor("#9aa4b2"));
+                painter->setPen(QColor("#9a9aa0"));
                 painter->drawText(sourceRect, Qt::AlignRight | Qt::AlignVCenter, source);
             }
         }
@@ -639,8 +644,8 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(QStringLiteral("AdaptNote — 阅读与标注（自用版 0.2）"));
-    resize(1400, 920);
+    setWindowTitle(QStringLiteral("AdaptNote — 阅读 · 标注 · 脑图 · 生词"));
+    resize(1440, 920);
 
     view_ = new PageView(this);
     view_->setEngine(&engine_);
@@ -785,15 +790,52 @@ void MainWindow::buildUi()
     buildFindBar();
     buildDocks();
     buildAiDock();
-    translateSelectionButton_ = new QToolButton(view_->viewport());
+    // MarginNote-style floating pill: annotation tools, lookup and OCR stay next to the
+    // selection instead of forcing a trip to the toolbar.
+    selectionBar_ = new QWidget(view_->viewport());
+    selectionBar_->setObjectName("selectionBar");
+    auto* barLayout = new QHBoxLayout(selectionBar_);
+    barLayout->setContentsMargins(6, 5, 6, 5);
+    barLayout->setSpacing(2);
+    auto addBarButton = [&](const QString& label, const QString& tip,
+                            const std::function<void()>& fn) -> QToolButton* {
+        auto* b = new QToolButton(selectionBar_);
+        b->setText(label);
+        b->setToolTip(tip);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        connect(b, &QToolButton::clicked, this, fn);
+        barLayout->addWidget(b);
+        return b;
+    };
+    addBarButton(QStringLiteral("高亮"), QStringLiteral("高亮选中文字 · H"),
+                 [this]() { addMarkupFromSelection(MarkupType::Highlight); });
+    addBarButton(QStringLiteral("下划线"), QStringLiteral("下划线 · U"),
+                 [this]() { addMarkupFromSelection(MarkupType::Underline); });
+    addBarButton(QStringLiteral("批注"), QStringLiteral("添加个人批注 · N"),
+                 [this]() { addMarkupFromSelection(MarkupType::Note); });
+    auto* barDivider = new QFrame(selectionBar_);
+    barDivider->setFrameShape(QFrame::VLine);
+    barDivider->setObjectName("selectionBarDivider");
+    barLayout->addWidget(barDivider);
+    addBarButton(QStringLiteral("查词"), QStringLiteral("查词并加入生词本（本地词典优先，其次 AI）"),
+                 [this]() { lookupSelectionWord(); });
+    translateSelectionButton_ = addBarButton(QStringLiteral("翻译"),
+                                             QStringLiteral("划词翻译（流式）"),
+                                             [this]() { showSelectionTranslation(); });
     translateSelectionButton_->setObjectName("selectionTranslateButton");
-    translateSelectionButton_->setText(QStringLiteral("翻译"));
-    translateSelectionButton_->setIcon(glyphIcon("find", QColor("#486b9a")));
-    translateSelectionButton_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    translateSelectionButton_->setCursor(Qt::PointingHandCursor);
-    translateSelectionButton_->setStyleSheet(QStringLiteral("QToolButton{background:#ffffff;border:1px solid #dfe4ec;border-radius:10px;padding:6px 11px;color:#273142;} QToolButton:hover{background:#f5f8ff;border-color:#bdcfea;}"));
-    translateSelectionButton_->hide();
-    connect(translateSelectionButton_, &QToolButton::clicked, this, &MainWindow::showSelectionTranslation);
+    addBarButton(QStringLiteral("AI"), QStringLiteral("对选中内容向 AI 提问"), [this]() {
+        if (aiPanel_ && leftTabs_) leftTabs_->setCurrentWidget(aiPanel_);
+        runAiWithSelection();
+    });
+    addBarButton(QStringLiteral("OCR"), QStringLiteral("识别选中区域/剪贴板图片中的文字"),
+                 [this]() { ocrSelection(); });
+    auto* barShadow = new QGraphicsDropShadowEffect(selectionBar_);
+    barShadow->setBlurRadius(22);
+    barShadow->setOffset(0, 5);
+    barShadow->setColor(QColor(0, 0, 0, 45));
+    selectionBar_->setGraphicsEffect(barShadow);
+    selectionBar_->hide();
     buildStatusBar();
     // Reading is the default: keep the page and notes visible, hide optional panels.
     setWorkspaceMode(0);
@@ -1013,8 +1055,14 @@ void MainWindow::buildToolbar()
         a->setCheckable(true);
         a->setShortcut(def.key);
         a->setActionGroup(modeGroup);
+        a->setData(def.mode);
         if (def.mode == workspaceMode_) a->setChecked(true);
         connect(a, &QAction::triggered, this, [this, mode = def.mode]() { setWorkspaceMode(mode); });
+        // Named modes read better than three abstract glyphs (MarginNote uses words too).
+        if (auto* modeButton = qobject_cast<QToolButton*>(tb->widgetForAction(a))) {
+            modeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            modeButton->setAutoRaise(true);
+        }
     }
     {
         auto* mindShortcut = new QAction(this);
@@ -1459,6 +1507,7 @@ void MainWindow::buildDocks()
 
     // ---- notes tab: search + tag filter + colour filter + list ----
     auto* notesTab = new QWidget(leftTabs_);
+    notesTab->setObjectName(QStringLiteral("excerptsPanel"));
     auto* vbox = new QVBoxLayout(notesTab);
     vbox->setContentsMargins(8, 8, 8, 8);
     vbox->setSpacing(6);
@@ -1554,15 +1603,23 @@ void MainWindow::buildDocks()
     });
 
     leftTabs_->addTab(notesTab, QStringLiteral("摘录"));
-    auto* wordsPane = new QWidget(leftTabs_);
-    auto* wordsLayout = new QVBoxLayout(wordsPane);
-    auto* wordsEmpty = new QLabel(QStringLiteral("生词本尚未接入当前笔记数据。\n此标签先保留 MN 工作区布局，不展示虚构条目。"), wordsPane);
-    wordsEmpty->setObjectName("sidePanelHint");
-    wordsEmpty->setWordWrap(true);
-    wordsLayout->addWidget(wordsEmpty);
-    wordsLayout->addStretch();
-    leftTabs_->addTab(wordsPane, QStringLiteral("生词"));
+    vocabPanel_ = new VocabPanel(store_, leftTabs_);
+    vocabPanel_->setObjectName("vocabPanel");
+    connect(vocabPanel_, &VocabPanel::lookupRequested, this, &MainWindow::lookupWordForVocab);
+    connect(vocabPanel_, &VocabPanel::statusMessage, this,
+            [this](const QString& text) { statusBar()->showMessage(text, 5000); });
+    connect(vocabPanel_, &VocabPanel::openSourceRequested, this,
+            [this](const QString& path, int page) {
+                if (path != docPath_) {
+                    currentTopic_.clear();
+                    if (!openDocument(path)) return;
+                }
+                view_->gotoPage(page);
+                updateStatus();
+            });
+    leftTabs_->addTab(vocabPanel_, QStringLiteral("生词"));
     QWidget* mapTab = new QWidget(leftTabs_);
+    mapTab->setObjectName(QStringLiteral("sideMindPanel"));
     auto* mapTabLayout = new QVBoxLayout(mapTab);
     mapTabLayout->setContentsMargins(0, 0, 0, 0);
     auto* mapActions = new QHBoxLayout;
@@ -1577,6 +1634,9 @@ void MainWindow::buildDocks()
     connect(mapFit, &QPushButton::clicked, rightMindView, &mind::MindMapView::fitToContent);
     connect(mapOpen, &QPushButton::clicked, this, &MainWindow::showNotebookMindMap);
     leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
+    // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
+    // The page-outline tree is constructed before the excerpt list, so move it behind.
+    leftTabs_->tabBar()->moveTab(leftTabs_->indexOf(notesTab), 0);
 
     dock->setWidget(leftTabs_);
     dock->setMinimumWidth(300);
@@ -1589,8 +1649,8 @@ void MainWindow::buildStatusBar()
     infoLabel_ = new QLabel;
     statusBar()->addPermanentWidget(infoLabel_);
     statusBar()->showMessage(
-        QStringLiteral("拖选文字后 H 高亮 / U 下划线 / S 波浪线 / N 批注；X 框选摘录图；"
-                       "Ctrl+F 查找；Ctrl+Z 撤销"));
+        QStringLiteral("拖选文字：浮出高亮/下划线/批注/查词/翻译/AI/OCR；"
+                       "Ctrl+F 查找；Ctrl+Z 撤销；Ctrl+1/2/3 切换阅读/整理/脑图"));
     updateStatus();
 }
 
@@ -2149,10 +2209,11 @@ QStringList MainWindow::currentTopicDocPaths() const
 void MainWindow::updateNotesPanel()
 {
     if (!notesList_) return;
+    // Tab 0 is the excerpt list after the reorder in buildDocks; tab 1 is the outline.
     if (currentTopic_.isEmpty()) {
-        if (leftTabs_) leftTabs_->setTabText(0, QStringLiteral("书签大纲"));
+        if (leftTabs_) leftTabs_->setTabText(1, QStringLiteral("笔记"));
     } else if (leftTabs_) {
-        leftTabs_->setTabText(0, QStringLiteral("笔记本大纲"));
+        leftTabs_->setTabText(1, QStringLiteral("笔记本大纲"));
     }
     const QString keepId = notesList_->currentItem()
                                ? notesList_->currentItem()->data(Qt::UserRole).toString()
@@ -2200,7 +2261,7 @@ void MainWindow::updateNotesPanel()
         if (m.id == keepId) keepRow = row;
     }
 
-    leftTabs_->setTabText(2, QStringLiteral("笔记列表 (%1)").arg(shown_.size()));
+    if (leftTabs_) leftTabs_->setTabText(0, QStringLiteral("摘录 (%1)").arg(shown_.size()));
     if (keepRow >= 0) notesList_->setCurrentRow(keepRow);
 }
 
@@ -2788,28 +2849,58 @@ void MainWindow::doExport(const QString& format)
 void MainWindow::openSyncSettings()
 {
     QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("同步设置（WebDAV）"));
+    dlg.setWindowTitle(QStringLiteral("同步设置"));
     auto* form = new QFormLayout(&dlg);
 
     const SyncSettings current = sync_.settings();
+    auto* backend = new QComboBox(&dlg);
+    backend->addItem(QStringLiteral("WebDAV 服务器"), QStringLiteral("webdav"));
+    backend->addItem(QStringLiteral("本地文件夹 / NAS"), QStringLiteral("folder"));
+    backend->setCurrentIndex(current.backend == QLatin1String("folder") ? 1 : 0);
+
     auto* url = new QLineEdit(current.url, &dlg);
-    url->setPlaceholderText(QStringLiteral("https://dav.jianguoyun.com/dav 或自建 WebDAV"));
+    auto* browse = new QToolButton(&dlg);
+    browse->setText(QStringLiteral("选择…"));
+    auto* urlRow = new QWidget(&dlg);
+    auto* urlLayout = new QHBoxLayout(urlRow);
+    urlLayout->setContentsMargins(0, 0, 0, 0);
+    urlLayout->addWidget(url, 1);
+    urlLayout->addWidget(browse);
+
     auto* user = new QLineEdit(current.user, &dlg);
     auto* pass = new QLineEdit(current.password, &dlg);
     pass->setEchoMode(QLineEdit::Password);
     auto* remote = new QLineEdit(current.remotePath, &dlg);
     remote->setPlaceholderText(QStringLiteral("adaptnote"));
 
-    form->addRow(QStringLiteral("服务器地址"), url);
+    form->addRow(QStringLiteral("同步方式"), backend);
+    form->addRow(QStringLiteral("服务器 / 文件夹"), urlRow);
     form->addRow(QStringLiteral("用户名"), user);
     form->addRow(QStringLiteral("密码 / 应用密码"), pass);
-    form->addRow(QStringLiteral("远端目录"), remote);
+    form->addRow(QStringLiteral("同步子目录"), remote);
+
+    auto applyBackend = [=]() {
+        const bool folder = backend->currentData().toString() == QLatin1String("folder");
+        url->setPlaceholderText(folder ? QStringLiteral("例如 D:/ReadingNotes 或 /mnt/nas/notes")
+                                       : QStringLiteral("https://dav.jianguoyun.com/dav 或自建 WebDAV"));
+        browse->setVisible(folder);
+        user->setEnabled(!folder);
+        pass->setEnabled(!folder);
+    };
+    connect(backend, &QComboBox::currentIndexChanged, &dlg, applyBackend);
+    connect(browse, &QToolButton::clicked, &dlg, [&]() {
+        const QString dir = QFileDialog::getExistingDirectory(
+            &dlg, QStringLiteral("选择同步文件夹"), url->text());
+        if (!dir.isEmpty()) url->setText(dir);
+    });
+    applyBackend();
 
     auto* hint = new QLabel(QStringLiteral(
-        "密码以明文保存在本地数据库（自用工具）。同步按书做文件级合并；"
-        "两端同时改同一条笔记会保留两个版本，并给副本打上 #conflict 标签。"), &dlg);
+        "WebDAV 与本地文件夹共用同一套快照与版本向量合并；本地文件夹适合 U 盘 / NAS。"
+        "密码以明文保存在本地数据库（自用工具）。两端同时改同一条笔记会保留两个版本，"
+        "并给副本打上 #conflict 标签。"), &dlg);
     hint->setWordWrap(true);
-    hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:12px;"));
+    hint->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:12px;"));
     form->addRow(hint);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
@@ -2820,9 +2911,10 @@ void MainWindow::openSyncSettings()
     if (dlg.exec() != QDialog::Accepted) return;
 
     SyncSettings s;
+    s.backend = backend->currentData().toString();
     s.url = url->text().trimmed();
-    s.user = user->text().trimmed();
-    s.password = pass->text();
+    s.user = s.backend == QLatin1String("folder") ? QString() : user->text().trimmed();
+    s.password = s.backend == QLatin1String("folder") ? QString() : pass->text();
     s.remotePath = remote->text().trimmed().isEmpty() ? QStringLiteral("adaptnote")
                                                       : remote->text().trimmed();
     sync_.setSettings(s);
@@ -3001,12 +3093,12 @@ void MainWindow::onRegionSelected(int page, const QRectF& pageRect)
 
 void MainWindow::buildAiDock()
 {
-    auto* dock = new QDockWidget(QStringLiteral("AI 助手"), this);
-    aiDock_ = dock;
-    dock->setObjectName("aiDock");
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    // AI lives in the same right-hand tab strip as excerpts, notes and words: a second
+    // floating dock made the panel too narrow and hid the notes while it was open.
+    auto* panel = new QWidget(this);
+    aiPanel_ = panel;
+    panel->setObjectName("aiPanel");
 
-    auto* panel = new QWidget(dock);
     auto* vbox = new QVBoxLayout(panel);
     vbox->setContentsMargins(8, 8, 8, 8);
     vbox->setSpacing(6);
@@ -3046,13 +3138,21 @@ void MainWindow::buildAiDock()
     aiExtraEdit_->setPlaceholderText(QStringLiteral("可选：目标语言 / 自定义要求"));
     vbox->addWidget(aiExtraEdit_);
 
+    auto* askRow = new QHBoxLayout;
+    aiQuestionEdit_ = new QLineEdit(panel);
+    aiQuestionEdit_->setPlaceholderText(QStringLiteral("直接提问，例如：这一章的论证漏洞在哪？"));
+    auto* askButton = new QPushButton(QStringLiteral("提问"), panel);
+    askRow->addWidget(aiQuestionEdit_, 1);
+    askRow->addWidget(askButton);
+    vbox->addLayout(askRow);
+    connect(askButton, &QPushButton::clicked, this, &MainWindow::askAiQuestion);
+    connect(aiQuestionEdit_, &QLineEdit::returnPressed, this, &MainWindow::askAiQuestion);
+
     aiRunButton_ = new QPushButton(QStringLiteral("对选中的内容提问"), panel);
     vbox->addWidget(aiRunButton_);
     connect(aiRunButton_, &QPushButton::clicked, this, &MainWindow::runAiWithSelection);
 
-    aiReasoningToggle_ = new QToolButton(panel);
-    aiReasoningToggle_->setText(QStringLiteral("思考过程"));
-    aiReasoningToggle_->setCheckable(true);
+    aiReasoningToggle_ = new QCheckBox(QStringLiteral("显示思考过程"), panel);
     aiReasoningToggle_->setChecked(false);
     vbox->addWidget(aiReasoningToggle_);
 
@@ -3060,7 +3160,7 @@ void MainWindow::buildAiDock()
     aiReasoning_->setMaximumHeight(140);
     aiReasoning_->setVisible(false);
     vbox->addWidget(aiReasoning_);
-    connect(aiReasoningToggle_, &QToolButton::toggled, this, [this](bool on) {
+    connect(aiReasoningToggle_, &QCheckBox::toggled, this, [this](bool on) {
         if (aiReasoning_) aiReasoning_->setVisible(on);
     });
 
@@ -3073,10 +3173,36 @@ void MainWindow::buildAiDock()
     vbox->addWidget(aiInsertButton_);
     connect(aiInsertButton_, &QPushButton::clicked, this, &MainWindow::insertAiAsNote);
 
-    dock->setWidget(panel);
-    dock->setMinimumWidth(300);
-    addDockWidget(Qt::RightDockWidgetArea, dock);
-    if (moreMenu_) moreMenu_->addAction(dock->toggleViewAction());
+    if (leftTabs_) {
+        leftTabs_->addTab(panel, QStringLiteral("AI"));
+        leftTabs_->setTabToolTip(leftTabs_->indexOf(panel),
+                                 QStringLiteral("AI 助手：解释 / 翻译 / 总结 / 提问"));
+        // Reopen on the panel the reader last used (tab labels change with counts, so
+        // the stable object name is what gets persisted).
+        const QString savedTab = store_.setting(QStringLiteral("ui.sideTab"));
+        if (!savedTab.isEmpty()) {
+            for (int i = 0; i < leftTabs_->count(); ++i) {
+                if (leftTabs_->widget(i)->objectName() == savedTab) {
+                    leftTabs_->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        connect(leftTabs_, &QTabWidget::currentChanged, this, [this](int index) {
+            if (!leftTabs_ || index < 0 || index >= leftTabs_->count()) return;
+            store_.setSetting(QStringLiteral("ui.sideTab"), leftTabs_->widget(index)->objectName());
+        });
+    }
+    if (moreMenu_) {
+        moreMenu_->addAction(QStringLiteral("AI 助手"), this, [this]() {
+            if (notesDock_) notesDock_->show();
+            if (leftTabs_ && aiPanel_) leftTabs_->setCurrentWidget(aiPanel_);
+        });
+        moreMenu_->addAction(QStringLiteral("生词本"), this, [this]() {
+            if (notesDock_) notesDock_->show();
+            if (leftTabs_ && vocabPanel_) leftTabs_->setCurrentWidget(vocabPanel_);
+        });
+    }
 
     ai::AiClient::Settings s;
     s.baseUrl = store_.setting(QStringLiteral("ai.url"), QStringLiteral("https://api.deepseek.com"));
@@ -3087,17 +3213,47 @@ void MainWindow::buildAiDock()
     connect(&ai_, &ai::AiClient::delta, this, [this](const QString& content, const QString& reasoning) {
         aiContent_ += content;
         aiReasoningText_ += reasoning;
-        if (translationRequest_ && translationOutput_) translationOutput_->setPlainText(aiContent_);
-        if (aiOutput_) aiOutput_->setPlainText(aiContent_);
+        if (translationRequest_ && translationOutput_) {
+            translationOutput_->setPlainText(aiContent_);
+        } else if (pendingWord_.isEmpty() && !pendingOcr_) {
+            // Dictionary/OCR replies are handled as data, not pasted into the answer pane.
+            if (aiOutput_) aiOutput_->setPlainText(aiContent_);
+        }
         if (aiReasoning_) aiReasoning_->setPlainText(aiReasoningText_);
     });
     connect(&ai_, &ai::AiClient::finished,
             this, [this](const QString& content, const QString& reasoning, const QString& error) {
                 aiContent_ = content;
                 aiReasoningText_ = reasoning;
-                if (aiOutput_) aiOutput_->setPlainText(content);
                 if (aiReasoning_) aiReasoning_->setPlainText(reasoning);
                 if (aiRunButton_) aiRunButton_->setEnabled(true);
+
+                if (!pendingWord_.isEmpty()) {
+                    const QString word = pendingWord_;
+                    pendingWord_.clear();
+                    vocab::Definition def;
+                    def.word = word;
+                    def.source = QStringLiteral("ai");
+                    if (!error.isEmpty()) {
+                        def.ok = false;
+                        def.error = error;
+                    } else {
+                        vocab::parseAiDefinition(content, &def);
+                    }
+                    saveVocabDefinition(def);
+                    return;
+                }
+                if (pendingOcr_) {
+                    pendingOcr_ = false;
+                    if (!error.isEmpty()) {
+                        statusBar()->showMessage(QStringLiteral("云端 OCR 失败：%1").arg(error), 7000);
+                    } else {
+                        showOcrResult(content);
+                    }
+                    return;
+                }
+
+                if (aiOutput_) aiOutput_->setPlainText(content);
                 if (aiInsertButton_) aiInsertButton_->setEnabled(!content.isEmpty());
                 if (translationRequest_) {
                     translationRequest_ = false;
@@ -3258,11 +3414,11 @@ void MainWindow::editAiRoles()
 
 void MainWindow::updateSelectionTranslationAction()
 {
-    if (!translateSelectionButton_ || !view_) return;
+    if (!selectionBar_ || !view_) return;
     if (translationDialog_ && translationDialog_->isVisible()) translationDialog_->hide();
     const Selection selection = view_->selection();
     if (!selection.isValid() || selection.text.trimmed().isEmpty() || ai_.busy()) {
-        translateSelectionButton_->hide();
+        selectionBar_->hide();
         return;
     }
     QRectF bounds;
@@ -3276,16 +3432,16 @@ void MainWindow::updateSelectionTranslationAction()
         const QRectF one = QRectF(a,b).normalized().united(QRectF(c,d).normalized());
         bounds = bounds.isNull() ? one : bounds.united(one);
     }
-    if (bounds.isNull()) { translateSelectionButton_->hide(); return; }
-    const QSize size = translateSelectionButton_->sizeHint();
+    if (bounds.isNull()) { selectionBar_->hide(); return; }
+    const QSize size = selectionBar_->sizeHint();
     QPoint pos(qBound(8, qRound(bounds.left()), view_->viewport()->width() - size.width() - 8),
                qMax(8, qRound(bounds.top()) - size.height() - 8));
     if (pos.y() < 8) pos.setY(qMin(view_->viewport()->height() - size.height() - 8,
                                    qRound(bounds.bottom()) + 8));
-    translateSelectionButton_->move(pos);
-    translateSelectionButton_->adjustSize();
-    translateSelectionButton_->raise();
-    translateSelectionButton_->show();
+    selectionBar_->move(pos);
+    selectionBar_->adjustSize();
+    selectionBar_->raise();
+    selectionBar_->show();
 }
 
 void MainWindow::translateSelectionForTest()
@@ -3374,6 +3530,228 @@ void MainWindow::runAiWithSelection()
         }
     }
     askAi(action);
+}
+
+void MainWindow::askAiQuestion()
+{
+    const QString question = aiQuestionEdit_ ? aiQuestionEdit_->text().trimmed() : QString();
+    if (question.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("先输入一个问题"), 2500);
+        return;
+    }
+    if (ai_.settings().apiKey.trimmed().isEmpty()) {
+        statusBar()->showMessage(
+            QStringLiteral("请先在“AI → 设置”中配置兼容 OpenAI 的 API Key"), 6000);
+        return;
+    }
+
+    const QString context = view_ ? view_->selection().text.trimmed() : QString();
+    const QString prompt = context.isEmpty()
+        ? question
+        : QStringLiteral("原文摘录：\n%1\n\n问题：%2").arg(context, question);
+
+    const ai::AiClient::Settings previous = ai_.settings();
+    ai::AiClient::Settings oneShot = previous;
+    oneShot.systemRole = QStringLiteral(
+        "你是阅读助手。回答简洁、具体；引用原文时说明依据，不确定就直说不确定。");
+    ai_.setSettings(oneShot);
+    aiContent_.clear();
+    aiReasoningText_.clear();
+    if (aiOutput_) aiOutput_->clear();
+    if (aiReasoning_) aiReasoning_->clear();
+    ai_.send(prompt);
+    ai_.setSettings(previous);
+    statusBar()->showMessage(QStringLiteral("正在提问…"), 2000);
+}
+
+void MainWindow::lookupSelectionWord()
+{
+    const QString text = view_ ? view_->selection().text.trimmed() : QString();
+    if (text.isEmpty()) {
+        if (notesDock_) notesDock_->show();
+        if (leftTabs_ && vocabPanel_) leftTabs_->setCurrentWidget(vocabPanel_);
+        if (vocabPanel_) vocabPanel_->focusLookup();
+        statusBar()->showMessage(QStringLiteral("选中一个词再点“查词”，或直接输入"), 4000);
+        return;
+    }
+    lookupWordForVocab(vocab::normalizeQuery(text));
+}
+
+void MainWindow::lookupWordForVocab(const QString& raw)
+{
+    const QString word = vocab::normalizeQuery(raw);
+    if (word.isEmpty()) return;
+
+    if (notesDock_) notesDock_->show();
+    if (leftTabs_ && vocabPanel_) leftTabs_->setCurrentWidget(vocabPanel_);
+
+    const WordEntry existing = store_.wordByText(word);
+    if (!existing.id.isEmpty()) {
+        if (vocabPanel_) {
+            vocabPanel_->focusLookup(existing.word);
+            vocabPanel_->selectWord(existing.word);
+        }
+        statusBar()->showMessage(QStringLiteral("「%1」已在生词本").arg(existing.word), 3000);
+        return;
+    }
+
+    const vocab::Definition local = vocab::lookupLocal(store_.dataDir() + "/ecdict.db", word);
+    if (local.ok) {
+        saveVocabDefinition(local);
+        statusBar()->showMessage(QStringLiteral("本地词典：%1").arg(local.word), 3500);
+        return;
+    }
+
+    if (ai_.settings().apiKey.trimmed().isEmpty()) {
+        vocab::Definition bare;
+        bare.word = word;
+        bare.meaning = QStringLiteral("（待补释义：未配置本地词典或 AI）");
+        bare.source = QStringLiteral("manual");
+        bare.ok = true;
+        saveVocabDefinition(bare);
+        statusBar()->showMessage(
+            QStringLiteral("已加入生词本；未找到本地词典也未配置 AI，释义留空"), 6000);
+        return;
+    }
+
+    pendingWord_ = word;
+    aiContent_.clear();
+    aiReasoningText_.clear();
+    const ai::AiClient::Settings previous = ai_.settings();
+    ai::AiClient::Settings oneShot = previous;
+    oneShot.systemRole = QStringLiteral(
+        "你是严谨的双语词典编辑。严格按要求的三行输出，不寒暄、不解释格式。");
+    ai_.setSettings(oneShot);
+    ai_.send(vocab::promptForLookup(word));
+    ai_.setSettings(previous);
+    statusBar()->showMessage(QStringLiteral("正在查词：%1…").arg(word), 3000);
+}
+
+void MainWindow::saveVocabDefinition(const vocab::Definition& def)
+{
+    if (def.word.trimmed().isEmpty()) return;
+    WordEntry w = store_.wordByText(def.word);
+    if (w.id.isEmpty()) w.id = newId();
+    w.word = def.word.trimmed();
+    if (!def.phonetic.isEmpty()) w.phonetic = def.phonetic;
+    if (!def.meaning.isEmpty()) w.meaning = def.meaning;
+    if (!def.example.isEmpty()) w.example = def.example;
+    if (w.docPath.isEmpty() && !docPath_.isEmpty()) {
+        w.docPath = docPath_;
+        w.page = view_ ? view_->currentPage() : -1;
+    }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (w.created <= 0) w.created = now;
+    w.updated = now;
+    if (w.dueAt <= 0) w.dueAt = now;
+
+    QString err;
+    if (!store_.upsertWord(w, &err)) {
+        statusBar()->showMessage(QStringLiteral("生词保存失败：%1").arg(err), 6000);
+        return;
+    }
+    if (vocabPanel_) {
+        vocabPanel_->reload();
+        vocabPanel_->selectWord(def.word);
+    }
+    if (def.ok) {
+        statusBar()->showMessage(QStringLiteral("已加入生词本：%1").arg(def.word), 4000);
+    } else {
+        statusBar()->showMessage(
+            QStringLiteral("已记住「%1」，但查词失败：%2").arg(def.word, def.error), 7000);
+    }
+}
+
+void MainWindow::ocrSelection()
+{
+    QImage image;
+    if (view_ && view_->selection().isValid()) {
+        const Selection sel = view_->selection();
+        const QSizeF pt = engine_.pageSize(sel.page);
+        const float scale = 2.4f;
+        QRectF box;
+        for (const Quad& q : sel.quads)
+            box = box.isNull() ? q.boundingRect() : box.united(q.boundingRect());
+        if (pt.width() > 0) {
+            const QImage page = engine_.renderPage(sel.page, scale, 0);
+            if (!page.isNull()) {
+                const QRect crop = QRectF(box.left() * scale, box.top() * scale,
+                                          box.width() * scale, box.height() * scale)
+                                       .adjusted(-6, -6, 6, 6)
+                                       .toRect()
+                                       .intersected(page.rect());
+                if (crop.width() > 2 && crop.height() > 2) image = page.copy(crop);
+            }
+        }
+    }
+    if (image.isNull()) image = QApplication::clipboard()->image();
+    if (image.isNull() && !kHeadless) {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("选择要识别的图片"), QString(),
+            QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp)"));
+        if (!path.isEmpty()) image = QImage(path);
+    }
+    if (image.isNull()) {
+        statusBar()->showMessage(QStringLiteral("选中一块区域，或先把图片复制到剪贴板"), 5000);
+        return;
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const ocr::Result result = ocr::recognize(image);
+    QApplication::restoreOverrideCursor();
+    if (result.ok) {
+        statusBar()->showMessage(QStringLiteral("OCR 完成（%1）").arg(result.engine), 3000);
+        showOcrResult(result.text);
+        return;
+    }
+
+    if (!ai_.settings().apiKey.trimmed().isEmpty()) {
+        pendingOcr_ = true;
+        aiContent_.clear();
+        statusBar()->showMessage(QStringLiteral("本机没有 tesseract，改用云端视觉模型…"), 3000);
+        ai_.sendVision(QStringLiteral("只输出图片中的文字，不要解释，不要 Markdown。保留原换行。"),
+                       {image});
+        return;
+    }
+
+    warnUser(this, QStringLiteral("OCR 不可用"), result.error);
+    statusBar()->showMessage(result.error, 7000);
+}
+
+void MainWindow::showOcrResult(const QString& text)
+{
+    const QString content = text.trimmed();
+    if (content.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("没有识别到文字"), 3000);
+        return;
+    }
+    if (kHeadless) {
+        statusBar()->showMessage(QStringLiteral("OCR：%1").arg(content.left(60)), 5000);
+        return;
+    }
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("OCR 识别结果"));
+    dlg.resize(560, 420);
+    auto* layout = new QVBoxLayout(&dlg);
+    auto* edit = new QPlainTextEdit(content, &dlg);
+    layout->addWidget(edit, 1);
+    auto* buttons = new QDialogButtonBox(&dlg);
+    auto* insert = buttons->addButton(QStringLiteral("插入为摘录"), QDialogButtonBox::AcceptRole);
+    auto* copy = buttons->addButton(QStringLiteral("复制"), QDialogButtonBox::ActionRole);
+    buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
+    layout->addWidget(buttons);
+    connect(copy, &QPushButton::clicked, &dlg, [&edit]() {
+        QApplication::clipboard()->setText(edit->toPlainText());
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(insert, &QPushButton::clicked, &dlg, &QDialog::accept);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    const QString title = QStringLiteral("OCR 摘录");
+    if (createFreeNoteForPageForTest(title, edit->toPlainText().trimmed(),
+                                     view_ ? view_->currentPage() : 0))
+        statusBar()->showMessage(QStringLiteral("OCR 文字已插入为摘录笔记"), 4000);
 }
 
 void MainWindow::askAi(ai::PromptAction action)
@@ -4168,7 +4546,8 @@ bool MainWindow::notesDockVisibleForTest() const
 
 bool MainWindow::aiDockVisibleForTest() const
 {
-    return aiDock_ && aiDock_->isVisible();
+    return notesDock_ && notesDock_->isVisible() && leftTabs_ && aiPanel_ &&
+           leftTabs_->currentWidget() == aiPanel_;
 }
 
 bool MainWindow::undoForTest()
@@ -4282,12 +4661,19 @@ void MainWindow::setWorkspaceMode(int mode)
     if (!splitter_ || !mindPanel_) return;
 
     // Space policy: reading is page-first; arranging is page+map; map mode is map-first.
+    if (mainToolbar_) {
+        for (QAction* action : mainToolbar_->actions()) {
+            if (!action || !action->isCheckable() || !action->data().isValid()) continue;
+            const int actionMode = action->data().toInt();
+            if (actionMode >= 0 && actionMode <= 2)
+                action->setChecked(actionMode == workspaceMode_);
+        }
+    }
     if (notesDock_) {
         if (!currentTopic_.isEmpty()) notesDock_->setWindowTitle(QStringLiteral("笔记本大纲"));
         else notesDock_->setWindowTitle(QStringLiteral("文档目录与笔记"));
         notesDock_->setVisible(workspaceMode_ == 0);
     }
-    if (aiDock_) aiDock_->setVisible(false); // open explicitly from 更多 when needed
 
     if (workspaceMode_ == 0) {
         mindPanel_->hide();
@@ -4305,6 +4691,16 @@ void MainWindow::setWorkspaceMode(int mode)
             splitter_->setSizes({total * 62 / 100, total * 38 / 100});
         }
         rebuildMindMap();
+    }
+    // Fit once per document/topic; later mode switches keep the user's pan and zoom.
+    if (workspaceMode_ != 0 && mindView_) {
+        const QString scope = mindScopeKey();
+        if (scope != mindFittedScope_) {
+            mindFittedScope_ = scope;
+            QTimer::singleShot(0, mindView_, [this]() {
+                if (mindView_) mindView_->fitToContent();
+            });
+        }
     }
 }
 

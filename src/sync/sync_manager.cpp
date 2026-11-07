@@ -8,11 +8,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+
+#include <algorithm>
 
 namespace an {
 namespace {
@@ -27,6 +30,18 @@ QString conflictTag()
 void addTag(Markup& m, const QString& tag)
 {
     if (!m.tags.contains(tag)) m.tags.append(tag);
+}
+
+// One place that turns settings into a transport, so per-document and topic sync
+// cannot drift apart.
+void configureRemote(WebDavClient& dav, const SyncSettings& s)
+{
+    if (s.backend == QLatin1String("folder")) {
+        dav.setLocalRoot(s.url);
+        return;
+    }
+    dav.setBaseUrl(s.url);
+    if (!s.user.isEmpty()) dav.setCredentials(s.user, s.password);
 }
 
 }  // namespace
@@ -53,6 +68,7 @@ SyncSettings SyncManager::settings() const
     s.user = store_.setting(QStringLiteral("sync.user"));
     s.password = store_.setting(QStringLiteral("sync.pass"));
     s.remotePath = store_.setting(QStringLiteral("sync.path"), QStringLiteral("adaptnote"));
+    s.backend = store_.setting(QStringLiteral("sync.backend"), QStringLiteral("webdav"));
     return s;
 }
 
@@ -62,6 +78,9 @@ void SyncManager::setSettings(const SyncSettings& s)
     store_.setSetting(QStringLiteral("sync.user"), s.user);
     store_.setSetting(QStringLiteral("sync.pass"), s.password);
     store_.setSetting(QStringLiteral("sync.path"), s.remotePath.trimmed());
+    store_.setSetting(QStringLiteral("sync.backend"),
+                      s.backend == QLatin1String("folder") ? QStringLiteral("folder")
+                                                            : QStringLiteral("webdav"));
 }
 
 QString SyncManager::docKeyFor(const QString& docPath)
@@ -459,13 +478,14 @@ SyncReport SyncManager::syncDocument(const QString& docPath)
     SyncReport rep;
     const SyncSettings s = settings();
     if (!s.configured()) {
-        rep.error = QStringLiteral("尚未配置 WebDAV 地址");
+        rep.error = s.backend == QLatin1String("folder")
+                        ? QStringLiteral("尚未选择本地同步文件夹")
+                        : QStringLiteral("尚未配置 WebDAV 地址");
         return rep;
     }
 
     WebDavClient dav;
-    dav.setBaseUrl(s.url);
-    if (!s.user.isEmpty()) dav.setCredentials(s.user, s.password);
+    configureRemote(dav, s);
 
     const QString docKey = docKeyFor(docPath);
     const QString rel = s.remotePath + QLatin1Char('/') + docKey + QStringLiteral(".json");
@@ -584,6 +604,95 @@ SyncReport SyncManager::syncDocument(const QString& docPath)
     return rep;
 }
 
+QByteArray SyncManager::wordsJson(const QVector<WordEntry>& words)
+{
+    QJsonObject root;
+    root["schema"] = 1;
+    QJsonArray arr;
+    for (const WordEntry& w : words) {
+        QJsonObject o;
+        o["id"] = w.id;
+        o["word"] = w.word;
+        o["phonetic"] = w.phonetic;
+        o["meaning"] = w.meaning;
+        o["example"] = w.example;
+        // Absolute paths never go on the wire; the source file name is only a hint.
+        o["docName"] = w.docPath.isEmpty() ? QString() : QFileInfo(w.docPath).fileName();
+        o["page"] = w.page;
+        o["box"] = w.box;
+        o["dueAt"] = static_cast<double>(w.dueAt);
+        o["created"] = static_cast<double>(w.created);
+        o["updated"] = static_cast<double>(w.updated);
+        o["deleted"] = w.deleted;
+        arr.append(o);
+    }
+    root["words"] = arr;
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+QVector<WordEntry> SyncManager::parseWords(const QByteArray& json, QString* error)
+{
+    QVector<WordEntry> out;
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        if (error) *error = QStringLiteral("生词快照解析失败：%1").arg(parseError.errorString());
+        return out;
+    }
+    for (const QJsonValue& value : doc.object().value("words").toArray()) {
+        const QJsonObject o = value.toObject();
+        WordEntry w;
+        w.id = o.value("id").toString();
+        w.word = o.value("word").toString();
+        if (w.id.isEmpty() || w.word.isEmpty()) continue;
+        w.phonetic = o.value("phonetic").toString();
+        w.meaning = o.value("meaning").toString();
+        w.example = o.value("example").toString();
+        w.page = o.value("page").toInt(-1);
+        w.box = qBound(0, o.value("box").toInt(), 5);
+        w.dueAt = static_cast<qint64>(o.value("dueAt").toDouble());
+        w.created = static_cast<qint64>(o.value("created").toDouble());
+        w.updated = static_cast<qint64>(o.value("updated").toDouble());
+        w.deleted = o.value("deleted").toBool();
+        out.append(w);
+    }
+    return out;
+}
+
+SyncManager::WordMergeResult SyncManager::mergeWords(const QVector<WordEntry>& local,
+                                                      const QVector<WordEntry>& remote,
+                                                      qint64 nowMs)
+{
+    Q_UNUSED(nowMs);
+    WordMergeResult result;
+    QHash<QString, WordEntry> byId;
+    for (const WordEntry& w : local) byId.insert(w.id, w);
+
+    for (const WordEntry& incoming : remote) {
+        auto it = byId.find(incoming.id);
+        if (it == byId.end()) {
+            byId.insert(incoming.id, incoming);
+            ++result.pulled;
+            continue;
+        }
+        if (incoming.updated > it->updated) {
+            *it = incoming;
+            ++result.pulled;
+        } else if (it->updated > incoming.updated) {
+            ++result.pushed;
+        }
+        // Timestamps are equal: keep local. Vocabulary uses last-writer-wins by design
+        // (a forked card is noise), so this is not counted as a note conflict.
+    }
+
+    result.merged.reserve(byId.size());
+    for (const WordEntry& w : byId) result.merged.append(w);
+    std::sort(result.merged.begin(), result.merged.end(), [](const WordEntry& a, const WordEntry& b) {
+        return a.word.compare(b.word, Qt::CaseInsensitive) < 0;
+    });
+    return result;
+}
+
 SyncReport SyncManager::syncAll()
 {
     SyncReport total;
@@ -608,8 +717,51 @@ SyncReport SyncManager::syncAll()
         return total;
     }
     const QString deviceId = store_.deviceId();
+    WebDavClient dav; configureRemote(dav, cfg);
+
+    // ---- vocabulary: one global words.json, independent from per-book snapshots ----
+    {
+        const QString wordsRel = cfg.remotePath + QStringLiteral("/words.json");
+        bool synced = false;
+        for (int attempt = 0; attempt < 2 && !synced; ++attempt) {
+            QString err, etag;
+            QByteArray remoteBytes;
+            const bool got = dav.get(wordsRel, &remoteBytes, &etag, &err);
+            if (!got && !err.contains(QStringLiteral("404"))) {
+                total.ok = false; total.error = err; return total;
+            }
+            QVector<WordEntry> remote;
+            if (got) {
+                remote = parseWords(remoteBytes, &err);
+                if (!err.isEmpty()) { total.ok = false; total.error = err; return total; }
+            }
+            const auto merged = mergeWords(store_.words(true), remote,
+                                           QDateTime::currentMSecsSinceEpoch());
+            for (const WordEntry& w : merged.merged) {
+                QString wordErr;
+                if (!store_.upsertWord(w, &wordErr, true)) {
+                    total.ok = false; total.error = wordErr; return total;
+                }
+            }
+            bool precond = false;
+            if (dav.put(wordsRel, wordsJson(store_.words(true)), got ? etag : QString(),
+                        &err, &precond)) {
+                total.pulled += merged.pulled;
+                total.pushed += merged.pushed;
+                total.conflicts += merged.conflicts;
+                synced = true;
+                break;
+            }
+            if (precond && attempt == 0) continue;
+            total.ok = false; total.error = err; return total;
+        }
+        if (!synced) {
+            total.ok = false; total.error = QStringLiteral("生词同步重试后仍然冲突");
+            return total;
+        }
+    }
+
     const QString rel = cfg.remotePath + QStringLiteral("/topics.json");
-    WebDavClient dav; dav.setBaseUrl(cfg.url); dav.setCredentials(cfg.user, cfg.password);
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         QString err, etag;

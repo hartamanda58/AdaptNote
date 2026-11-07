@@ -106,6 +106,19 @@ int main(int argc, char** argv)
         check(QJsonDocument::fromJson(noSystem).object().value("messages").toArray().size() == 1,
               QStringLiteral("empty system role is omitted"));
 
+        const QByteArray vision = AiClient::buildVisionBody(
+            QStringLiteral("gpt-4o-mini"), QStringLiteral("ocr"), QStringLiteral("读出文字"),
+            {QStringLiteral("data:image/png;base64,AAAA")});
+        const QJsonObject vo = QJsonDocument::fromJson(vision).object();
+        const QJsonArray vmsgs = vo.value("messages").toArray();
+        const QJsonArray parts = vmsgs.last().toObject().value("content").toArray();
+        check(!vo.value("stream").toBool(), QStringLiteral("vision body is non-streaming"));
+        check(parts.size() == 2 &&
+                  parts.at(0).toObject().value("type").toString() == QStringLiteral("text") &&
+                  parts.at(1).toObject().value("image_url").toObject().value("url").toString()
+                          .startsWith(QStringLiteral("data:image/png;base64,")),
+              QStringLiteral("vision body carries text + data URL image"));
+
         QString content, reasoning;
         bool done = false;
         check(AiClient::parseSseData(R"({"choices":[{"delta":{"content":"Hi"}}]})", &content,

@@ -38,6 +38,8 @@ int main(int argc, char** argv)
     const QCommandLineOption optZoom("zoom", "zoom: fitwidth|fitpage|actual|<percent>", "zoom", "fitwidth");
     const QCommandLineOption optRotate("rotate", "rotation: 0|90|180|270", "deg", "0");
     const QCommandLineOption optFind("find", "run an in-document search before screenshotting", "text");
+    // Screenshot hook, same spirit as --find: seed a selection so the floating pill is visible.
+    const QCommandLineOption optSelect("selection", "seed a text selection before screenshotting", "text");
     const QCommandLineOption optExportDir("export-dir", "export all formats into DIR", "dir");
     const QCommandLineOption optMindMap("mindmap", "render the note mind map to a PNG and exit", "png");
     const QCommandLineOption optLibrary("library", "screenshot the library window to PNG and exit",
@@ -59,6 +61,7 @@ int main(int argc, char** argv)
     parser.addOption(optZoom);
     parser.addOption(optRotate);
     parser.addOption(optFind);
+    parser.addOption(optSelect);
     parser.addOption(optExportDir);
     parser.addOption(optMindMap);
     parser.addOption(optLibrary);
@@ -125,6 +128,15 @@ int main(int argc, char** argv)
             return page.isNull() ? 3 : 0;
         }
         if (parser.isSet(optFind)) w.findText(parser.value(optFind));
+        if (parser.isSet(optSelect) && !parser.value(optSelect).isEmpty()) {
+            an::Selection selection;
+            selection.page = w.view()->currentPage();
+            selection.text = parser.value(optSelect);
+            selection.startChar = 0;
+            selection.endChar = selection.text.size();
+            selection.quads = {an::Quad::fromRect(QRectF(88, 150, 210, 16))};
+            w.view()->setSelection(selection);
+        }
         if (parser.isSet(optMindMap)) {
             const QString out = parser.value(optMindMap);
             an::mind::MindMapView view;

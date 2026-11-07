@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QByteArray>
+#include <QImage>
+#include <QList>
 #include <QObject>
 #include <QString>
 
@@ -32,12 +34,19 @@ public:
 
     bool busy() const { return reply_ != nullptr; }
     void send(const QString& userPrompt);
+    // One-shot, non-streaming vision request (OCR fallback / image questions).
+    // Emits finished() with the whole answer; reasoning is always empty.
+    void sendVision(const QString& prompt, const QList<QImage>& images,
+                    const QString& systemRole = {});
     void cancel();
 
     // --- pure helpers (unit tested without network) ---
     static QString endpointFor(const QString& baseUrl);
     static QByteArray buildBody(const QString& model, const QString& systemRole,
                                 const QString& userPrompt);
+    // Exposed for tests: OpenAI-compatible vision message with data: URLs.
+    static QByteArray buildVisionBody(const QString& model, const QString& systemRole,
+                                      const QString& prompt, const QStringList& dataUrls);
     // Parses one `data: {...}` payload. Returns true when the frame carried a delta.
     static bool parseSseData(const QByteArray& payload, QString* content, QString* reasoning,
                              bool* done);
