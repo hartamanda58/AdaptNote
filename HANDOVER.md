@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，本次合并已提交 `b369160` → `19bc53e` → `79e6e23`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,27 +17,27 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-07，自带 OCR/词典版）
+### 最近一次验收（2026-11-07，就地编辑版）
 
 ```text
-run 42373627839  Windows 构建（main @ 58efc35）  success
-12/12 套测试在 Windows runner 上全部 PASSED
-自带 tesseract --list-langs 冒烟通过（chi_sim + eng），zip 76.0 MB
+run 42387890013  Windows 构建（main @ 01c238b）  success
+12/12 套测试在 Windows runner 上全部 PASSED（含就地编辑/就地改名/单步撤销断言）
+自带 tesseract --list-langs 通过（chi_sim + eng），ecdict 43,823 条 / 8 MB，zip 76.0 MB
 ```
 
-上一个全绿记录：run 42353005512（900e60a，不带 OCR/词典）。
+之前全绿记录：42373627839（58efc35，自带 OCR/词典）、42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
-12 套测试的 `.out.txt` 在 run 的 test-diagnostics artifact 里。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/bundled-ocr-dict-58efc35/AdaptNote-windows-x64-ocr-dict.zip
-sha256: fd697a4efe0b1334d8e506599060176e51e89fb287cca5c1fc9e8f8dd8df485a
+https://github.com/hartamanda58/AdaptNote/releases/download/ux-direct-01c238b/AdaptNote-windows-x64-ux.zip
+sha256: dca9f1603bf703f6791f175d2c4b1065e19f566a787a4cf0fa16808b0a71715a
 ```
 
-**自带本地 OCR 与查词，离线开箱即用**（压缩 76 MB / 解压 145 MB）。包内直接运行
-`bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`；`AdaptNote.bat` 兼容。
+**直接操作版**（压缩 76 MB / 解压 145 MB）：摘录面板就地编辑、脑图双击直接改名、
+回到有笔记的书默认「整理」布局、Ctrl+滚轮光标锚定缩放/捏合/中键平移。
+包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
   `ocr.cpp` 优先找包内引擎并自动加 `--tessdata-dir`（`make_portable.ps1 -WithExtras` 打包）
@@ -47,7 +47,9 @@ sha256: fd697a4efe0b1334d8e506599060176e51e89fb287cca5c1fc9e8f8dd8df485a
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（43 MB，不带 OCR/词典）：
+上一个版本（58efc35，同样的 OCR/词典，但没有就地编辑）：
+`releases/download/bundled-ocr-dict-58efc35/AdaptNote-windows-x64-ocr-dict.zip`
+更早的不带 OCR/词典版（43 MB）：
 `releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip`
 
 注意：早期 CI 产出的 zip 内层文件名曾被 `make_portable.ps1` 的 `$name` 变量覆盖成
