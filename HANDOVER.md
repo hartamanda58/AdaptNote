@@ -17,30 +17,41 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-07，合并版）
+### 最近一次验收（2026-11-07，自带 OCR/词典版）
 
 ```text
-run 42353005512  Windows 构建（main @ 900e60a）  success
-12/12 套测试在 Windows runner 上全部 PASSED（test-diagnostics 产物已核对，
-含新增 vocabtest：SigV4 官方向量 + 假 S3 双库推拉）
+run 42373627839  Windows 构建（main @ 58efc35）  success
+12/12 套测试在 Windows runner 上全部 PASSED
+自带 tesseract --list-langs 冒烟通过（chi_sim + eng），zip 76.0 MB
 ```
 
-便携包运行验收（inspect-win-artifact）本轮未触发；上一次全绿记录见 `ci-report` 的
-`ci/windows-report.txt`。12 套测试的 `.out.txt` 在 run 的 test-diagnostics artifact 里。
+上一个全绿记录：run 42353005512（900e60a，不带 OCR/词典）。
+inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
+12 套测试的 `.out.txt` 在 run 的 test-diagnostics artifact 里。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip
-sha256: 988a68df5b2269f77b4c7772767579118056df3590c89e78be65e214208f85da
+https://github.com/hartamanda58/AdaptNote/releases/download/bundled-ocr-dict-58efc35/AdaptNote-windows-x64-ocr-dict.zip
+sha256: fd697a4efe0b1334d8e506599060176e51e89fb287cca5c1fc9e8f8dd8df485a
 ```
 
-包含合并版全部功能（生词本/OCR/S3 同步/新 UI）。包内直接运行 `bin\adaptnote.exe` 即可；
-`portable.flag` 让它把数据写到包根 `data\`；`AdaptNote.bat` 仍然兼容。
-`ecdict.db`（可选查词）放包根 `data\`；tesseract 可装系统或用 `ADAPT_TESSERACT` 指定。
+**自带本地 OCR 与查词，离线开箱即用**（压缩 76 MB / 解压 145 MB）。包内直接运行
+`bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`；`AdaptNote.bat` 兼容。
 
-注意：这版 CI 产出的 zip 内层文件名曾被 `make_portable.ps1` 的 `$name` 变量覆盖成
-`test.epub.zip`（已修复并提交）；发布包是解层重命名后的产物。
+- `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
+  `ocr.cpp` 优先找包内引擎并自动加 `--tessdata-dir`（`make_portable.ps1 -WithExtras` 打包）
+- `data\ecdict.db`：`scripts/make_ecdict.py` 从 ecdict-sqlite-28 裁出 43,823 个常用词条
+  （词频 / Collins / Oxford 评级，8 MB）；替换同名文件可换全量词典
+- `scripts/strip_coff_debug.py` 剥掉 libtesseract-5.dll 里 97 MB COFF 调试符号（108→76 MB），
+  打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
+- 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
+
+上一个版本（43 MB，不带 OCR/词典）：
+`releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip`
+
+注意：早期 CI 产出的 zip 内层文件名曾被 `make_portable.ps1` 的 `$name` 变量覆盖成
+`test.epub.zip`（已修复）；发布包是解层重命名后的产物。
 
 ---
 
