@@ -3,6 +3,7 @@
 #include "core/model.h"
 
 #include <QHash>
+#include <QPair>
 #include <QString>
 #include <QVector>
 
@@ -23,6 +24,9 @@ struct ExportContext {
     // Mind map structure per document (id -> groups). When present, XMind and OPML
     // exports follow the group tree instead of the flat page grouping.
     QHash<QString, QVector<MindGroup>> groupsByDoc;
+    // Literal Anki front/back pairs. When non-empty they replace the markup-derived
+    // cards, which lets the vocabulary book reuse the same collection builder.
+    QVector<QPair<QString, QString>> ankiCards;
 };
 
 namespace exports {
@@ -33,6 +37,11 @@ bool toHtml(const ExportContext& ctx, QString* error = nullptr);
 bool toOpml(const ExportContext& ctx, QString* error = nullptr);
 bool toXmind(const ExportContext& ctx, QString* error = nullptr);
 bool toAnki(const ExportContext& ctx, QString* error = nullptr);
+// Vocabulary deck: one basic card per word (word + phonetic on the front, meaning /
+// example on the back). Written as a real .apkg so Anki can import it directly.
+bool vocabToAnki(const QVector<WordEntry>& words, const QString& outPath,
+                 const QString& deckName = QStringLiteral("AdaptNote 生词"),
+                 QString* error = nullptr);
 
 // Dispatch by extension: md | html | opml | xmind | apkg
 bool byExtension(const ExportContext& ctx, QString* error = nullptr);

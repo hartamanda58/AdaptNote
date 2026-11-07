@@ -352,20 +352,40 @@ bool buildAnkiCollection(const ExportContext& ctx, const QString& dbPath,
             }
         }
 
+        struct CardData {
+            QString front;
+            QString back;
+            QString sortField;
+            QString tags;
+        };
+        QVector<CardData> cards;
+        if (!ctx.ankiCards.isEmpty()) {
+            // Literal cards (vocabulary deck). The visible front may be HTML, but the
+            // sort field must stay plain text.
+            for (const auto& pair : ctx.ankiCards) {
+                QString plain = pair.first;
+                plain.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
+                cards.append({pair.first, pair.second, plain.left(120),
+                              QStringLiteral("AdaptNote::vocab")});
+            }
+        } else {
+            for (const Markup& m : sorted(ctx)) {
+                const QString docTitle = bookNameOf(ctx, m);
+                cards.append({ankiFrontHtml(m, docTitle), ankiBackHtml(m),
+                              m.text.isEmpty() ? docTitle : m.text.left(120),
+                              ankiTags(m.tags)});
+                if (m.type == MarkupType::Image && !m.imagePath.isEmpty() && ctx.includeImages) {
+                    if (media && QFile::exists(m.imagePath))
+                        media->append({QFileInfo(m.imagePath).fileName(), m.imagePath});
+                }
+            }
+        }
+
         int index = 0;
-        for (const Markup& m : sorted(ctx)) {
-            const QString docTitle = bookNameOf(ctx, m);
+        for (const CardData& card : cards) {
             if (!ok) break;
             ++index;
             const qint64 noteId = nowMs + index;
-            const QString front = ankiFrontHtml(m, docTitle);
-            const QString back = ankiBackHtml(m);
-            const QString sfld = m.text.isEmpty() ? docTitle : m.text.left(120);
-
-            if (m.type == MarkupType::Image && !m.imagePath.isEmpty() && ctx.includeImages) {
-                if (media && QFile::exists(m.imagePath))
-                    media->append({QFileInfo(m.imagePath).fileName(), m.imagePath});
-            }
 
             QSqlQuery n(db);
             n.prepare("INSERT INTO notes (id,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data)"
@@ -374,10 +394,10 @@ bool buildAnkiCollection(const ExportContext& ctx, const QString& dbPath,
             n.addBindValue(QUuid::createUuid().toString(QUuid::WithoutBraces).left(10));
             n.addBindValue(modelId);
             n.addBindValue(nowSec);
-            n.addBindValue(ankiTags(m.tags));
-            n.addBindValue(front + QLatin1Char('\x1f') + back);
-            n.addBindValue(sfld);
-            n.addBindValue(ankiChecksum(sfld));
+            n.addBindValue(card.tags);
+            n.addBindValue(card.front + QLatin1Char('\x1f') + card.back);
+            n.addBindValue(card.sortField);
+            n.addBindValue(ankiChecksum(card.sortField));
             if (!n.exec()) {
                 if (error) *error = n.lastError().text();
                 ok = false;
@@ -826,6 +846,55 @@ bool toAnki(const ExportContext& ctx, QString* error)
                QJsonDocument(mediaJson).toJson(QJsonDocument::Compact));
     if (!zw.close(error)) return false;
     return true;
+}
+
+// --------------------------------------------------------------------- vocabulary
+
+bool vocabToAnki(const QVector<WordEntry>& words, const QString& outPath,
+                 const QString& deckName, QString* error)
+{
+    ExportContext ctx;
+    ctx.outPath = outPath;
+    ctx.deckName = deckName;
+
+    QVector<WordEntry> rows = words;
+    std::sort(rows.begin(), rows.end(), [](const WordEntry& a, const WordEntry& b) {
+        return a.word.compare(b.word, Qt::CaseInsensitive) < 0;
+    });
+
+    for (const WordEntry& w : rows) {
+        if (w.deleted || w.word.trimmed().isEmpty()) continue;
+        QString front = QStringLiteral("<div style=\"font-size:22px;font-weight:600\">%1</div>")
+                            .arg(w.word.toHtmlEscaped());
+        if (!w.phonetic.isEmpty()) {
+            front += QStringLiteral("<div style=\"color:#8a8a8e;font-size:14px\">[%1]</div>")
+                         .arg(w.phonetic.toHtmlEscaped());
+        }
+
+        QString back;
+        if (!w.meaning.isEmpty()) {
+            back += QStringLiteral("<div style=\"font-size:15px\">%1</div>")
+                        .arg(w.meaning.toHtmlEscaped().replace(QLatin1Char('\n'),
+                                                              QStringLiteral("<br>")));
+        }
+        if (!w.example.isEmpty()) {
+            back += QStringLiteral("<div style=\"margin-top:8px;color:#555;font-size:13px\">%1</div>")
+                        .arg(w.example.toHtmlEscaped());
+        }
+        if (!w.docPath.isEmpty()) {
+            back += QStringLiteral("<div style=\"margin-top:8px;color:#9a9aa0;font-size:11px\">%1%2</div>")
+                        .arg(QFileInfo(w.docPath).fileName().toHtmlEscaped(),
+                             w.page >= 0 ? QStringLiteral(" · 第 %1 页").arg(w.page + 1)
+                                         : QString());
+        }
+        ctx.ankiCards.append({front, back});
+    }
+
+    if (ctx.ankiCards.isEmpty()) {
+        if (error) *error = QStringLiteral("生词本是空的");
+        return false;
+    }
+    return toAnki(ctx, error);
 }
 
 // ------------------------------------------------------------------- dispatch

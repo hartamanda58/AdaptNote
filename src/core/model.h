@@ -187,6 +187,9 @@ struct WordEntry {
     QString meaning;
     QString example;
     QString docPath;     // where it was collected (may be empty)
+    // Content identity of docPath, used on the sync wire instead of an absolute path.
+    // Transient: not stored in SQLite, recomputed from the file when needed.
+    QString docKey;
     int page = -1;
     int box = 0;         // 0..5, see vocab::kReviewGapsDays
     qint64 dueAt = 0;    // ms since epoch

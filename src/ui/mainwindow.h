@@ -228,6 +228,9 @@ private:
     void saveVocabDefinition(const vocab::Definition& def);
     // OCR: selected region (or clipboard image) -> tesseract, vision model fallback.
     void ocrSelection();
+    void ocrCurrentPage();
+    void runOcrOnImage(const QImage& image);
+    void openOcrSettings();
     void showOcrResult(const QString& text);
     void insertAiAsNote();
     void onInkStroke(int page, const QVector<InkPoint>& points);
@@ -261,6 +264,12 @@ private:
     QListWidget* bookshelfList_ = nullptr;
     QListWidget* topicShelfList_ = nullptr;
     QTreeWidget* pageOutlineOnShelf_ = nullptr;
+    QListWidget* pageThumbs_ = nullptr;
+    QTimer* thumbTimer_ = nullptr;
+    int thumbNext_ = 0;
+    QString thumbDocPath_;
+    void rebuildPageThumbnails();
+    void pumpPageThumbnails();
     mind::MindMapView* shelfMindView_ = nullptr;
     QTabWidget* readerSideTabs_ = nullptr;
     QWidget* aiPanel_ = nullptr;

@@ -44,6 +44,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListView>
+#include <QIcon>
 #include <QMenu>
 #include <QSplitter>
 #include <QMessageBox>
@@ -173,29 +175,140 @@ protected:
             event->acceptProposedAction();
         else event->ignore();
     }
+    void dragLeaveEvent(QDragLeaveEvent* event) override
+    {
+        dropTarget_ = nullptr;
+        viewport()->update();
+        QTreeWidget::dragLeaveEvent(event);
+    }
     void dragMoveEvent(QDragMoveEvent* event) override
     {
         auto* target = itemAt(event->position().toPoint());
         if (event->source() == this && target) {
-            setCurrentItem(target);
-            viewport()->setToolTip(QStringLiteral("放开：移入分组；笔记落到笔记上则插入其前方（仅同资料）"));
+            dropTarget_ = target;
+            dropNest_ = nestFor(target, event->position().toPoint());
+            viewport()->setToolTip(dropNest_
+                ? QStringLiteral("放开：成为这条笔记的子笔记")
+                : QStringLiteral("放开：插入到这条笔记之前"));
+            viewport()->update();
             event->acceptProposedAction();
+        } else {
+            dropTarget_ = nullptr;
+            viewport()->update();
+            event->ignore();
         }
-        else event->ignore();
     }
     void dropEvent(QDropEvent* event) override
     {
         if (event->source() != this || !moveNote) { event->ignore(); return; }
         const QString id = QString::fromUtf8(event->mimeData()->data("application/x-adaptnote-note"));
         auto* target = itemAt(event->position().toPoint());
-        const QRect row = target ? visualItemRect(target) : QRect();
-        const bool nestUnderParent = !row.isEmpty() &&
-                                     event->position().toPoint().y() >= row.center().y() + row.height() / 4;
+        const bool nestUnderParent = nestFor(target, event->position().toPoint());
+        dropTarget_ = nullptr;
+        viewport()->update();
         const bool moved = id.startsWith(QStringLiteral("group:"))
                                ? (moveGroup && moveGroup(id.mid(6), target))
                                : moveNote(id, target, nestUnderParent);
         if (moved) event->acceptProposedAction();
         else event->ignore();
+    }
+
+    void paintEvent(QPaintEvent* event) override
+    {
+        QTreeWidget::paintEvent(event);
+        if (!dropTarget_) return;
+        QPainter painter(viewport());
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QRect row = visualItemRect(dropTarget_);
+        if (row.isEmpty()) return;
+        painter.setPen(QPen(QColor("#0a84ff"), 2));
+        if (dropNest_) {
+            painter.setBrush(QColor(10, 132, 255, 28));
+            painter.drawRoundedRect(row.adjusted(2, 1, -2, -1), 8, 8);
+        } else {
+            painter.drawLine(row.left() + 4, row.top() + 1, row.right() - 4, row.top() + 1);
+        }
+    }
+
+private:
+    bool nestFor(QTreeWidgetItem* target, const QPoint& pos) const
+    {
+        if (!target) return false;
+        const QRect row = visualItemRect(target);
+        return !row.isEmpty() && pos.y() >= row.center().y() + row.height() / 4;
+    }
+
+    QTreeWidgetItem* dropTarget_ = nullptr;
+    bool dropNest_ = false;
+};
+
+// Reader-side excerpt card: colour stripe, type + page, quote, then the user's note
+// or tags. MarginNote keeps excerpts as cards rather than spreadsheet rows.
+class ExcerptDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const override
+    {
+        return QSize(qMax(120, option.rect.width()), 66);
+    }
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        const QRect row = option.rect.adjusted(3, 2, -4, -2);
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hovered = option.state & QStyle::State_MouseOver;
+        if (selected || hovered) {
+            painter->setPen(selected ? QColor("#b9d4ff") : Qt::NoPen);
+            painter->setBrush(selected ? QColor("#dfeaff") : QColor("#f2f4f7"));
+            painter->drawRoundedRect(row, 9, 9);
+        }
+
+        const QColor color = index.data(Qt::UserRole + 6).value<QColor>();
+        if (color.isValid()) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(color);
+            painter->drawRoundedRect(QRect(row.left() + 6, row.top() + 8, 3, row.height() - 16),
+                                     1.5, 1.5);
+        }
+
+        const int left = row.left() + 16;
+        const int right = row.right() - 8;
+        QFont meta = option.font;
+        meta.setPointSizeF(8.5);
+        painter->setFont(meta);
+        painter->setPen(QColor("#8a8a8e"));
+        const QString kind = index.data(Qt::UserRole + 2).toString();
+        const QString page = QStringLiteral("P%1").arg(index.data(Qt::UserRole + 1).toInt());
+        painter->drawText(QRect(left, row.top() + 6, right - left - 44, 15),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(kind, Qt::ElideRight, right - left - 48));
+        painter->drawText(QRect(right - 42, row.top() + 6, 42, 15),
+                          Qt::AlignRight | Qt::AlignVCenter, page);
+
+        QFont quoteFont = option.font;
+        quoteFont.setPointSizeF(11.0);
+        quoteFont.setWeight(QFont::DemiBold);
+        painter->setFont(quoteFont);
+        painter->setPen(QColor("#1d1d1f"));
+        const QString quote = index.data(Qt::UserRole + 3).toString();
+        painter->drawText(QRect(left, row.top() + 22, right - left, 20),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(quote, Qt::ElideRight, right - left));
+
+        painter->setFont(meta);
+        painter->setPen(QColor("#6b6b70"));
+        const QString comment = index.data(Qt::UserRole + 4).toString();
+        const QString tags = index.data(Qt::UserRole + 5).toString();
+        QString second = comment.isEmpty() ? tags : comment;
+        if (second.isEmpty()) second = index.data(Qt::UserRole + 7).toString();
+        painter->drawText(QRect(left, row.top() + 43, right - left, 16),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(second, Qt::ElideRight, right - left));
+        painter->restore();
     }
 };
 
@@ -467,6 +580,21 @@ QString excerptOf(const Markup& m, int max = 42)
     if (m.type == MarkupType::Image && s.isEmpty()) s = QStringLiteral("(图片摘录)");
     if (s.size() > max) s = s.left(max) + QStringLiteral("…");
     return s;
+}
+
+// The sentence that contains a looked-up word, used when no dictionary example exists.
+QString sentenceAround(const QString& text, const QString& word)
+{
+    if (word.trimmed().isEmpty() || text.isEmpty()) return {};
+    const int pos = text.indexOf(word.trimmed(), 0, Qt::CaseInsensitive);
+    if (pos < 0) return {};
+    static const QString ends = QStringLiteral("。！？!?;；\n");
+    int start = pos;
+    while (start > 0 && !ends.contains(text.at(start - 1))) --start;
+    int end = pos + word.trimmed().size();
+    while (end < text.size() && !ends.contains(text.at(end))) ++end;
+    if (end < text.size()) ++end;
+    return text.mid(start, end - start).simplified().left(300);
 }
 
 }  // namespace
@@ -768,6 +896,14 @@ void MainWindow::buildUi()
     connect(view_, &PageView::pageChanged, this, [this](int) {
         updateStatus();
         saveReadingState();
+        if (pageThumbs_ && view_) {
+            const int page = view_->currentPage();
+            if (page >= 0 && page < pageThumbs_->count()) {
+                pageThumbs_->setCurrentRow(page);
+                if (QListWidgetItem* item = pageThumbs_->currentItem())
+                    pageThumbs_->scrollToItem(item, QAbstractItemView::EnsureVisible);
+            }
+        }
     });
     connect(view_, &PageView::zoomChanged, this, [this](float z) {
         updateSelectionTranslationAction();
@@ -1352,6 +1488,44 @@ void MainWindow::buildDocks()
     pageOutlineOnShelf_->setHeaderHidden(true);
     shelfTabs->addTab(pageOutlineOnShelf_, QStringLiteral("目录"));
 
+    // Page thumbnails, rendered in small batches so a 600-page book does not freeze the UI.
+    pageThumbs_ = new QListWidget(shelfTabs);
+    pageThumbs_->setObjectName("pageThumbs");
+    pageThumbs_->setViewMode(QListView::IconMode);
+    pageThumbs_->setIconSize(QSize(108, 144));
+    pageThumbs_->setGridSize(QSize(124, 178));
+    pageThumbs_->setResizeMode(QListView::Adjust);
+    pageThumbs_->setMovement(QListView::Static);
+    pageThumbs_->setUniformItemSizes(true);
+    pageThumbs_->setWordWrap(false);
+    pageThumbs_->setSpacing(4);
+    pageThumbs_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    shelfTabs->addTab(pageThumbs_, QStringLiteral("页面"));
+    connect(pageThumbs_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        if (!item) return;
+        const int page = item->data(Qt::UserRole).toInt();
+        if (page >= 0) {
+            view_->gotoPage(page);
+            updateStatus();
+        }
+    });
+    const QString savedShelfTab = store_.setting(QStringLiteral("ui.shelfTab"));
+    if (!savedShelfTab.isEmpty()) {
+        for (int i = 0; i < shelfTabs->count(); ++i) {
+            if (shelfTabs->tabText(i) == savedShelfTab) {
+                shelfTabs->setCurrentIndex(i);
+                break;
+            }
+        }
+    }
+    connect(shelfTabs, &QTabWidget::currentChanged, this, [this, shelfTabs](int index) {
+        if (!shelfTabs || index < 0 || index >= shelfTabs->count()) return;
+        store_.setSetting(QStringLiteral("ui.shelfTab"), shelfTabs->tabText(index));
+    });
+    thumbTimer_ = new QTimer(this);
+    thumbTimer_->setInterval(0);
+    connect(thumbTimer_, &QTimer::timeout, this, &MainWindow::pumpPageThumbnails);
+
 
     shelfLayout->addWidget(shelfTabs, 1);
 
@@ -1561,7 +1735,10 @@ void MainWindow::buildDocks()
     });
 
     notesList_ = new QListWidget(notesTab);
-    notesList_->setAlternatingRowColors(true);
+    notesList_->setObjectName("excerptList");
+    notesList_->setItemDelegate(new ExcerptDelegate(notesList_));
+    notesList_->setMouseTracking(true);
+    notesList_->setAlternatingRowColors(false);
     vbox->addWidget(notesList_, 1);
 
     connect(noteSearchEdit_, &QLineEdit::textChanged, this, [this](const QString&) {
@@ -1637,6 +1814,8 @@ void MainWindow::buildDocks()
     // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
     // The page-outline tree is constructed before the excerpt list, so move it behind.
     leftTabs_->tabBar()->moveTab(leftTabs_->indexOf(notesTab), 0);
+    // moveTab keeps the previously current tab; excerpts should be the default view.
+    leftTabs_->setCurrentWidget(notesTab);
 
     dock->setWidget(leftTabs_);
     dock->setMinimumWidth(300);
@@ -1669,6 +1848,7 @@ bool MainWindow::openDocument(const QString& path)
 
     view_->setEngine(&engine_);
     reloadOutline();
+    rebuildPageThumbnails();
     reloadMarkups();
     refreshBookshelf();
     hits_.clear();
@@ -2091,6 +2271,70 @@ void MainWindow::reloadOutline()
     }
 }
 
+void MainWindow::rebuildPageThumbnails()
+{
+    if (!pageThumbs_) return;
+    if (thumbTimer_) thumbTimer_->stop();
+    pageThumbs_->clear();
+    thumbNext_ = 0;
+    thumbDocPath_ = docPath_;
+    if (!engine_.isOpen()) return;
+
+    constexpr int kMaxThumbs = 500;
+    const int pages = qMin(engine_.pageCount(), kMaxThumbs);
+    pageThumbs_->setUpdatesEnabled(false);
+    for (int p = 0; p < pages; ++p) {
+        auto* item = new QListWidgetItem(pageThumbs_);
+        item->setText(QString::number(p + 1));
+        item->setData(Qt::UserRole, p);
+        item->setSizeHint(QSize(116, 168));
+        item->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
+        item->setToolTip(QStringLiteral("第 %1 页").arg(p + 1));
+    }
+    if (engine_.pageCount() > kMaxThumbs) {
+        auto* more = new QListWidgetItem(pageThumbs_);
+        more->setText(QStringLiteral("…"));
+        more->setData(Qt::UserRole, -1);
+        more->setFlags(Qt::NoItemFlags);
+        more->setToolTip(QStringLiteral("仅渲染前 %1 页").arg(kMaxThumbs));
+    }
+    pageThumbs_->setUpdatesEnabled(true);
+    if (view_ && view_->currentPage() < pages) pageThumbs_->setCurrentRow(view_->currentPage());
+    if (thumbTimer_) thumbTimer_->start();
+}
+
+void MainWindow::pumpPageThumbnails()
+{
+    if (!pageThumbs_ || !thumbTimer_ || !engine_.isOpen()) return;
+    if (thumbDocPath_ != docPath_) {
+        thumbTimer_->stop();
+        return;
+    }
+    constexpr int kBatch = 6;
+    int rendered = 0;
+    const int total = pageThumbs_->count();
+    while (thumbNext_ < total && rendered < kBatch) {
+        QListWidgetItem* item = pageThumbs_->item(thumbNext_);
+        const int page = item->data(Qt::UserRole).toInt();
+        if (page >= 0 && page < engine_.pageCount()) {
+            const QSizeF pt = engine_.pageSize(page);
+            if (pt.width() > 0) {
+                const float scale = 108.0f / static_cast<float>(pt.width());
+                QImage image = engine_.renderPage(page, scale, 0);
+                if (!image.isNull()) {
+                    QPixmap pixmap = QPixmap::fromImage(image);
+                    if (pixmap.width() > 108)
+                        pixmap = pixmap.scaledToWidth(108, Qt::SmoothTransformation);
+                    item->setIcon(QIcon(pixmap));
+                }
+            }
+        }
+        ++thumbNext_;
+        ++rendered;
+    }
+    if (thumbNext_ >= total) thumbTimer_->stop();
+}
+
 void MainWindow::reloadMarkups()
 {
     markups_ = store_.markups(docPath_);
@@ -2253,6 +2497,24 @@ void MainWindow::updateNotesPanel()
         auto* item = new QListWidgetItem(text);
         item->setIcon(swatchIcon(m.color));
         item->setData(Qt::UserRole, m.id);
+        item->setData(Qt::UserRole + 1, m.page + 1);
+        item->setData(Qt::UserRole + 2, markupTypeLabel(m.type));
+        const QString quote = !m.text.trimmed().isEmpty()
+                                  ? m.text.simplified()
+                                  : (!m.title.trimmed().isEmpty()
+                                         ? m.title.simplified()
+                                         : (m.type == MarkupType::Image
+                                                ? QStringLiteral("图片摘录")
+                                                : (m.type == MarkupType::Ink
+                                                       ? QStringLiteral("手写标注")
+                                                       : m.comment.simplified())));
+        item->setData(Qt::UserRole + 3, quote);
+        item->setData(Qt::UserRole + 4, m.comment.simplified());
+        item->setData(Qt::UserRole + 5, m.tags.isEmpty()
+                                            ? QString()
+                                            : QStringLiteral("#") + m.tags.join(QStringLiteral(" #")));
+        item->setData(Qt::UserRole + 6, m.color);
+        item->setData(Qt::UserRole + 7, searchAllDocs_ ? QFileInfo(m.docPath).completeBaseName() : QString());
         item->setToolTip(QStringLiteral("%1\n%2\n标签：%3")
                              .arg(excerptOf(m, 200), m.comment,
                                   m.tags.isEmpty() ? QStringLiteral("—") : m.tags.join(", ")));
@@ -3202,6 +3464,11 @@ void MainWindow::buildAiDock()
             if (notesDock_) notesDock_->show();
             if (leftTabs_ && vocabPanel_) leftTabs_->setCurrentWidget(vocabPanel_);
         });
+        QAction* pageOcr = moreMenu_->addAction(QStringLiteral("整页 OCR"));
+        pageOcr->setToolTip(QStringLiteral("识别当前页（tesseract 或视觉模型）"));
+        connect(pageOcr, &QAction::triggered, this, &MainWindow::ocrCurrentPage);
+        QAction* ocrSettings = moreMenu_->addAction(QStringLiteral("OCR 设置…"));
+        connect(ocrSettings, &QAction::triggered, this, &MainWindow::openOcrSettings);
     }
 
     ai::AiClient::Settings s;
@@ -3640,6 +3907,12 @@ void MainWindow::saveVocabDefinition(const vocab::Definition& def)
         w.docPath = docPath_;
         w.page = view_ ? view_->currentPage() : -1;
     }
+    // No dictionary example? Keep the sentence the reader actually met the word in.
+    if (w.example.isEmpty() && view_ && !docPath_.isEmpty() && w.docPath == docPath_) {
+        if (const TextPage* tp = engine_.textPage(view_->currentPage())) {
+            w.example = sentenceAround(pageText(*tp), w.word);
+        }
+    }
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (w.created <= 0) w.created = now;
     w.updated = now;
@@ -3695,9 +3968,30 @@ void MainWindow::ocrSelection()
         statusBar()->showMessage(QStringLiteral("选中一块区域，或先把图片复制到剪贴板"), 5000);
         return;
     }
+    runOcrOnImage(image);
+}
 
+void MainWindow::ocrCurrentPage()
+{
+    if (!engine_.isOpen()) {
+        statusBar()->showMessage(QStringLiteral("先打开一份文档"), 3000);
+        return;
+    }
+    const int page = view_ ? view_->currentPage() : 0;
+    const QImage image = engine_.renderPage(page, 2.4f, 0);
+    if (image.isNull()) {
+        statusBar()->showMessage(QStringLiteral("当前页渲染失败"), 4000);
+        return;
+    }
+    runOcrOnImage(image);
+}
+
+void MainWindow::runOcrOnImage(const QImage& image)
+{
+    const QString lang = store_.setting(QStringLiteral("ocr.lang"),
+                                        QStringLiteral("eng+chi_sim"));
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const ocr::Result result = ocr::recognize(image);
+    const ocr::Result result = ocr::recognize(image, lang);
     QApplication::restoreOverrideCursor();
     if (result.ok) {
         statusBar()->showMessage(QStringLiteral("OCR 完成（%1）").arg(result.engine), 3000);
@@ -3708,7 +4002,7 @@ void MainWindow::ocrSelection()
     if (!ai_.settings().apiKey.trimmed().isEmpty()) {
         pendingOcr_ = true;
         aiContent_.clear();
-        statusBar()->showMessage(QStringLiteral("本机没有 tesseract，改用云端视觉模型…"), 3000);
+        statusBar()->showMessage(QStringLiteral("本机 OCR 不可用，改用云端视觉模型…"), 3000);
         ai_.sendVision(QStringLiteral("只输出图片中的文字，不要解释，不要 Markdown。保留原换行。"),
                        {image});
         return;
@@ -3716,6 +4010,48 @@ void MainWindow::ocrSelection()
 
     warnUser(this, QStringLiteral("OCR 不可用"), result.error);
     statusBar()->showMessage(result.error, 7000);
+}
+
+void MainWindow::openOcrSettings()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("OCR 设置"));
+    auto* form = new QFormLayout(&dlg);
+
+    const QString exe = ocr::tesseractExecutable();
+    auto* status = new QLabel(
+        exe.isEmpty()
+            ? QStringLiteral("未找到 tesseract。选中区域 OCR 会改用已配置的视觉模型。")
+            : QStringLiteral("已找到：%1").arg(exe),
+        &dlg);
+    status->setWordWrap(true);
+    status->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:12px;"));
+    form->addRow(QStringLiteral("引擎"), status);
+
+    auto* lang = new QLineEdit(
+        store_.setting(QStringLiteral("ocr.lang"), QStringLiteral("eng+chi_sim")), &dlg);
+    lang->setPlaceholderText(QStringLiteral("eng+chi_sim"));
+    form->addRow(QStringLiteral("语言包"), lang);
+
+    auto* hint = new QLabel(QStringLiteral(
+        "语言包写法例如 eng+chi_sim（英文+简体）、chi_sim+eng、jpn、kor。\n"
+        "Windows 默认安装在 C:/Program Files/Tesseract-OCR；其他位置可用环境变量\n"
+        "ADAPT_TESSERACT 指向 tesseract 可执行文件。没有 tesseract 时，会在配置了\n"
+        "AI Key 的前提下自动走视觉模型。"), &dlg);
+    hint->setWordWrap(true);
+    hint->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:12px;"));
+    form->addRow(hint);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    const QString value = lang->text().trimmed();
+    store_.setSetting(QStringLiteral("ocr.lang"),
+                      value.isEmpty() ? QStringLiteral("eng+chi_sim") : value);
+    statusBar()->showMessage(QStringLiteral("OCR 设置已保存"), 3000);
 }
 
 void MainWindow::showOcrResult(const QString& text)

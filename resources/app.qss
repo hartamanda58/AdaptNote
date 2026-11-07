@@ -105,12 +105,10 @@ QDockWidget::title {
     letter-spacing: 0.4px;
 }
 QDockWidget#bookshelfDock, QDockWidget#notesDock { background: #f7f7f9; }
-QWidget#bookshelfDock QWidget { background: #f7f7f9; color: #3a3a3c; }
 QDockWidget#bookshelfDock::title { background: #f7f7f9; padding: 7px 10px; }
 QDockWidget#bookshelfDock::close-button, QDockWidget#bookshelfDock::float-button,
 QDockWidget#notesDock::close-button, QDockWidget#notesDock::float-button { width: 0; height: 0; }
 
-QWidget#notesDock QWidget { background: #f7f7f9; color: #3a3a3c; }
 QWidget#notesDock QTabWidget::pane { background: transparent; border: 0; }
 QWidget#bookshelfDock QTabWidget::pane { background: transparent; border: 0; }
 

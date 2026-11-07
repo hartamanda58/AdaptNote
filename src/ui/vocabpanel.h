@@ -50,6 +50,8 @@ private:
     void deleteSelected();
     void openSourceSelected();
     void exportWords(bool anki);
+    void exportApkg();
+    void startReview();
     WordEntry selectedWord() const;
 
     Store& store_;
@@ -61,6 +63,7 @@ private:
     QPushButton* lookupButton_ = nullptr;
     QToolButton* exportButton_ = nullptr;
     QToolButton* filterButton_ = nullptr;
+    QPushButton* reviewButton_ = nullptr;
     QListWidget* list_ = nullptr;
     QTextBrowser* detail_ = nullptr;
     QPushButton* knownButton_ = nullptr;

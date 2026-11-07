@@ -609,14 +609,26 @@ QByteArray SyncManager::wordsJson(const QVector<WordEntry>& words)
     QJsonObject root;
     root["schema"] = 1;
     QJsonArray arr;
+    QHash<QString, QString> keyCache;
     for (const WordEntry& w : words) {
         QJsonObject o;
+        QString key = w.docKey;
+        if (key.isEmpty() && !w.docPath.isEmpty()) {
+            auto it = keyCache.constFind(w.docPath);
+            if (it != keyCache.constEnd()) {
+                key = it.value();
+            } else {
+                key = docKeyFor(w.docPath);
+                keyCache.insert(w.docPath, key);
+            }
+        }
         o["id"] = w.id;
         o["word"] = w.word;
         o["phonetic"] = w.phonetic;
         o["meaning"] = w.meaning;
         o["example"] = w.example;
-        // Absolute paths never go on the wire; the source file name is only a hint.
+        // Absolute paths never go on the wire; docKey resolves to a local path on the peer.
+        o["docKey"] = key;
         o["docName"] = w.docPath.isEmpty() ? QString() : QFileInfo(w.docPath).fileName();
         o["page"] = w.page;
         o["box"] = w.box;
@@ -648,6 +660,7 @@ QVector<WordEntry> SyncManager::parseWords(const QByteArray& json, QString* erro
         w.phonetic = o.value("phonetic").toString();
         w.meaning = o.value("meaning").toString();
         w.example = o.value("example").toString();
+        w.docKey = o.value("docKey").toString();
         w.page = o.value("page").toInt(-1);
         w.box = qBound(0, o.value("box").toInt(), 5);
         w.dueAt = static_cast<qint64>(o.value("dueAt").toDouble());
@@ -735,9 +748,26 @@ SyncReport SyncManager::syncAll()
                 remote = parseWords(remoteBytes, &err);
                 if (!err.isEmpty()) { total.ok = false; total.error = err; return total; }
             }
+            // Resolve the wire docKey to a local path so "回原文" still works on the peer.
+            QHash<QString, QString> keyToPath;
+            for (const QString& path : store_.documentPaths()) {
+                const QString key = docKeyFor(path);
+                if (!key.isEmpty()) keyToPath.insert(key, path);
+            }
+            for (WordEntry& w : remote) {
+                w.docPath = w.docKey.isEmpty() ? QString()
+                                               : keyToPath.value(w.docKey, QString());
+            }
+
             const auto merged = mergeWords(store_.words(true), remote,
                                            QDateTime::currentMSecsSinceEpoch());
-            for (const WordEntry& w : merged.merged) {
+            for (WordEntry w : merged.merged) {
+                // An unresolved remote anchor must not wipe the local one.
+                if (w.docPath.isEmpty()) {
+                    const WordEntry local = store_.wordByText(w.word);
+                    w.docPath = local.docPath;
+                    if (w.page < 0) w.page = local.page;
+                }
                 QString wordErr;
                 if (!store_.upsertWord(w, &wordErr, true)) {
                     total.ok = false; total.error = wordErr; return total;

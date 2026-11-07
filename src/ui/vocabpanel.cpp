@@ -1,6 +1,7 @@
 #include "ui/vocabpanel.h"
 
 #include "core/store.h"
+#include "export/exporter.h"
 #include "vocab/vocab.h"
 
 #include <QDateTime>
@@ -11,6 +12,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -23,6 +25,8 @@
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 #ifdef ADAPT_HAVE_TTS
 #include <QTextToSpeech>
@@ -116,6 +120,179 @@ public:
     }
 };
 
+// Focused review session: reveal the meaning, then grade. Keyboard: Space reveals,
+// 1 / ← = 不认识, 2 / → = 认识, Esc closes. Deliberately small and modal so the
+// reader's context is not lost for long.
+class ReviewDialog : public QDialog {
+public:
+    ReviewDialog(Store& store, QVector<WordEntry> queue, QWidget* parent)
+        : QDialog(parent)
+        , store_(store)
+        , queue_(std::move(queue))
+    {
+        setWindowTitle(QStringLiteral("生词复习"));
+        resize(460, 380);
+        auto* layout = new QVBoxLayout(this);
+        layout->setSpacing(8);
+
+        progress_ = new QLabel(this);
+        progress_->setObjectName("panelHint");
+        layout->addWidget(progress_);
+
+        word_ = new QLabel(this);
+        word_->setAlignment(Qt::AlignCenter);
+        word_->setWordWrap(true);
+        word_->setStyleSheet(QStringLiteral("font-size:26px;font-weight:650;color:#1d1d1f;"));
+        layout->addWidget(word_);
+
+        phonetic_ = new QLabel(this);
+        phonetic_->setAlignment(Qt::AlignCenter);
+        phonetic_->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:13px;"));
+        layout->addWidget(phonetic_);
+
+        answer_ = new QTextBrowser(this);
+        answer_->setMinimumHeight(130);
+        answer_->setOpenExternalLinks(false);
+        layout->addWidget(answer_, 1);
+
+        hint_ = new QLabel(QStringLiteral("空格显示答案 · 1 不认识 · 2 认识 · Esc 关闭"), this);
+        hint_->setObjectName("panelHint");
+        hint_->setAlignment(Qt::AlignCenter);
+        layout->addWidget(hint_);
+
+        auto* row = new QHBoxLayout;
+        reveal_ = new QPushButton(QStringLiteral("显示答案"), this);
+        reveal_->setObjectName("primaryButton");
+        unknown_ = new QPushButton(QStringLiteral("1 · 不认识"), this);
+        known_ = new QPushButton(QStringLiteral("2 · 认识"), this);
+        known_->setObjectName("primaryButton");
+        row->addWidget(reveal_, 1);
+        row->addWidget(unknown_, 1);
+        row->addWidget(known_, 1);
+        layout->addLayout(row);
+
+        connect(reveal_, &QPushButton::clicked, this, &ReviewDialog::revealAnswer);
+        connect(unknown_, &QPushButton::clicked, this, [this]() { grade(false); });
+        connect(known_, &QPushButton::clicked, this, [this]() { grade(true); });
+
+        showCurrent();
+    }
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        if (finished_) {
+            QDialog::keyPressEvent(event);
+            return;
+        }
+        if (event->key() == Qt::Key_Space || event->key() == Qt::Key_Return) {
+            if (!revealed_) revealAnswer();
+            return;
+        }
+        if (event->key() == Qt::Key_1 || event->key() == Qt::Key_Left) {
+            if (revealed_) grade(false);
+            return;
+        }
+        if (event->key() == Qt::Key_2 || event->key() == Qt::Key_Right) {
+            if (revealed_) grade(true);
+            return;
+        }
+        QDialog::keyPressEvent(event);
+    }
+
+private:
+    void showCurrent()
+    {
+        if (index_ >= queue_.size()) {
+            finish();
+            return;
+        }
+        const WordEntry& w = queue_.at(index_);
+        progress_->setText(QStringLiteral("%1 / %2 · 第 %3 盒")
+                               .arg(index_ + 1)
+                               .arg(queue_.size())
+                               .arg(w.box));
+        word_->setText(w.word);
+        phonetic_->setText(w.phonetic.isEmpty() ? QString()
+                                                : QStringLiteral("[%1]").arg(w.phonetic));
+        QString html;
+        if (!w.meaning.isEmpty())
+            html += QStringLiteral("<div style=\"font-size:15px\">%1</div>")
+                        .arg(htmlEscape(w.meaning).replace(QLatin1Char('\n'), QStringLiteral("<br>")));
+        if (!w.example.isEmpty())
+            html += QStringLiteral("<div style=\"margin-top:8px;color:#6b6b70;font-size:12px\">%1</div>")
+                        .arg(htmlEscape(w.example));
+        if (html.isEmpty())
+            html = QStringLiteral("<div style=\"color:#8a8a8e\">（这个词还没有释义，可在面板里编辑）</div>");
+        answer_->setHtml(html);
+        answer_->hide();
+        reveal_->show();
+        unknown_->hide();
+        known_->hide();
+        revealed_ = false;
+    }
+
+    void revealAnswer()
+    {
+        if (finished_ || revealed_) return;
+        revealed_ = true;
+        answer_->show();
+        reveal_->hide();
+        unknown_->show();
+        known_->show();
+        known_->setFocus();
+    }
+
+    void grade(bool remembered)
+    {
+        if (finished_ || !revealed_ || index_ >= queue_.size()) return;
+        store_.reviewWord(queue_.at(index_).id, remembered);
+        if (remembered)
+            ++knownCount_;
+        else
+            ++unknownCount_;
+        ++index_;
+        showCurrent();
+    }
+
+    void finish()
+    {
+        finished_ = true;
+        progress_->setText(QStringLiteral("本轮完成"));
+        word_->setText(QStringLiteral("复习了 %1 张 · 认识 %2 · 不认识 %3")
+                           .arg(queue_.size())
+                           .arg(knownCount_)
+                           .arg(unknownCount_));
+        word_->setStyleSheet(QStringLiteral("font-size:17px;font-weight:600;color:#1d1d1f;"));
+        phonetic_->clear();
+        answer_->hide();
+        reveal_->hide();
+        unknown_->hide();
+        known_->hide();
+        auto* close = new QPushButton(QStringLiteral("完成"), this);
+        close->setObjectName("primaryButton");
+        connect(close, &QPushButton::clicked, this, &QDialog::accept);
+        static_cast<QVBoxLayout*>(layout())->addWidget(close);
+        close->setFocus();
+    }
+
+    Store& store_;
+    QVector<WordEntry> queue_;
+    int index_ = 0;
+    int knownCount_ = 0;
+    int unknownCount_ = 0;
+    bool revealed_ = false;
+    bool finished_ = false;
+    QLabel* progress_ = nullptr;
+    QLabel* word_ = nullptr;
+    QLabel* phonetic_ = nullptr;
+    QLabel* hint_ = nullptr;
+    QTextBrowser* answer_ = nullptr;
+    QPushButton* reveal_ = nullptr;
+    QPushButton* unknown_ = nullptr;
+    QPushButton* known_ = nullptr;
+};
+
 }  // namespace
 
 VocabPanel::VocabPanel(Store& store, QWidget* parent)
@@ -151,13 +328,20 @@ VocabPanel::VocabPanel(Store& store, QWidget* parent)
     filterButton_->setText(QStringLiteral("待复习"));
     filterButton_->setCheckable(true);
     filterButton_->setToolTip(QStringLiteral("只显示到期需要复习的词"));
+    reviewButton_ = new QPushButton(QStringLiteral("开始复习"), this);
+    reviewButton_->setObjectName("primaryButton");
+    reviewButton_->setToolTip(
+        QStringLiteral("按五盒间隔重复复习到期生词：空格显示答案，1 不认识，2 认识"));
+    tools->addWidget(reviewButton_);
     tools->addWidget(filterButton_);
+    connect(reviewButton_, &QPushButton::clicked, this, &VocabPanel::startReview);
     exportButton_ = new QToolButton(this);
     exportButton_->setText(QStringLiteral("导出"));
     exportButton_->setPopupMode(QToolButton::InstantPopup);
     auto* menu = new QMenu(exportButton_);
     menu->addAction(QStringLiteral("TSV（Excel / 通用）"), this, [this]() { exportWords(false); });
     menu->addAction(QStringLiteral("Anki 导入文本"), this, [this]() { exportWords(true); });
+    menu->addAction(QStringLiteral("Anki 卡包（.apkg）"), this, [this]() { exportApkg(); });
     exportButton_->setMenu(menu);
     tools->addWidget(exportButton_);
     tools->addStretch(1);
@@ -260,6 +444,11 @@ void VocabPanel::reload()
         if (w.dueAt <= now) ++due;
 
     stats_->setText(QStringLiteral("%1 词 · %2 待复习").arg(words_.size()).arg(due));
+    if (reviewButton_) {
+        reviewButton_->setEnabled(due > 0);
+        reviewButton_->setText(due > 0 ? QStringLiteral("开始复习 (%1)").arg(due)
+                                       : QStringLiteral("开始复习"));
+    }
 
     list_->clear();
     for (const WordEntry& w : words_) {
@@ -400,6 +589,50 @@ void VocabPanel::openSourceSelected()
 {
     const WordEntry w = selectedWord();
     if (!w.docPath.isEmpty() && w.page >= 0) emit openSourceRequested(w.docPath, w.page);
+}
+
+void VocabPanel::startReview()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QVector<WordEntry> queue;
+    for (const WordEntry& w : store_.words())
+        if (w.dueAt <= now) queue.append(w);
+    if (queue.isEmpty()) {
+        emit statusMessage(QStringLiteral("没有到期生词；明天再来，或先查几个词"));
+        return;
+    }
+    std::sort(queue.begin(), queue.end(), [](const WordEntry& a, const WordEntry& b) {
+        if (a.dueAt != b.dueAt) return a.dueAt < b.dueAt;
+        return a.word.compare(b.word, Qt::CaseInsensitive) < 0;
+    });
+
+    if (kHeadless) {
+        emit statusMessage(QStringLiteral("%1 个生词待复习").arg(queue.size()));
+        return;
+    }
+    ReviewDialog dialog(store_, queue, this);
+    dialog.exec();
+    reload();
+}
+
+void VocabPanel::exportApkg()
+{
+    const QVector<WordEntry> rows = store_.words();
+    if (rows.isEmpty()) {
+        emit statusMessage(QStringLiteral("生词本是空的，先查几个词"));
+        return;
+    }
+    if (kHeadless) return;
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("导出生词卡包"),
+                                                      QStringLiteral("words.apkg"),
+                                                      QStringLiteral("Anki 卡包 (*.apkg)"));
+    if (path.isEmpty()) return;
+    QString err;
+    if (!exports::vocabToAnki(rows, path, QStringLiteral("AdaptNote 生词"), &err)) {
+        emit statusMessage(QStringLiteral("导出失败：%1").arg(err));
+        return;
+    }
+    emit statusMessage(QStringLiteral("已导出 %1 个词到 %2").arg(rows.size()).arg(path));
 }
 
 void VocabPanel::exportWords(bool anki)

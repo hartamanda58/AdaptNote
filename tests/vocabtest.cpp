@@ -1,6 +1,8 @@
 // Vocabulary book: five-box schedule, case-insensitive identity, dictionary lookup,
 // AI answer parsing and TSV/Anki export. The network path is covered by aitest.
 #include "core/store.h"
+#include "export/exporter.h"
+#include "export/zip.h"
 #include "ocr/ocr.h"
 #include "sync/sync_manager.h"
 #include "sync/webdav_client.h"
@@ -200,10 +202,16 @@ int main(int argc, char** argv)
     // ---- full local-folder sync between two libraries ----
     QTemporaryDir syncRoot;
     const QString bookPath = tmp.path() + QStringLiteral("/book.pdf");
+    const QString bookPathB = tmp.path() + QStringLiteral("/library-copy.pdf");
     {
+        const QByteArray bytes = QByteArrayLiteral("%PDF-1.4 fake but stable");
         QFile book(bookPath);
         book.open(QIODevice::WriteOnly);
-        book.write(QByteArrayLiteral("%PDF-1.4 fake but stable"));
+        book.write(bytes);
+        book.close();
+        QFile copy(bookPathB);
+        copy.open(QIODevice::WriteOnly);
+        copy.write(bytes);
     }
     Store libraryA, libraryB;
     check(libraryA.open(tmp.path() + QStringLiteral("/a.db"), &err) &&
@@ -220,7 +228,7 @@ int main(int argc, char** argv)
     check(libraryA.upsertMarkup(note), QStringLiteral("seed note in A"));
     // Both devices know the book locally; identity is its content hash, so paths may differ.
     libraryA.touchDocument(bookPath, QStringLiteral("book A"), 3);
-    libraryB.touchDocument(bookPath, QStringLiteral("book B"), 3);
+    libraryB.touchDocument(bookPathB, QStringLiteral("book B"), 3);
 
     SyncSettings localSync;
     localSync.backend = QStringLiteral("folder");
@@ -233,8 +241,8 @@ int main(int argc, char** argv)
     check(push.ok && push.pushed > 0, QStringLiteral("A pushes a snapshot: %1").arg(push.error));
     const SyncReport pull = managerB.syncAll();
     check(pull.ok && pull.pulled > 0, QStringLiteral("B pulls the snapshot: %1").arg(pull.error));
-    check(libraryB.markups(bookPath).size() == 1 &&
-              libraryB.markups(bookPath).first().text == note.text,
+    check(libraryB.markups(bookPathB).size() == 1 &&
+              libraryB.markups(bookPathB).first().text == note.text,
           QStringLiteral("B received the note through the local folder"));
     const SyncReport noop = managerB.syncAll();
     check(noop.ok && noop.pushed == 0 && noop.conflicts == 0,
@@ -243,6 +251,8 @@ int main(int argc, char** argv)
     WordEntry vocabCard;
     vocabCard.word = QStringLiteral("serendipity");
     vocabCard.meaning = QStringLiteral("n. 意外发现");
+    vocabCard.docPath = bookPath;
+    vocabCard.page = 4;
     check(libraryA.upsertWord(vocabCard, &err) && managerA.syncAll().ok,
           QStringLiteral("A pushes a vocabulary card"));
     const SyncReport vocabPull = managerB.syncAll();
@@ -251,6 +261,9 @@ int main(int argc, char** argv)
     const WordEntry pulledCard = libraryB.wordByText(QStringLiteral("serendipity"));
     check(pulledCard.meaning.contains(QStringLiteral("意外发现")),
           QStringLiteral("vocabulary meaning travelled with the card"));
+    check(pulledCard.docPath == bookPathB && pulledCard.page == 4,
+          QStringLiteral("vocabulary source anchor resolves on the peer by docKey: %1")
+              .arg(pulledCard.docPath));
 
     check(libraryA.removeWord(pulledCard.id), QStringLiteral("A deletes the vocabulary card"));
     managerA.syncAll();
@@ -303,6 +316,41 @@ int main(int argc, char** argv)
     const QByteArray ankiBytes = af.readAll();
     check(!ankiBytes.contains("单词\t音标"), QStringLiteral("Anki export has no header"));
     check(ankiBytes.toLower().contains("survive\t"), QStringLiteral("Anki export is front-tab-back"));
+
+    // Real Anki package: same collection schema the note exporter uses.
+    const QString apkg = tmp.path() + QStringLiteral("/words.apkg");
+    check(exports::vocabToAnki(store.words(), apkg, QStringLiteral("AdaptNote Vocab"), &err),
+          QStringLiteral("export vocabulary apkg: %1").arg(err));
+    {
+        ZipReader zr(apkg);
+        check(zr.isOpen() && zr.contains(QStringLiteral("collection.anki2")),
+              QStringLiteral("vocabulary apkg is a zip with collection.anki2"));
+        const QString dbPath = tmp.path() + QStringLiteral("/vocab-collection.anki2");
+        {
+            QFile f(dbPath);
+            f.open(QIODevice::WriteOnly);
+            f.write(zr.read(QStringLiteral("collection.anki2")));
+        }
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+                                                       QStringLiteral("vocab-apkg"));
+            db.setDatabaseName(dbPath);
+            check(db.open(), QStringLiteral("vocabulary apkg collection opens"));
+            QSqlQuery q(db);
+            q.exec(QStringLiteral("select count(*) from notes"));
+            const int notes = q.next() ? q.value(0).toInt() : -1;
+            check(notes == store.words().size(),
+                  QStringLiteral("vocabulary apkg has one note per word (%1)").arg(notes));
+            q.exec(QStringLiteral("select flds from notes limit 1"));
+            const QString fields = q.next() ? q.value(0).toString() : QString();
+            check(fields.contains(QLatin1Char('\x1f')) && fields.toLower().contains("survive"),
+                  QStringLiteral("vocabulary apkg front/back fields are populated"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("vocab-apkg"));
+    }
+    check(!exports::vocabToAnki({}, tmp.path() + QStringLiteral("/empty.apkg"), QString(), &err),
+          QStringLiteral("empty vocabulary deck is rejected"));
 
     WordEntry later;
     const qint64 base = 1700000000000LL;

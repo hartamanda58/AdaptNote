@@ -108,6 +108,26 @@ int main(int argc, char** argv)
     w.applyDemoMarkups();
     settle();
 
+    // The shelf "页面" tab is populated synchronously; icons render in batches.
+    if (auto* thumbs = w.findChild<QListWidget*>(QStringLiteral("pageThumbs"))) {
+        check(thumbs->count() == w.view()->engine()->pageCount(),
+              QStringLiteral("page thumbnails match the document (%1)").arg(thumbs->count()));
+        check(thumbs->item(0)->data(Qt::UserRole).toInt() == 0,
+              QStringLiteral("first thumbnail points at page 0"));
+    } else {
+        check(false, QStringLiteral("page thumbnail tab exists"));
+    }
+
+    // Excerpts are cards: the delegate needs structured roles, not just item text.
+    if (auto* excerpts = w.findChild<QListWidget*>(QStringLiteral("excerptList"))) {
+        check(excerpts->count() > 0 &&
+                  !excerpts->item(0)->data(Qt::UserRole + 3).toString().isEmpty() &&
+                  excerpts->item(0)->data(Qt::UserRole + 1).toInt() >= 1,
+              QStringLiteral("excerpt cards carry quote text and a page number"));
+    } else {
+        check(false, QStringLiteral("excerpt card list exists"));
+    }
+
     // ---- 1. demo data: 4 text markups + 1 image excerpt ----
     const QVector<Markup> demo = w.visibleMarkups();
     check(demo.size() == 6,
