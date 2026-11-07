@@ -10,12 +10,18 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
+#include <QMap>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <cstdio>
+#include <functional>
 
 using namespace an;
 
@@ -25,6 +31,17 @@ static void check(bool ok, const QString& what)
 {
     std::printf("%s  %s\n", ok ? "PASS" : "FAIL", qPrintable(what));
     if (!ok) ++failures;
+}
+
+static bool waitFor(const std::function<bool()>& condition, int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!condition()) {
+        if (timer.elapsed() > timeoutMs) return false;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    return true;
 }
 
 int main(int argc, char** argv)
@@ -168,6 +185,21 @@ int main(int argc, char** argv)
               store.wordByText(QStringLiteral("ZEITGEIST")).id == deterministicId,
           QStringLiteral("same spelling always maps to the same card"));
 
+    // ---- SigV4 against the AWS get-vanilla test-suite vector ----
+    {
+        QMap<QString, QString> headers;
+        headers.insert(QStringLiteral("host"), QStringLiteral("example.amazonaws.com"));
+        headers.insert(QStringLiteral("x-amz-date"), QStringLiteral("20150830T123600Z"));
+        const QByteArray auth = WebDavClient::awsV4Authorization(
+            QByteArrayLiteral("GET"), QStringLiteral("/"), QString(), headers, QByteArray(),
+            QStringLiteral("20150830T123600Z"), QStringLiteral("us-east-1"),
+            QStringLiteral("service"), QStringLiteral("AKIDEXAMPLE"),
+            QStringLiteral("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"));
+        check(auth.contains("Signature=5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31"),
+              QStringLiteral("SigV4 matches the AWS get-vanilla vector: %1")
+                  .arg(QString::fromLatin1(auth)));
+    }
+
     // ---- local-folder sync transport (same interface as WebDAV) ----
     WebDavClient dav;
     dav.setLocalRoot(tmp.path() + QStringLiteral("/sync"));
@@ -270,6 +302,81 @@ int main(int argc, char** argv)
     managerB.syncAll();
     check(libraryB.words().isEmpty() && libraryB.words(true).size() == 1,
           QStringLiteral("vocabulary tombstone propagates to B"));
+
+    // ---- S3 / MinIO round trip against scripts/fake_s3_server.py ----
+    {
+        const QString script = argc > 1 ? QString::fromLocal8Bit(argv[1])
+                                        : QStringLiteral("../scripts/fake_s3_server.py");
+        QProcess server;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("FAKE_S3_ROOT"), tmp.path() + QStringLiteral("/s3root"));
+        server.setProcessEnvironment(env);
+#ifdef Q_OS_WIN
+        server.start(QStringLiteral("python"), {script});
+#else
+        server.start(QStringLiteral("python3"), {script});
+#endif
+        QString output;
+        const bool listening = server.waitForStarted(5000) &&
+                               waitFor([&]() {
+                                   output += QString::fromUtf8(server.readAllStandardOutput());
+                                   return output.contains(QStringLiteral("PORT "));
+                               }, 8000);
+        int port = -1;
+        const int marker = output.indexOf(QStringLiteral("PORT "));
+        if (marker >= 0)
+            port = output.mid(marker + 5).section(QLatin1Char('\n'), 0, 0).trimmed().toInt();
+        check(listening && port > 0,
+              QStringLiteral("fake S3 server starts on port %1 (%2)").arg(port).arg(script));
+
+        if (port > 0) {
+            Store s3a, s3b;
+            check(s3a.open(tmp.path() + QStringLiteral("/s3a.db"), &err) &&
+                      s3b.open(tmp.path() + QStringLiteral("/s3b.db"), &err),
+                  QStringLiteral("open two libraries for S3 sync"));
+            s3a.touchDocument(bookPath, QStringLiteral("book A"), 3);
+            s3b.touchDocument(bookPath, QStringLiteral("book B"), 3);
+
+            Markup s3note = note;
+            s3note.id = newId();
+            s3note.text = QStringLiteral("s3 sync works");
+            check(s3a.upsertMarkup(s3note), QStringLiteral("seed an S3 note"));
+            WordEntry s3word;
+            s3word.word = QStringLiteral("objectkey");
+            s3word.meaning = QStringLiteral("n. 对象键");
+            check(s3a.upsertWord(s3word, &err), QStringLiteral("seed an S3 vocabulary card"));
+
+            SyncSettings s3cfg;
+            s3cfg.backend = QStringLiteral("s3");
+            s3cfg.url = QStringLiteral("http://127.0.0.1:%1").arg(port);
+            s3cfg.region = QStringLiteral("us-east-1");
+            s3cfg.bucket = QStringLiteral("adaptnote-test");
+            s3cfg.user = QStringLiteral("AKIDEXAMPLE");
+            s3cfg.password = QStringLiteral("test-secret");
+            s3cfg.remotePath = QStringLiteral("adaptnote");
+            SyncManager s3managerA(s3a), s3managerB(s3b);
+            s3managerA.setSettings(s3cfg);
+            s3managerB.setSettings(s3cfg);
+
+            const SyncReport s3push = s3managerA.syncAll();
+            check(s3push.ok && s3push.pushed > 0,
+                  QStringLiteral("A pushes to S3: %1").arg(s3push.error));
+            const SyncReport s3pull = s3managerB.syncAll();
+            check(s3pull.ok && s3pull.pulled > 0,
+                  QStringLiteral("B pulls from S3: %1").arg(s3pull.error));
+            check(s3b.markups(bookPath).size() == 1 &&
+                      s3b.markups(bookPath).first().text == s3note.text,
+                  QStringLiteral("S3 delivered the note"));
+            check(s3b.wordByText(QStringLiteral("objectkey")).meaning.contains(
+                      QStringLiteral("对象键")),
+                  QStringLiteral("S3 delivered the vocabulary card"));
+            const SyncReport s3noop = s3managerB.syncAll();
+            check(s3noop.ok && s3noop.pushed == 0 && s3noop.conflicts == 0,
+                  QStringLiteral("second S3 sync is a no-op"));
+        }
+        server.kill();
+        server.waitForFinished(3000);
+    }
 
     // ---- OCR seam ----
     check(!ocr::recognize(QImage()).ok, QStringLiteral("OCR rejects an empty image"));

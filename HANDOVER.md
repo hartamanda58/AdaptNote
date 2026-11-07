@@ -7,12 +7,13 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`，合并前最新提交 `ea38004`；本次合并（AdaptNote × MN × ReaderNote）尚未提交
-- 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows 构建脚本未改动
-- 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.7 万行，自用、不分发
+- 分支 `main`；合并前基线 `ea38004`，本次合并已提交 `b369160` → `19bc53e` → `79e6e23`
+- 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
+- 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
 - **本次合并说明见 `docs/merge-mn-readernote.md`**：以 AdaptNote 为底座，吸收 MN 的
-  生词本 / OCR / 查词 / 自由 AI 提问 / 本地目录同步，UI 改为浅色 MarginNote/macOS 三栏
+  生词本（复习/查词/.apkg）/ OCR / 自由 AI 提问 / 本地目录 + S3 同步，
+  UI 改为浅色 MarginNote/macOS 三栏，并补页面缩略图、摘录卡片、拖动落点提示
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
@@ -96,7 +97,7 @@ run librarytest
 run migratetest  test.pdf
 run importtest   test.pdf
 run conflicttest
-run vocabtest
+run vocabtest   ../scripts/fake_s3_server.py
 ```
 
 截图（固定尺寸，便于比较）：
@@ -209,7 +210,7 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 - 生词复习模式：空格显示答案、1 不认识、2 认识；答对进盒、答错回 0
 - 划词浮出条：高亮 / 下划线 / 批注 / 查词 / 翻译 / AI / OCR
 - OCR：选中区域 / 剪贴板 / 整页 → tesseract（语言包可设）；没有 tesseract 时走视觉模型
-- 本地目录同步（U 盘/NAS），与 WebDAV 共用版本向量合并
+- 本地目录同步（U 盘/NAS）与 **S3 / MinIO（SigV4）**，三种方式共用合并逻辑
 - 左栏「页面」缩略图（分批渲染、当前页高亮）、右栏摘录卡片化
 - 笔记大纲拖动落点提示：上半区插入线 / 下半区“成为子笔记”块
 - 左/右侧标签记住上次位置（`ui.shelfTab` / `ui.sideTab`）
@@ -224,16 +225,15 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 
 ## 4. 未完成 / 已知问题
 
-1. **S3/MinIO 同步未合并**：MN 有，合并版只有 WebDAV + 本地目录（SigV4 未实现）
-2. **ReaderNote 白板 / Excalidraw 未合并**：手写层 + 脑图覆盖主路径，白板另算一个大工程
-3. OCR 依赖外部 `tesseract`，没有随包分发；没有 tesseract 时必须配视觉模型
-4. 生词的原文回链用 `docKey`（内容 SHA-1）解析；对端没打开过同一本书时无法定位
-5. 大纲/脑图拖拽已有落点提示，但 **跨资料拖动** 仍只支持同一本书内
-6. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）；本地目录同步也只在测试里验过
-7. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
-8. 大纲/脑图 **多选、批量操作、折叠按钮** 未做
-9. 真实数位板压感/倾斜、真实 Anki/XMind 客户端、真实 WebDAV 未人工验收
-10. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
+1. **ReaderNote 白板 / Excalidraw 未合并**：手写层 + 脑图覆盖主路径，白板另算一个大工程
+2. OCR 依赖外部 `tesseract`，没有随包分发；没有 tesseract 时必须配视觉模型
+3. 生词的原文回链用 `docKey`（内容 SHA-1）解析；对端没打开过同一本书时无法定位
+4. 大纲/脑图拖拽已有落点提示，但 **跨资料拖动** 仍只支持同一本书内
+5. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）；本地目录/S3 也只在测试里验过
+6. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
+7. 大纲/脑图 **多选、批量操作、折叠按钮** 未做
+8. 真实数位板压感/倾斜、真实 Anki/XMind 客户端、真实 WebDAV/S3 未人工验收
+9. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
 
 ---
 
@@ -246,7 +246,7 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 - 新的浅色 UI 在 125%/150%/200% 缩放下的观感（只有 100% 截图）
 - 浮出 pill 在触控板/触屏上的手感
 - 真实 tesseract 安装后的识别质量（本机无 tesseract；已用假 exe 验证进程管线与失败分支，视觉模型只验了请求体）
-- 本地目录同步接真实 NAS/U 盘（测试用临时目录）
+- 本地目录同步接真实 NAS/U 盘，S3 接真实 AWS/MinIO（测试用临时目录与假服务器）
 
 - 高分屏下的人眼观感（125%/150%/200%、多显示器）
 - 数位板真实压感与笔迹偏移
@@ -276,7 +276,7 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 
 ## 7. 建议的下一步
 
-1. **S3/MinIO 同步**（SigV4）与白板/Excalidraw：合并后仍缺的两块
+1. **白板/Excalidraw**：合并后仍缺的一块；S3 已补
 2. 脑图多选/批量操作、折叠按钮
 3. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV/本地目录、Anki/XMind、tesseract）
 4. 主题同步补冲突/墓碑的集成测试（远端并发改名、远端删资料）

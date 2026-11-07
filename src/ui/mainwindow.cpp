@@ -3118,7 +3118,10 @@ void MainWindow::openSyncSettings()
     auto* backend = new QComboBox(&dlg);
     backend->addItem(QStringLiteral("WebDAV 服务器"), QStringLiteral("webdav"));
     backend->addItem(QStringLiteral("本地文件夹 / NAS"), QStringLiteral("folder"));
-    backend->setCurrentIndex(current.backend == QLatin1String("folder") ? 1 : 0);
+    backend->addItem(QStringLiteral("S3 / MinIO"), QStringLiteral("s3"));
+    backend->setCurrentIndex(current.backend == QLatin1String("folder") ? 1
+                           : current.backend == QLatin1String("s3")   ? 2
+                                                                      : 0);
 
     auto* url = new QLineEdit(current.url, &dlg);
     auto* browse = new QToolButton(&dlg);
@@ -3134,20 +3137,32 @@ void MainWindow::openSyncSettings()
     pass->setEchoMode(QLineEdit::Password);
     auto* remote = new QLineEdit(current.remotePath, &dlg);
     remote->setPlaceholderText(QStringLiteral("adaptnote"));
+    auto* region = new QLineEdit(current.region, &dlg);
+    region->setPlaceholderText(QStringLiteral("us-east-1"));
+    auto* bucket = new QLineEdit(current.bucket, &dlg);
+    bucket->setPlaceholderText(QStringLiteral("adaptnote"));
 
     form->addRow(QStringLiteral("同步方式"), backend);
-    form->addRow(QStringLiteral("服务器 / 文件夹"), urlRow);
-    form->addRow(QStringLiteral("用户名"), user);
-    form->addRow(QStringLiteral("密码 / 应用密码"), pass);
+    form->addRow(QStringLiteral("端点 / 服务器 / 文件夹"), urlRow);
+    form->addRow(QStringLiteral("用户名 / Access Key"), user);
+    form->addRow(QStringLiteral("密码 / Secret Key"), pass);
+    form->addRow(QStringLiteral("S3 区域"), region);
+    form->addRow(QStringLiteral("S3 存储桶"), bucket);
     form->addRow(QStringLiteral("同步子目录"), remote);
 
     auto applyBackend = [=]() {
-        const bool folder = backend->currentData().toString() == QLatin1String("folder");
-        url->setPlaceholderText(folder ? QStringLiteral("例如 D:/ReadingNotes 或 /mnt/nas/notes")
-                                       : QStringLiteral("https://dav.jianguoyun.com/dav 或自建 WebDAV"));
+        const QString kind = backend->currentData().toString();
+        const bool folder = kind == QLatin1String("folder");
+        const bool s3 = kind == QLatin1String("s3");
+        url->setPlaceholderText(
+            folder ? QStringLiteral("例如 D:/ReadingNotes 或 /mnt/nas/notes")
+                   : s3 ? QStringLiteral("https://s3.amazonaws.com 或 http://127.0.0.1:9000")
+                        : QStringLiteral("https://dav.jianguoyun.com/dav 或自建 WebDAV"));
         browse->setVisible(folder);
         user->setEnabled(!folder);
         pass->setEnabled(!folder);
+        region->setEnabled(s3);
+        bucket->setEnabled(s3);
     };
     connect(backend, &QComboBox::currentIndexChanged, &dlg, applyBackend);
     connect(browse, &QToolButton::clicked, &dlg, [&]() {
@@ -3158,9 +3173,9 @@ void MainWindow::openSyncSettings()
     applyBackend();
 
     auto* hint = new QLabel(QStringLiteral(
-        "WebDAV 与本地文件夹共用同一套快照与版本向量合并；本地文件夹适合 U 盘 / NAS。"
-        "密码以明文保存在本地数据库（自用工具）。两端同时改同一条笔记会保留两个版本，"
-        "并给副本打上 #conflict 标签。"), &dlg);
+        "三种方式共用同一套快照与版本向量合并：WebDAV、本地文件夹（U 盘 / NAS）、"
+        "S3 / MinIO（路径式 + SigV4）。密钥以明文保存在本地数据库（自用工具）。"
+        "两端同时改同一条笔记会保留两个版本，并给副本打上 #conflict 标签。"), &dlg);
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color:#8a8a8e;font-size:12px;"));
     form->addRow(hint);
@@ -3179,6 +3194,9 @@ void MainWindow::openSyncSettings()
     s.password = s.backend == QLatin1String("folder") ? QString() : pass->text();
     s.remotePath = remote->text().trimmed().isEmpty() ? QStringLiteral("adaptnote")
                                                       : remote->text().trimmed();
+    s.region = region->text().trimmed().isEmpty() ? QStringLiteral("us-east-1")
+                                                  : region->text().trimmed();
+    s.bucket = bucket->text().trimmed();
     sync_.setSettings(s);
     statusBar()->showMessage(QStringLiteral("同步设置已保存"), 3000);
 }

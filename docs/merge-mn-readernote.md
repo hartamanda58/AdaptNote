@@ -61,7 +61,7 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 | 笔记本 / 阅读主题 / 多文档 | ✓ | 笔记本 | ✓ |
 | 脑图树 / 拖拽 / 连线 / PNG / XMind | ✓ | SVG 树 | ✓ |
 | 导出 MD/HTML/OPML/XMind/Anki | ✓ | 生词 TSV/Anki | ✓ |
-| 同步 | WebDAV + 版本向量 | WebDAV / S3 / 本地目录 | WebDAV + **本地目录**（S3 未合并） |
+| 同步 | WebDAV + 版本向量 | WebDAV / S3 / 本地目录 | WebDAV + 本地目录 + **S3/MinIO**（SigV4） |
 | 生词本（五盒 SRS、发音、TSV/Anki） | ✗ | ✓ | **✓ 新增** |
 | 查词（本地词典优先 + AI 兜底） | ✗ | ✓ | **✓ 新增** |
 | OCR（tesseract + 视觉模型兜底） | ✗ | ✓ | **✓ 新增** |
@@ -118,10 +118,18 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 
 | 项 | 原因 |
 |---|---|
-| S3 / MinIO 同步 | 需要 SigV4 签名 + 真机联调；WebDAV 与本地目录已覆盖自托管场景 |
 | ReaderNote 白板 / Excalidraw | 体量大，且 AdaptNote 的手写层 + 脑图已覆盖“画布整理”主路径 |
 | ReaderNote 许可绕过 / 遥测屏蔽 | 不采用、不分发；只参考公开界面 |
 | Electron 打包 | MN 的 `better-sqlite3` ABI 问题不再是问题：底座改为原生 Qt |
+
+## 7.1 S3 / MinIO
+
+- 同步设置里选「S3 / MinIO」，填端点（如 `http://127.0.0.1:9000`）、区域、桶、
+  Access Key / Secret Key；对象键为 `<同步子目录>/<docKey>.json`、`words.json`、`topics.json`。
+- 路径式寻址 + SigV4（`WebDavClient::awsV4Authorization`）。
+- 签名用 AWS 官方 `get-vanilla` 测试向量做单元测试；端到端用 `scripts/fake_s3_server.py`
+  跑双库推拉（含 If-Match 条件检查）。
+- 真实 AWS / MinIO 仍需人工验收；虚拟主机式端点（bucket 在域名里）暂不支持。
 
 ## 8. 测试
 

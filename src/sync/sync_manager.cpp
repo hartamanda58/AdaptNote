@@ -40,6 +40,10 @@ void configureRemote(WebDavClient& dav, const SyncSettings& s)
         dav.setLocalRoot(s.url);
         return;
     }
+    if (s.backend == QLatin1String("s3")) {
+        dav.setS3(s.url, s.region, s.bucket, s.user, s.password);
+        return;
+    }
     dav.setBaseUrl(s.url);
     if (!s.user.isEmpty()) dav.setCredentials(s.user, s.password);
 }
@@ -69,6 +73,8 @@ SyncSettings SyncManager::settings() const
     s.password = store_.setting(QStringLiteral("sync.pass"));
     s.remotePath = store_.setting(QStringLiteral("sync.path"), QStringLiteral("adaptnote"));
     s.backend = store_.setting(QStringLiteral("sync.backend"), QStringLiteral("webdav"));
+    s.region = store_.setting(QStringLiteral("sync.region"), QStringLiteral("us-east-1"));
+    s.bucket = store_.setting(QStringLiteral("sync.bucket"));
     return s;
 }
 
@@ -80,7 +86,12 @@ void SyncManager::setSettings(const SyncSettings& s)
     store_.setSetting(QStringLiteral("sync.path"), s.remotePath.trimmed());
     store_.setSetting(QStringLiteral("sync.backend"),
                       s.backend == QLatin1String("folder") ? QStringLiteral("folder")
+                      : s.backend == QLatin1String("s3")  ? QStringLiteral("s3")
                                                             : QStringLiteral("webdav"));
+    store_.setSetting(QStringLiteral("sync.region"),
+                      s.region.trimmed().isEmpty() ? QStringLiteral("us-east-1")
+                                                   : s.region.trimmed());
+    store_.setSetting(QStringLiteral("sync.bucket"), s.bucket.trimmed());
 }
 
 QString SyncManager::docKeyFor(const QString& docPath)
@@ -480,7 +491,9 @@ SyncReport SyncManager::syncDocument(const QString& docPath)
     if (!s.configured()) {
         rep.error = s.backend == QLatin1String("folder")
                         ? QStringLiteral("尚未选择本地同步文件夹")
-                        : QStringLiteral("尚未配置 WebDAV 地址");
+                        : s.backend == QLatin1String("s3")
+                              ? QStringLiteral("尚未配置 S3 端点或存储桶")
+                              : QStringLiteral("尚未配置 WebDAV 地址");
         return rep;
     }
 

@@ -10,12 +10,19 @@
 namespace an {
 
 struct SyncSettings {
-    QString backend = QStringLiteral("webdav");   // webdav | folder
-    QString url;                              // WebDAV URL or a local folder
-    QString user;
-    QString password;
+    QString backend = QStringLiteral("webdav");   // webdav | folder | s3
+    QString url;                              // WebDAV URL, local folder, or S3 endpoint
+    QString user;                             // username / S3 access key
+    QString password;                         // password / S3 secret key
     QString remotePath = QStringLiteral("adaptnote");
-    bool configured() const { return !url.trimmed().isEmpty(); }
+    QString region = QStringLiteral("us-east-1");
+    QString bucket;                           // S3 only
+    bool configured() const
+    {
+        if (url.trimmed().isEmpty()) return false;
+        if (backend == QLatin1String("s3") && bucket.trimmed().isEmpty()) return false;
+        return true;
+    }
 };
 
 struct SyncReport {

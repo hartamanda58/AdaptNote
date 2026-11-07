@@ -214,7 +214,7 @@ add_test(NAME librarytest COMMAND librarytest WORKING_DIRECTORY ${CMAKE_BINARY_D
 add_test(NAME migratetest COMMAND migratetest test.pdf WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(NAME importtest COMMAND importtest test.pdf WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(NAME conflicttest COMMAND conflicttest WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-add_test(NAME vocabtest COMMAND vocabtest WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(NAME vocabtest COMMAND vocabtest ${CMAKE_SOURCE_DIR}/scripts/fake_s3_server.py WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 set_tests_properties(selftest visualtest featuretest exporttest synctest aitest p5test librarytest
                      migratetest importtest conflicttest vocabtest
                      PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/testhome")

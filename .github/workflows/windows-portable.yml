@@ -104,7 +104,8 @@ jobs:
           $failed = @()
           $i = 0
           foreach ($t in @("selftest","visualtest","featuretest","exporttest","synctest",
-                           "aitest","p5test","librarytest","migratetest","importtest","conflicttest")) {
+                           "aitest","p5test","librarytest","migratetest","importtest","conflicttest",
+                           "vocabtest")) {
             $i++
             $env:ADAPT_DATA_DIR = Join-Path $env:GITHUB_WORKSPACE "build-win\test-data\$t$i"
             if (Test-Path $env:ADAPT_DATA_DIR) { Remove-Item -Recurse -Force $env:ADAPT_DATA_DIR }
@@ -115,6 +116,7 @@ jobs:
               "exporttest"   { @("test.pdf") }
               "synctest"     { @("test.pdf","..\scripts\dav_server.py") }
               "aitest"       { @("..\scripts\fake_openai_server.py") }
+              "vocabtest"    { @("..\scripts\fake_s3_server.py") }
               "p5test"       { @("test.pdf") }
               "migratetest"  { @("test.pdf") }
               "importtest"   { @("test.pdf") }

@@ -29,6 +29,53 @@ QString lastSegment(const QString& path)
     return slash >= 0 ? p.mid(slash + 1) : p;
 }
 
+QByteArray sha256Bytes(const QByteArray& data)
+{
+    return QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+}
+
+QString sha256Hex(const QByteArray& data)
+{
+    return QString::fromLatin1(sha256Bytes(data).toHex());
+}
+
+QByteArray hmacSha256(const QByteArray& key, const QByteArray& data)
+{
+    constexpr int kBlock = 64;
+    QByteArray normalised = key.size() > kBlock ? sha256Bytes(key) : key;
+    // QByteArray::resize() leaves grown bytes uninitialised; HMAC requires zero padding.
+    if (normalised.size() < kBlock)
+        normalised.append(QByteArray(kBlock - normalised.size(), '\0'));
+    QByteArray outer(kBlock, '\x5c');
+    QByteArray inner(kBlock, '\x36');
+    for (int i = 0; i < kBlock; ++i) {
+        outer[i] = static_cast<char>(outer.at(i) ^ normalised.at(i));
+        inner[i] = static_cast<char>(inner.at(i) ^ normalised.at(i));
+    }
+    return sha256Bytes(outer + sha256Bytes(inner + data));
+}
+
+QString uriEncode(const QString& text, bool encodeSlash)
+{
+    static const char* hex = "0123456789ABCDEF";
+    QByteArray out;
+    const QByteArray bytes = text.toUtf8();
+    for (char ch : bytes) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        const bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                                (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                                c == '.' || c == '~';
+        if (unreserved || (c == '/' && !encodeSlash)) {
+            out.append(ch);
+        } else {
+            out.append('%');
+            out.append(hex[c >> 4]);
+            out.append(hex[c & 0x0f]);
+        }
+    }
+    return QString::fromLatin1(out);
+}
+
 }  // namespace
 
 WebDavClient::WebDavClient()
@@ -45,6 +92,8 @@ void WebDavClient::setBaseUrl(const QString& url)
 {
     baseUrl_ = url.trimmed();
     while (baseUrl_.endsWith(QLatin1Char('/'))) baseUrl_.chop(1);
+    s3_ = false;
+    localRoot_.clear();
 }
 
 void WebDavClient::setCredentials(const QString& user, const QString& password)
@@ -64,6 +113,7 @@ void WebDavClient::setLocalRoot(const QString& root)
 {
     localRoot_ = root.trimmed();
     while (localRoot_.endsWith(QLatin1Char('/'))) localRoot_.chop(1);
+    s3_ = false;
 }
 
 QString WebDavClient::localPath(const QString& relPath) const
@@ -79,8 +129,203 @@ QString WebDavClient::localEtag(const QString& path) const
     return QStringLiteral("%1-%2").arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
 }
 
+void WebDavClient::setS3(const QString& endpoint, const QString& region, const QString& bucket,
+                         const QString& accessKey, const QString& secretKey)
+{
+    QString root = endpoint.trimmed();
+    while (root.endsWith(QLatin1Char('/'))) root.chop(1);
+    baseUrl_ = root;
+    localRoot_.clear();
+    s3_ = true;
+    s3Region_ = region.trimmed().isEmpty() ? QStringLiteral("us-east-1") : region.trimmed();
+    s3Bucket_ = bucket.trimmed();
+    user_ = accessKey.trimmed();
+    password_ = secretKey;
+}
+
+QString WebDavClient::s3Uri(const QString& relPath) const
+{
+    QString rel = relPath;
+    while (rel.startsWith(QLatin1Char('/'))) rel.remove(0, 1);
+    const QString bucket = uriEncode(s3Bucket_, false);
+    if (rel.isEmpty()) return QLatin1Char('/') + bucket + QLatin1Char('/');
+    return QLatin1Char('/') + bucket + QLatin1Char('/') + uriEncode(rel, false);
+}
+
+QByteArray WebDavClient::awsV4Authorization(const QByteArray& method,
+                                            const QString& canonicalUri,
+                                            const QString& canonicalQuery,
+                                            const QMap<QString, QString>& headers,
+                                            const QByteArray& payload, const QString& amzDate,
+                                            const QString& region, const QString& service,
+                                            const QString& accessKey, const QString& secretKey)
+{
+    QStringList names = headers.keys();
+    names.sort();
+    QString canonicalHeaders;
+    for (const QString& name : names)
+        canonicalHeaders += name + QLatin1Char(':') + headers.value(name).trimmed() + QLatin1Char('\n');
+    const QString signedHeaders = names.join(QLatin1Char(';'));
+
+    const QString canonicalRequest = QString::fromLatin1(method) + QLatin1Char('\n') +
+                                     canonicalUri + QLatin1Char('\n') + canonicalQuery +
+                                     QLatin1Char('\n') + canonicalHeaders + QLatin1Char('\n') +
+                                     signedHeaders + QLatin1Char('\n') + sha256Hex(payload);
+
+    const QString dateStamp = amzDate.left(8);
+    const QString scope = dateStamp + QLatin1Char('/') + region + QLatin1Char('/') + service +
+                          QStringLiteral("/aws4_request");
+    const QString stringToSign = QStringLiteral("AWS4-HMAC-SHA256\n") + amzDate +
+                                 QLatin1Char('\n') + scope + QLatin1Char('\n') +
+                                 sha256Hex(canonicalRequest.toUtf8());
+
+    const QByteArray kDate = hmacSha256(QByteArrayLiteral("AWS4") + secretKey.toUtf8(),
+                                        dateStamp.toUtf8());
+    const QByteArray kRegion = hmacSha256(kDate, region.toUtf8());
+    const QByteArray kService = hmacSha256(kRegion, service.toUtf8());
+    const QByteArray kSigning = hmacSha256(kService, QByteArrayLiteral("aws4_request"));
+    const QString signature = QString::fromLatin1(hmacSha256(kSigning, stringToSign.toUtf8()).toHex());
+
+    return QStringLiteral("AWS4-HMAC-SHA256 Credential=%1/%2, SignedHeaders=%3, Signature=%4")
+        .arg(accessKey, scope, signedHeaders, signature)
+        .toUtf8();
+}
+
+QNetworkRequest WebDavClient::s3Request(const QByteArray& method, const QString& relPath,
+                                        const QByteArray& payload) const
+{
+    const QString uri = s3Uri(relPath);
+    QUrl url(baseUrl_);
+    url.setPath(uri);
+
+    const QString amzDate = QDateTime::currentDateTimeUtc()
+                                .toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
+    QString host = url.host();
+    if (url.port() > 0) host += QLatin1Char(':') + QString::number(url.port());
+
+    QMap<QString, QString> headers;
+    headers.insert(QStringLiteral("host"), host);
+    headers.insert(QStringLiteral("x-amz-content-sha256"), sha256Hex(payload));
+    headers.insert(QStringLiteral("x-amz-date"), amzDate);
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/octet-stream"));
+    request.setRawHeader("x-amz-date", amzDate.toUtf8());
+    request.setRawHeader("x-amz-content-sha256", sha256Hex(payload).toUtf8());
+    request.setRawHeader("Authorization",
+                         awsV4Authorization(method, uri, QString(), headers, payload, amzDate,
+                                            s3Region_, QStringLiteral("s3"), user_, password_));
+    request.setTransferTimeout(timeoutMs_);
+    return request;
+}
+
+bool WebDavClient::s3Get(const QString& relPath, QByteArray* out, QString* etag, QString* error,
+                         bool* notFound)
+{
+    if (notFound) *notFound = false;
+    QNetworkReply* reply = nam_->get(s3Request(QByteArrayLiteral("GET"), relPath, QByteArray()));
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&]() { reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(timeoutMs_);
+    loop.exec();
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    const QString responseEtag = QString::fromLatin1(reply->rawHeader("ETag"));
+    reply->deleteLater();
+
+    if (status == 404) {
+        if (notFound) *notFound = true;
+        if (error) *error = QStringLiteral("404 not found: %1").arg(relPath);
+        return false;
+    }
+    if (status < 200 || status >= 300) {
+        if (error) *error = QStringLiteral("S3 GET %1 -> HTTP %2：%3")
+                                .arg(relPath).arg(status)
+                                .arg(QString::fromUtf8(body.left(300)));
+        return false;
+    }
+    if (out) *out = body;
+    if (etag) *etag = responseEtag;
+    return true;
+}
+
+bool WebDavClient::s3Put(const QString& relPath, const QByteArray& data,
+                         const QString& ifMatchEtags, QString* error, bool* preconditionFailed)
+{
+    if (preconditionFailed) *preconditionFailed = false;
+    // S3 conditional PUT support varies by provider; checking first is portable and the
+    // objects are small JSON snapshots.
+    if (!ifMatchEtags.isEmpty()) {
+        QByteArray current;
+        QString currentEtag;
+        QString getError;
+        bool missing = false;
+        if (!s3Get(relPath, &current, &currentEtag, &getError, &missing) || missing ||
+            currentEtag != ifMatchEtags) {
+            if (preconditionFailed) *preconditionFailed = true;
+            if (error) *error = QStringLiteral("412 precondition failed: %1").arg(relPath);
+            return false;
+        }
+    }
+
+    QNetworkReply* reply = nam_->put(s3Request(QByteArrayLiteral("PUT"), relPath, data), data);
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&]() { reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(timeoutMs_);
+    loop.exec();
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    reply->deleteLater();
+    if (status == 412) {
+        if (preconditionFailed) *preconditionFailed = true;
+        if (error) *error = QStringLiteral("412 precondition failed: %1").arg(relPath);
+        return false;
+    }
+    if (status < 200 || status >= 300) {
+        if (error) *error = QStringLiteral("S3 PUT %1 -> HTTP %2：%3")
+                                .arg(relPath).arg(status)
+                                .arg(QString::fromUtf8(body.left(300)));
+        return false;
+    }
+    return true;
+}
+
+bool WebDavClient::s3Remove(const QString& relPath, QString* error)
+{
+    QNetworkReply* reply = nam_->deleteResource(s3Request(QByteArrayLiteral("DELETE"), relPath, QByteArray()));
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&]() { reply->abort(); });
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timer.start(timeoutMs_);
+    loop.exec();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body = reply->readAll();
+    reply->deleteLater();
+    if ((status >= 200 && status < 300) || status == 404) return true;
+    if (error) *error = QStringLiteral("S3 DELETE %1 -> HTTP %2：%3")
+                            .arg(relPath).arg(status)
+                            .arg(QString::fromUtf8(body.left(300)));
+    return false;
+}
+
 bool WebDavClient::list(const QString& relPath, QVector<DavEntry>* out, QString* error)
 {
+    if (isS3()) {
+        // SyncManager does not list; keep the contract honest instead of faking it.
+        if (error) *error = QStringLiteral("S3 同步不需要目录列表");
+        return false;
+    }
     if (isLocal()) {
         QDir dir(localPath(relPath));
         if (!dir.exists()) {
@@ -182,6 +427,7 @@ bool WebDavClient::get(const QString& relPath, QByteArray* out, QString* etag, Q
                        bool* notFound)
 {
     if (notFound) *notFound = false;
+    if (isS3()) return s3Get(relPath, out, etag, error, notFound);
     if (isLocal()) {
         const QString path = localPath(relPath);
         QFile file(path);
@@ -236,6 +482,7 @@ bool WebDavClient::put(const QString& relPath, const QByteArray& data, const QSt
                        QString* error, bool* preconditionFailed)
 {
     if (preconditionFailed) *preconditionFailed = false;
+    if (isS3()) return s3Put(relPath, data, ifMatchEtag, error, preconditionFailed);
     if (isLocal()) {
         const QString path = localPath(relPath);
         if (!ifMatchEtag.isEmpty() && QFileInfo::exists(path) && localEtag(path) != ifMatchEtag) {
@@ -288,6 +535,11 @@ bool WebDavClient::put(const QString& relPath, const QByteArray& data, const QSt
 
 bool WebDavClient::mkcol(const QString& relPath, QString* error)
 {
+    if (isS3()) {
+        Q_UNUSED(relPath);
+        Q_UNUSED(error);
+        return true;   // buckets are created out of band
+    }
     if (isLocal()) {
         if (QDir().mkpath(localPath(relPath))) return true;
         if (error) *error = QStringLiteral("无法创建目录：%1").arg(localPath(relPath));
@@ -318,6 +570,7 @@ bool WebDavClient::mkcol(const QString& relPath, QString* error)
 
 bool WebDavClient::remove(const QString& relPath, QString* error)
 {
+    if (isS3()) return s3Remove(relPath, error);
     if (isLocal()) {
         const QString path = localPath(relPath);
         const QFileInfo info(path);
