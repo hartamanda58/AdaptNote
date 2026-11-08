@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,35 +17,38 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-08，演示版 / 布局修复）
+### 最近一次验收（2026-11-08，脑图拖拽三处打通版）
 
 ```text
-run 42447994594  Windows 构建（main @ 1ca897c）  success
+run 42457738576  Windows 构建（main @ 1bfc57c）  success
 12/12 套测试在 Windows runner 上全部 PASSED
-新增断言：整理模式打开编辑器切到阅读布局、保存后回到整理
+新增断言：右侧 dock 脑图拖拽改分组；另含整理布局往返、参考标注、折叠等
 自带 tesseract --list-langs 通过，ecdict 43,823 条 / 8 MB，zip 76.0 MB
-附带 38 秒演示视频 + 体验包（两本演示书）
+附带 38 秒整体演示 + 10 秒脑图拖拽片段 + 体验包
 ```
 
-之前全绿：42444699623（edb6c40）、42433464805（7ccc5d1）、42393475215（818dcfb）、
-42387890013（01c238b）、42373627839（58efc35）、42353005512（900e60a）。
+之前全绿：42447994594（1ca897c）、42444699623（edb6c40）、42433464805（7ccc5d1）、
+42393475215（818dcfb）、42387890013（01c238b）、42373627839（58efc35）、
+42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/demo-1ca897c/AdaptNote-windows-x64-demo.zip
-sha256: 534750b582cf0763e892f610dfe43d1f2d446ab4564c6dbbee479d2fe2b67828
+https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-windows-x64-mapdrag.zip
+sha256: 37e253991e49cf460130d3457dedc8defdd3aee0fc7bdc8b833a892ac893cbaa
 ```
 
-**演示版**（压缩 76 MB / 解压 145 MB）：全部折叠/展开全部、参考窗格直接标注、
-卡片折叠、多选批量与组内排序、原文拖入脑图、双文档并排、就地编辑、双击改名、手势缩放。
-修复了从「整理/脑图」打开内联编辑器时把三栏挤变形的问题（保存/取消后回到原布局）。
+**脑图拖拽版**（压缩 76 MB / 解压 145 MB）：主脑图、右侧 dock「脑图」、独立脑图窗口
+三处都支持卡片拖拽（归组 / 组内排序 / 多选整组移动 / 跨书移动出处）；另有全部折叠、
+参考窗格直接标注、卡片折叠、多选批量、原文拖入脑图、双文档并排、就地编辑、双击改名、手势缩放。
 
-- 38 秒演示视频：`releases/download/demo-1ca897c/AdaptNote-demo.mp4`
+- 38 秒整体演示：`releases/download/map-drag-1bfc57c/AdaptNote-demo.mp4`
   （sha256 48f7ae6f…，已二次下载校验）
-- 体验包（两本演示书 + 步骤）：`releases/download/demo-1ca897c/AdaptNote-demo-pack-1ca897c.zip`
-  （sha256 fb30f830…）
+- 10 秒脑图拖拽片段：`releases/download/map-drag-1bfc57c/AdaptNote-map-drag.mp4`
+  （sha256 5405b3c2…）
+- 体验包（两本演示书 + 步骤）：`releases/download/map-drag-1bfc57c/AdaptNote-demo-pack-1bfc57c.zip`
+  （sha256 755c664f…）
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -56,8 +59,9 @@ sha256: 534750b582cf0763e892f610dfe43d1f2d446ab4564c6dbbee479d2fe2b67828
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（edb6c40，全部折叠/参考标注，无布局修复）：
-`releases/download/fold-annotate-edb6c40/AdaptNote-windows-x64-fold-annotate.zip`
+上一个版本（1ca897c，演示版 + 布局修复，无 dock 拖拽）：
+`releases/download/demo-1ca897c/AdaptNote-windows-x64-demo.zip`
+更早：edb6c40（全部折叠/参考标注）、7ccc5d1（折叠/排序/参考记忆）。
 更早：7ccc5d1（折叠/排序/参考记忆）、818dcfb（多选/拖拽/双文档）、
 01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：

@@ -2,9 +2,10 @@
 
 ## 演示
 
-- [38 秒演示视频（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/demo-1ca897c/AdaptNote-demo.mp4)
-- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/demo-1ca897c/AdaptNote-demo-pack-1ca897c.zip)
-- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/demo-1ca897c/AdaptNote-windows-x64-demo.zip
+- [10 秒脑图拖拽片段](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-map-drag.mp4)
+- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-demo-pack-1bfc57c.zip)
+- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-windows-x64-mapdrag.zip
 - 截图：`shots/merged-*.png`
 
 
