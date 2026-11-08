@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,29 +17,29 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-08，折叠/排序/参考记忆版）
+### 最近一次验收（2026-11-08，全部折叠/参考标注版）
 
 ```text
-run 42433464805  Windows 构建（main @ 7ccc5d1）  success
+run 42444699623  Windows 构建（main @ edb6c40）  success
 12/12 套测试在 Windows runner 上全部 PASSED
-新增断言：折叠前后节点数（26→25→26）、组内批量排序的单步撤销
+新增断言：全部折叠往返（26→…→26）、参考窗格标注与撤销
 自带 tesseract --list-langs 通过，ecdict 43,823 条 / 8 MB，zip 76.0 MB
 ```
 
-之前全绿：42393475215（818dcfb）、42387890013（01c238b）、42373627839（58efc35）、
-42353005512（900e60a）。
+之前全绿：42433464805（7ccc5d1）、42393475215（818dcfb）、42387890013（01c238b）、
+42373627839（58efc35）、42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/fold-reorder-7ccc5d1/AdaptNote-windows-x64-fold.zip
-sha256: 9034e5904808f1b16462c69b3540167dfeb1df940f62ba8847319b54901f9217
+https://github.com/hartamanda58/AdaptNote/releases/download/fold-annotate-edb6c40/AdaptNote-windows-x64-fold-annotate.zip
+sha256: 0d4818f263252cc420e02486f82caab88d67e71f6815fa0c2eadf057fa901f8a
 ```
 
-**折叠 / 排序 / 参考记忆版**（压缩 76 MB / 解压 145 MB）：容器卡片右下角 `−`/`+` 折叠分支，
-多选拖到当前分组按相对顺序整体排序，参考窗格的文档与宽度会记住并恢复；此前多选批量、
-原文拖入脑图、就地编辑、双击改名、光标锚定缩放/捏合/中键平移都在。
+**全部折叠 / 参考标注版**（压缩 76 MB / 解压 145 MB）：脑图 ⋯ 菜单「全部折叠/展开全部」，
+参考窗格可以直接高亮/下划线/批注（写入参考文档，批注走内联编辑器）；此前的卡片折叠、
+多选批量、组内排序、原文拖入脑图、双文档并排、就地编辑、双击改名、手势缩放都在。
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -50,9 +50,9 @@ sha256: 9034e5904808f1b16462c69b3540167dfeb1df940f62ba8847319b54901f9217
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（818dcfb，多选/拖拽/双文档，无折叠与排序）：
-`releases/download/multi-doc-818dcfb/AdaptNote-windows-x64-multidoc.zip`
-更早：01c238b（就地编辑）、58efc35（自带 OCR/词典）。
+上一个版本（7ccc5d1，折叠/排序/参考记忆）：
+`releases/download/fold-reorder-7ccc5d1/AdaptNote-windows-x64-fold.zip`
+更早：818dcfb（多选/拖拽/双文档）、01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：
 `releases/download/merged-mn-readernote-900e60a/AdaptNote-windows-x64-portable.zip`
 
@@ -312,11 +312,12 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 
 ## 7. 建议的下一步
 
-1. **白板/Excalidraw**：合并后仍缺的一块；S3 已补
-2. 白板/Excalidraw、暗色主题、手写跟手度
-3. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV/本地目录、Anki/XMind、tesseract）
-4. 主题同步补冲突/墓碑的集成测试（远端并发改名、远端删资料）
-5. 生词“回原文”跨设备定位（现在只传书名）；右侧面板在窄窗口下的最小宽度
+1. **暗色主题**（外壳；当前只有阅读区“夜间纸”）
+2. **手写跟手度**（压感/倾斜已有数据，但笔迹延迟与打磨未做）
+3. **白板 / Excalidraw**（大工程，ReaderNote 有、我们没合并）
+4. 真实设备验收清单（Windows 高分屏、数位板、双机 WebDAV/本地目录+S3、Anki/XMind、tesseract）
+5. 主题同步补冲突/墓碑的集成测试（远端并发改名、远端删资料）
+6. 右侧摘录列表增加“参考文档”筛选（现在只列主文档）
 
 ---
 
