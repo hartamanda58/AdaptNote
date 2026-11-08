@@ -106,6 +106,8 @@ public:
     void openReferenceForTest(const QString& path) { openReference(path); }
     void closeReferenceForTest() { closeReference(); }
     PageView* referenceViewForTest() const { return referenceView_; }
+    void annotateReferenceForTest(MarkupType type) { annotateReference(type); }
+    QVector<Markup> referenceMarkupsForTest() const { return referenceMarkups_; }
     bool aiDockVisibleForTest() const;
     void translateSelectionForTest();
     QString translationForTest() const;
@@ -291,11 +293,17 @@ private:
     QToolButton* referenceCapture_ = nullptr;
     QToolButton* referenceButton_ = nullptr;
     QString referencePath_;
+    QVector<Markup> referenceMarkups_;
+    QWidget* referencePill_ = nullptr;
     bool referenceRestorePending_ = true;
     void buildReferencePanel();
     void openReference(const QString& path);
     void closeReference();
     void addMarkupFromReference();
+    void annotateReference(MarkupType type);
+    void updateReferencePill();
+    void refreshReferenceMarkups();
+    Markup* editableMarkupById(const QString& id);
     QToolBar* mainToolbar_ = nullptr;
     QMenu* moreMenu_ = nullptr;
     QTabBar* notebookTabs_ = nullptr;

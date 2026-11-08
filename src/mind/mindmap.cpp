@@ -1022,6 +1022,29 @@ void MindMapView::setCollapsed(const QString& key, bool collapsed)
     rebuild();
 }
 
+void MindMapView::collapseAllBranches()
+{
+    collapsed_.clear();
+    std::function<void(const Node&, bool)> walk = [&](const Node& node, bool isRoot) {
+        // Root stays open, otherwise "collapse all" would leave a single card and no
+        // way to see which branches exist.
+        if (!isRoot && !node.children.isEmpty()) collapsed_.insert(nodeKey(node));
+        for (const Node& child : node.children) walk(child, false);
+    };
+    walk(root_, true);
+    rebuild();
+    fitToContent();
+    emit nodeSelected(selectedKey_);
+}
+
+void MindMapView::expandAllBranches()
+{
+    if (collapsed_.isEmpty()) return;
+    collapsed_.clear();
+    rebuild();
+    emit nodeSelected(selectedKey_);
+}
+
 void MindMapView::setSelectedKey(const QString& key)
 {
     if (selectedKeys_.size() == 1 && selectedKeys_.first() == key) return;

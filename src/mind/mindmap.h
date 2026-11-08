@@ -48,6 +48,9 @@ public:
     // that gets the accent outline.
     void setCollapsed(const QString& key, bool collapsed);
     bool isCollapsed(const QString& key) const { return collapsed_.contains(key); }
+    // Bulk fold: keep the root level visible, or show everything.
+    void collapseAllBranches();
+    void expandAllBranches();
     void setSelectedKey(const QString& key);
     QString selectedKey() const { return selectedKey_; }
     // Multi-selection (Ctrl+click toggles, Shift+drag draws a band, Ctrl+A selects notes).

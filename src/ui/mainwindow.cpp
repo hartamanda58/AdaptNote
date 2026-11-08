@@ -898,6 +898,7 @@ void MainWindow::buildUi()
     documentStripLayout->addWidget(appearance);
     connect(appearance, &QComboBox::currentIndexChanged, this, [this](int theme) {
         view_->setAppearanceTheme(theme);
+        if (referenceView_) referenceView_->setAppearanceTheme(theme);
         store_.setSetting(QStringLiteral("reader.appearance"), QString::number(theme));
     });
     appearance->setCurrentIndex(store_.setting(QStringLiteral("reader.appearance"), QStringLiteral("0")).toInt());
@@ -1098,7 +1099,39 @@ void MainWindow::buildReferencePanel()
     connect(referenceView_, &PageView::selectionChanged, this, [this]() {
         const Selection sel = referenceView_->selection();
         referenceCapture_->setEnabled(sel.isValid() && !sel.text.trimmed().isEmpty());
+        updateReferencePill();
     });
+    connect(referenceView_, &PageView::zoomChanged, this,
+            [this](float) { updateReferencePill(); });
+    connect(referenceView_->verticalScrollBar(), &QScrollBar::valueChanged, this,
+            [this](int) { updateReferencePill(); });
+    connect(referenceView_->horizontalScrollBar(), &QScrollBar::valueChanged, this,
+            [this](int) { updateReferencePill(); });
+
+    // Mini annotation bar over the reference page: same interaction language as the
+    // main reader's pill, without the network-backed actions.
+    referencePill_ = new QWidget(referenceView_->viewport());
+    referencePill_->setObjectName(QStringLiteral("referencePill"));
+    auto* pillRow = new QHBoxLayout(referencePill_);
+    pillRow->setContentsMargins(6, 4, 6, 4);
+    pillRow->setSpacing(2);
+    auto* grip = new QLabel(QStringLiteral("⠿"), referencePill_);
+    grip->setObjectName(QStringLiteral("selectionBarGrip"));
+    grip->setToolTip(QStringLiteral("按住选中的文字拖到脑图"));
+    pillRow->addWidget(grip);
+    auto addPillAction = [&](const QString& label, MarkupType type) {
+        auto* button = new QToolButton(referencePill_);
+        button->setText(label);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        connect(button, &QToolButton::clicked, this,
+                [this, type]() { annotateReference(type); });
+        pillRow->addWidget(button);
+    };
+    addPillAction(QStringLiteral("高亮"), MarkupType::Highlight);
+    addPillAction(QStringLiteral("下划线"), MarkupType::Underline);
+    addPillAction(QStringLiteral("批注"), MarkupType::Note);
+    referencePill_->hide();
 
     referencePanel_->hide();
     pageSplitter_->addWidget(referencePanel_);
@@ -1121,7 +1154,8 @@ void MainWindow::openReference(const QString& path)
     if (!kHeadless) store_.setSetting(QStringLiteral("ui.referencePath"), absolute);
     referenceView_->setEngine(&referenceEngine_);
     referenceView_->setAppearanceTheme(view_->appearanceTheme());
-    referenceView_->setMarkups(store_.markups(absolute));
+    referenceMarkups_ = store_.markups(absolute);
+    referenceView_->setMarkups(referenceMarkups_);
     referenceTitle_->setText(QFileInfo(absolute).completeBaseName());
     referencePanel_->show();
     const int total = qMax(500, pageSplitter_->width());
@@ -1151,9 +1185,76 @@ void MainWindow::closeReference()
         store_.setSetting(QStringLiteral("ui.referencePath"), QString());
     }
     referencePath_.clear();
+    referenceMarkups_.clear();
     referenceTitle_->clear();
     referenceView_->setMarkups({});
     referenceCapture_->setEnabled(false);
+    if (referencePill_) referencePill_->hide();
+}
+
+void MainWindow::annotateReference(MarkupType type)
+{
+    const Selection sel = referenceView_ ? referenceView_->selection() : Selection();
+    if (!sel.isValid() || referencePath_.isEmpty()) return;
+
+    Markup markup;
+    markup.id = newId();
+    markup.docPath = referencePath_;
+    markup.page = sel.page;
+    markup.type = type;
+    markup.color = markupColor_;
+    markup.quads = sel.quads;
+    markup.text = sel.text;
+    if (referenceEngine_.supportsAnchors() && sel.startChar >= 0) {
+        const int chapter = referenceEngine_.chapterOfPage(sel.page);
+        const int offset = referenceEngine_.chapterOffsetOf(sel.page, sel.startChar);
+        if (chapter >= 0 && offset >= 0) {
+            markup.anchorChapter = QString::number(chapter);
+            markup.anchorOffset = offset;
+        }
+    }
+    markup.created = markup.updated = QDateTime::currentMSecsSinceEpoch();
+    undo_->push(new MarkupCommand(this, CmdKind::Add, Markup(), markup,
+                                  QStringLiteral("参考窗格标注")));
+    referenceView_->clearSelection();
+    if (mindView_) mindView_->selectForMarkup(markup.id);
+    startExcerptEdit(markup.id);
+    statusBar()->showMessage(QStringLiteral("已在参考文档里添加%1").arg(markupTypeLabel(type)),
+                             2500);
+}
+
+void MainWindow::updateReferencePill()
+{
+    if (!referencePill_ || !referenceView_) return;
+    const Selection sel = referenceView_->selection();
+    if (!sel.isValid() || sel.text.trimmed().isEmpty()) {
+        referencePill_->hide();
+        return;
+    }
+    QRectF bounds;
+    for (const Quad& quad : sel.quads) {
+        const QPointF a = referenceView_->mapPageToViewport(sel.page, quad.ul);
+        const QPointF b = referenceView_->mapPageToViewport(sel.page, quad.lr);
+        const QPointF c = referenceView_->mapPageToViewport(sel.page, quad.ur);
+        const QPointF d = referenceView_->mapPageToViewport(sel.page, quad.ll);
+        const QRectF one = QRectF(a, b).normalized().united(QRectF(c, d).normalized());
+        bounds = bounds.isNull() ? one : bounds.united(one);
+    }
+    if (bounds.isNull()) {
+        referencePill_->hide();
+        return;
+    }
+    const QSize size = referencePill_->sizeHint();
+    QPoint pos(qBound(8, qRound(bounds.left()),
+                      referenceView_->viewport()->width() - size.width() - 8),
+               qMax(8, qRound(bounds.top()) - size.height() - 8));
+    if (pos.y() < 8)
+        pos.setY(qMin(referenceView_->viewport()->height() - size.height() - 8,
+                      qRound(bounds.bottom()) + 8));
+    referencePill_->move(pos);
+    referencePill_->adjustSize();
+    referencePill_->raise();
+    referencePill_->show();
 }
 
 void MainWindow::addMarkupFromReference()
@@ -2637,6 +2738,23 @@ void MainWindow::reloadMarkups()
 void MainWindow::refreshFromStore()
 {
     reloadMarkups();
+    refreshReferenceMarkups();
+}
+
+void MainWindow::refreshReferenceMarkups()
+{
+    if (referencePath_.isEmpty() || !referenceView_) return;
+    referenceMarkups_ = store_.markups(referencePath_);
+    referenceView_->setMarkups(referenceMarkups_);
+}
+
+Markup* MainWindow::editableMarkupById(const QString& id)
+{
+    for (Markup& m : markups_)
+        if (m.id == id) return &m;
+    for (Markup& m : referenceMarkups_)
+        if (m.id == id) return &m;
+    return nullptr;
 }
 
 void MainWindow::storeUpsertMarkup(const Markup& m)
@@ -2910,9 +3028,9 @@ void MainWindow::deleteMarkupById(const QString& id)
 void MainWindow::startExcerptEdit(const QString& id)
 {
     if (id.isEmpty() || !excerptEditor_) return;
-    Markup* m = findMarkup(id);
+    Markup* m = editableMarkupById(id);
     if (!m) {
-        statusBar()->showMessage(QStringLiteral("请先打开这条笔记所属的文档"), 3000);
+        statusBar()->showMessage(QStringLiteral("找不到这条笔记（可能已删除）"), 3000);
         return;
     }
     if (!excerptEditId_.isEmpty() && excerptEditId_ != id) finishExcerptEdit(true);
@@ -2962,7 +3080,7 @@ void MainWindow::applyExcerptEdit()
 {
     if (excerptEditId_.isEmpty() || !excerptEditor_) return;
     if (excerptSaveTimer_) excerptSaveTimer_->stop();
-    Markup* current = findMarkup(excerptEditId_);
+    Markup* current = editableMarkupById(excerptEditId_);
     if (!current) return;
 
     Markup after = *current;
@@ -2985,9 +3103,16 @@ void MainWindow::applyExcerptEdit()
     after.updated = QDateTime::currentMSecsSinceEpoch();
     after = store_.stampForLocalWrite(after);
     store_.upsertMarkup(after);
-    *current = after;
-    view_->setMarkups(markups_);
-    updateNotesPanel();
+    bool isReferenceNote = false;
+    for (const Markup& m : referenceMarkups_)
+        if (m.id == after.id) isReferenceNote = true;
+    if (isReferenceNote) {
+        refreshReferenceMarkups();
+    } else {
+        *current = after;
+        view_->setMarkups(markups_);
+        updateNotesPanel();
+    }
     if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
 }
 
@@ -3002,7 +3127,7 @@ void MainWindow::finishExcerptEdit(bool commit)
 
     if (commit) {
         applyExcerptEdit();
-        Markup* current = findMarkup(id);
+        Markup* current = editableMarkupById(id);
         if (current) {
             const bool changed = current->title != excerptEditBefore_.title ||
                                  current->comment != excerptEditBefore_.comment ||
@@ -3014,13 +3139,20 @@ void MainWindow::finishExcerptEdit(bool commit)
                                               *current, QStringLiteral("编辑摘录")));
             }
         }
-    } else if (Markup* current = findMarkup(id)) {
+    } else if (Markup* current = editableMarkupById(id)) {
+        bool isReferenceNote = false;
+        for (const Markup& m : referenceMarkups_)
+            if (m.id == current->id) isReferenceNote = true;
         Markup restore = excerptEditBefore_;
         restore.updated = QDateTime::currentMSecsSinceEpoch();
         store_.upsertMarkup(store_.stampForLocalWrite(restore));
-        *current = restore;
-        view_->setMarkups(markups_);
-        updateNotesPanel();
+        if (isReferenceNote) {
+            refreshReferenceMarkups();
+        } else {
+            *current = restore;
+            view_->setMarkups(markups_);
+            updateNotesPanel();
+        }
         if (mindPanel_ && mindPanel_->isVisible()) rebuildMindMap();
     }
 
@@ -5045,6 +5177,8 @@ void MainWindow::ensureMindPanel()
     auto* moreMenu = new QMenu(moreBtn);
     QAction* fitAct = moreMenu->addAction(QStringLiteral("适配全图"));
     QAction* collapseAct = moreMenu->addAction(QStringLiteral("折叠/展开选中节点"));
+    QAction* collapseAllAct = moreMenu->addAction(QStringLiteral("全部折叠"));
+    QAction* expandAllAct = moreMenu->addAction(QStringLiteral("展开全部"));
     moreMenu->addSeparator();
     QAction* pngAct = moreMenu->addAction(QStringLiteral("导出 PNG…"));
     moreBtn->setMenu(moreMenu);
@@ -5089,6 +5223,12 @@ void MainWindow::ensureMindPanel()
         const QString key = mindView_->selectedKey();
         if (key.isEmpty()) return;
         mindView_->setCollapsed(key, !mindView_->isCollapsed(key));
+    });
+    connect(collapseAllAct, &QAction::triggered, this, [this]() {
+        if (mindView_) mindView_->collapseAllBranches();
+    });
+    connect(expandAllAct, &QAction::triggered, this, [this]() {
+        if (mindView_) mindView_->expandAllBranches();
     });
     connect(pngAct, &QAction::triggered, this, [this]() {
         const QString base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +

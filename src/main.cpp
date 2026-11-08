@@ -47,6 +47,8 @@ int main(int argc, char** argv)
         "excerpt-edit", "open the inline excerpt editor on the first note (screenshots)");
     const QCommandLineOption optReference("reference", "open a second document in the reference pane",
                                           "file");
+    const QCommandLineOption optReferenceSelect(
+        "reference-select", "seed a selection in the reference pane (screenshots)", "text");
     const QCommandLineOption optMultiSelect(
         "multi-select", "select every note card in the mind map (screenshots)");
     const QCommandLineOption optFold("fold", "collapse the first container card (screenshots)");
@@ -74,6 +76,7 @@ int main(int argc, char** argv)
     parser.addOption(optSelect);
     parser.addOption(optExcerptEdit);
     parser.addOption(optReference);
+    parser.addOption(optReferenceSelect);
     parser.addOption(optMultiSelect);
     parser.addOption(optFold);
     parser.addOption(optExportDir);
@@ -143,6 +146,15 @@ int main(int argc, char** argv)
         }
         if (parser.isSet(optFind)) w.findText(parser.value(optFind));
         if (parser.isSet(optReference)) w.openReferenceForTest(parser.value(optReference));
+        if (parser.isSet(optReferenceSelect) && w.referenceViewForTest()) {
+            an::Selection selection;
+            selection.page = 0;
+            selection.text = parser.value(optReferenceSelect);
+            selection.startChar = 0;
+            selection.endChar = selection.text.size();
+            selection.quads = {an::Quad::fromRect(QRectF(70, 120, 200, 16))};
+            w.referenceViewForTest()->setSelection(selection);
+        }
         if (parser.isSet(optMultiSelect)) {
             w.setWorkspaceMode(1);
             if (auto* map = w.mindMapView()) map->selectAllForTest();

@@ -1606,6 +1606,25 @@ int main(int argc, char** argv)
         check(reference && reference->engine() && reference->engine()->isOpen() &&
                   reference->engine()->pageCount() > 0,
               QStringLiteral("reference pane renders the second document"));
+        if (reference) {
+            const int referenceBefore = w.referenceMarkupsForTest().size();
+            reference->setSelection(Selection{0, 0, 5, {Quad::fromRect(QRectF(50, 70, 120, 16))},
+                                              QStringLiteral("reference excerpt")});
+            w.annotateReferenceForTest(MarkupType::Highlight);
+            w.finishExcerptEditForTest(true);
+            bool annotated = false;
+            for (const Markup& m : w.referenceMarkupsForTest())
+                if (m.text == QStringLiteral("reference excerpt")) annotated = true;
+            check(annotated,
+                  QStringLiteral("reference pane annotations are stored on its own document"));
+            const bool undone = w.undoForTest();
+            bool stillThere = false;
+            for (const Markup& m : w.referenceMarkupsForTest())
+                if (m.text == QStringLiteral("reference excerpt")) stillThere = true;
+            check(undone && !stillThere &&
+                      w.referenceMarkupsForTest().size() == referenceBefore,
+                  QStringLiteral("reference annotation is undoable"));
+        }
         w.closeReferenceForTest();
         settle();
         check(reference && !reference->isVisible(),
@@ -1632,6 +1651,12 @@ int main(int argc, char** argv)
             map->setCollapsed(foldKey, false);
             check(map->sceneNodeCount() == expandedCount,
                   QStringLiteral("unfolding restores the branch"));
+            map->collapseAllBranches();
+            check(map->sceneNodeCount() < expandedCount,
+                  QStringLiteral("collapse-all keeps only the top level"));
+            map->expandAllBranches();
+            check(map->sceneNodeCount() == expandedCount,
+                  QStringLiteral("expand-all restores every branch"));
         } else {
             check(false, QStringLiteral("a container card exists to fold"));
         }
