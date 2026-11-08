@@ -1,5 +1,12 @@
 # AdaptNote — 本地优先的 PDF / EPUB 阅读与标注工具（自用版）
 
+## 演示
+
+- [38 秒演示视频（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/fold-annotate-edb6c40/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/fold-annotate-edb6c40/AdaptNote-demo-pack.zip)
+- 截图：`shots/merged-*.png`
+
+
 对标 BookxNote Pro 的自用实现。**P0–P5 全部完成并通过自动化验收**：
 能打开 PDF/EPUB、连续/双页/单页、缩放旋转、拖选文本、五类标注（含图片摘录）、写入原 PDF、
 全文搜索（FTS5）、标签与颜色筛选、撤销/重做、精细阅读位置记忆、导出 MD/HTML/OPML/XMind/Anki、

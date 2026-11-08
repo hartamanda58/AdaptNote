@@ -1691,6 +1691,25 @@ int main(int argc, char** argv)
         }
     }
 
+    // Editing from organize mode must open the reading layout and return afterwards.
+    {
+        const QVector<Markup> notes = w.visibleMarkups();
+        if (!notes.isEmpty()) {
+            w.setWorkspaceMode(1);
+            settle();
+            w.startExcerptEditForTest(notes.first().id);
+            settle();
+            check(w.workspaceMode() == 0,
+                  QStringLiteral("editing opens the reading layout for the note dock"));
+            w.finishExcerptEditForTest(true);
+            settle();
+            check(w.workspaceMode() == 1,
+                  QStringLiteral("finishing an edit returns to organize mode"));
+            w.setWorkspaceMode(0);
+            settle();
+        }
+    }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -3060,6 +3060,10 @@ void MainWindow::startExcerptEdit(const QString& id)
     }
 
     if (leftTabs_ && excerptsTab_) leftTabs_->setCurrentWidget(excerptsTab_);
+    if (notesDock_ && !notesDock_->isVisible()) {
+        excerptEditReturnMode_ = workspaceMode();
+        if (excerptEditReturnMode_ != 0) setWorkspaceMode(0);
+    }
     if (notesDock_) notesDock_->show();
     // Reflect the edited card in the list (without firing itemClicked, which would jump).
     if (notesList_) {
@@ -3161,6 +3165,12 @@ void MainWindow::finishExcerptEdit(bool commit)
     excerptEditor_->hide();
     statusBar()->showMessage(commit ? QStringLiteral("摘录已保存") : QStringLiteral("已放弃本次修改"),
                              2000);
+    if (excerptEditReturnMode_ >= 0) {
+        const int restoreMode = excerptEditReturnMode_;
+        excerptEditReturnMode_ = -1;
+        // Only return if the user has not moved on to another mode meanwhile.
+        if (workspaceMode() == 0) setWorkspaceMode(restoreMode);
+    }
 }
 
 void MainWindow::editMarkupComment(const QString& id)

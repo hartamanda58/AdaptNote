@@ -304,6 +304,8 @@ private:
     void updateReferencePill();
     void refreshReferenceMarkups();
     Markup* editableMarkupById(const QString& id);
+    // Editing opens the right dock; remember the layout to return to afterwards.
+    int excerptEditReturnMode_ = -1;
     QToolBar* mainToolbar_ = nullptr;
     QMenu* moreMenu_ = nullptr;
     QTabBar* notebookTabs_ = nullptr;
