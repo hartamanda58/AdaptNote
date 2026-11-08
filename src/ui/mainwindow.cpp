@@ -1118,14 +1118,16 @@ void MainWindow::openReference(const QString& path)
         return;
     }
     referencePath_ = absolute;
+    if (!kHeadless) store_.setSetting(QStringLiteral("ui.referencePath"), absolute);
     referenceView_->setEngine(&referenceEngine_);
     referenceView_->setAppearanceTheme(view_->appearanceTheme());
     referenceView_->setMarkups(store_.markups(absolute));
     referenceTitle_->setText(QFileInfo(absolute).completeBaseName());
     referencePanel_->show();
     const int total = qMax(500, pageSplitter_->width());
-    // Keep the book you are annotating larger than the reference.
-    pageSplitter_->setSizes({total * 60 / 100, total * 40 / 100});
+    const int ratio = qBound(20, store_.setting(QStringLiteral("ui.referenceRatio"),
+                                                QStringLiteral("40")).toInt(), 70);
+    pageSplitter_->setSizes({total * (100 - ratio) / 100, total * ratio / 100});
     QTimer::singleShot(0, referenceView_,
                        [this]() { referenceView_->setZoomMode(ZoomMode::FitWidth); });
     referenceCapture_->setEnabled(false);
@@ -1139,6 +1141,15 @@ void MainWindow::closeReference()
     if (!referencePanel_ || referencePanel_->isHidden()) return;
     referencePanel_->hide();
     referenceEngine_.close();
+    if (!kHeadless) {
+        const QList<int> sizes = pageSplitter_->sizes();
+        if (sizes.size() == 2 && sizes.at(0) + sizes.at(1) > 0) {
+            store_.setSetting(QStringLiteral("ui.referenceRatio"),
+                              QString::number(qRound(100.0 * sizes.at(1) /
+                                                    (sizes.at(0) + sizes.at(1)))));
+        }
+        store_.setSetting(QStringLiteral("ui.referencePath"), QString());
+    }
     referencePath_.clear();
     referenceTitle_->clear();
     referenceView_->setMarkups({});
@@ -2126,6 +2137,19 @@ bool MainWindow::openDocument(const QString& path)
         int mode = savedMode.isEmpty() ? (markups_.isEmpty() ? 0 : 1) : savedMode.toInt();
         if (mode == 2 && markups_.isEmpty()) mode = 0;
         setWorkspaceMode(qBound(0, mode, 2));
+    }
+    if (!kHeadless && referenceRestorePending_) {
+        referenceRestorePending_ = false;
+        const QString savedReference = store_.setting(QStringLiteral("ui.referencePath"));
+        if (!savedReference.isEmpty()) {
+            if (savedReference != docPath_ && QFileInfo::exists(savedReference)) {
+                QTimer::singleShot(0, this, [this, savedReference]() {
+                    if (referencePath_ != savedReference) openReference(savedReference);
+                });
+            } else {
+                store_.setSetting(QStringLiteral("ui.referencePath"), QString());
+            }
+        }
     }
     restoreReadingState();
 
@@ -5032,7 +5056,7 @@ void MainWindow::ensureMindPanel()
     wireMindBatch(mindView_);
 
     auto* hint = new QLabel(
-        QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：直接改名（Enter 保存）　·　右键：菜单"),
+        QStringLiteral("左键点卡片：选中并定位原文　·　左键拖卡片：整理笔记　·　空白处左拖 / 中键拖：移动画布　·　双击：直接改名　·　右下角 +/−：折叠　·　右键：菜单"),
         mindPanel_);
     hint->setStyleSheet(QStringLiteral("color:#6b7280;font-size:11px;padding:2px 8px 4px;"));
     hint->setWordWrap(true);
@@ -5392,6 +5416,75 @@ void MainWindow::colorMarkupsBatch(const QStringList& ids, const QColor& color)
     undo_->endMacro();
 }
 
+void MainWindow::reorderMarkupsBatch(const QStringList& ids, const QString& groupKey,
+                                     const QString& beforeId)
+{
+    if (ids.isEmpty() || groupKey.isEmpty()) return;
+    const QString groupId = groupKey.startsWith(QStringLiteral("group:"))
+                                ? groupKey.mid(6)
+                                : QString();
+    const bool pageBucket = !groupKey.startsWith(QStringLiteral("group:"));
+
+    QVector<Markup> scope;
+    if (!currentTopic_.isEmpty()) {
+        for (const TopicDoc& doc : store_.topicDocs(currentTopic_))
+            scope += (doc.docPath == docPath_ ? markups_ : store_.markups(doc.docPath));
+    } else {
+        scope = markups_;
+    }
+
+    QVector<Markup> siblings;
+    for (const Markup& m : scope) {
+        if (m.deleted || m.mindGroup != groupId) continue;
+        // Page buckets are per document; do not interleave two books in one bucket.
+        if (pageBucket && m.docPath != docPath_) continue;
+        siblings.append(m);
+    }
+    std::sort(siblings.begin(), siblings.end(), [](const Markup& a, const Markup& b) {
+        if (a.mindOrder != b.mindOrder) return a.mindOrder < b.mindOrder;
+        return a.created < b.created;
+    });
+
+    QVector<Markup> moving;
+    for (const Markup& m : siblings)
+        if (ids.contains(m.id)) moving.append(m);
+    if (moving.isEmpty()) return;
+    if (!ids.contains(beforeId)) {
+        // preserve the caller's order when it differs from the stored order
+        std::sort(moving.begin(), moving.end(), [&](const Markup& a, const Markup& b) {
+            return ids.indexOf(a.id) < ids.indexOf(b.id);
+        });
+    }
+
+    QVector<Markup> remaining;
+    for (const Markup& m : siblings)
+        if (!ids.contains(m.id)) remaining.append(m);
+    int insertAt = remaining.size();
+    if (!beforeId.isEmpty() && !ids.contains(beforeId)) {
+        for (int i = 0; i < remaining.size(); ++i)
+            if (remaining.at(i).id == beforeId) { insertAt = i; break; }
+    }
+
+    QVector<Markup> finalOrder = remaining;
+    for (int i = 0; i < moving.size(); ++i) finalOrder.insert(insertAt + i, moving.at(i));
+
+    undo_->beginMacro(QStringLiteral("排序 %1 条摘录").arg(moving.size()));
+    int order = 0;
+    for (const Markup& m : finalOrder) {
+        const int target = order * 10;
+        ++order;
+        if (m.mindOrder == target) continue;
+        Markup before = m;
+        Markup after = m;
+        after.mindOrder = target;
+        after.updated = QDateTime::currentMSecsSinceEpoch();
+        undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after,
+                                      QStringLiteral("排序摘录")));
+    }
+    undo_->endMacro();
+    statusBar()->showMessage(QStringLiteral("已重新排序 %1 条摘录").arg(moving.size()), 2000);
+}
+
 void MainWindow::showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos)
 {
     QStringList ids;
@@ -5442,6 +5535,8 @@ void MainWindow::wireMindBatch(mind::MindMapView* view)
             [this](const QStringList& ids, const QString& groupKey) {
                 moveMarkupsToGroupBatch(ids, groupIdOf(groupKey));
             });
+    connect(view, &mind::MindMapView::selectionReorderRequested, this,
+            &MainWindow::reorderMarkupsBatch);
     connect(view, &mind::MindMapView::selectionMenuRequested, this,
             &MainWindow::showMapSelectionMenu);
     connect(view, &mind::MindMapView::excerptDropped, this, &MainWindow::dropExcerpt);

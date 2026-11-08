@@ -1612,6 +1612,60 @@ int main(int argc, char** argv)
               QStringLiteral("reference pane closes without touching the main document"));
     }
 
+    // Fold control on container cards.
+    {
+        auto* map = w.mindMapView();
+        QString foldKey;
+        std::function<void(const mind::Node&)> findFold = [&](const mind::Node& node) {
+            if (foldKey.isEmpty() && !node.groupKey.isEmpty() && !node.children.isEmpty())
+                foldKey = node.groupKey;
+            for (const mind::Node& child : node.children) findFold(child);
+        };
+        findFold(map->tree());
+        if (!foldKey.isEmpty()) {
+            const int expandedCount = map->sceneNodeCount();
+            map->setCollapsed(foldKey, true);
+            const int foldedCount = map->sceneNodeCount();
+            check(foldedCount < expandedCount,
+                  QStringLiteral("fold control hides the branch (%1 -> %2)")
+                      .arg(expandedCount).arg(foldedCount));
+            map->setCollapsed(foldKey, false);
+            check(map->sceneNodeCount() == expandedCount,
+                  QStringLiteral("unfolding restores the branch"));
+        } else {
+            check(false, QStringLiteral("a container card exists to fold"));
+        }
+    }
+
+    // Batch reorder inside one group (multi-select drag order).
+    {
+        const QVector<Markup> notes = w.visibleMarkups();
+        QStringList ids;
+        for (const Markup& m : notes) {
+            if (m.type == MarkupType::Image || m.type == MarkupType::Ink) continue;
+            ids << m.id;
+            if (ids.size() == 3) break;
+        }
+        if (ids.size() == 3) {
+            const QString groupId = w.createMindGroupForTest(QStringLiteral("排序组"));
+            w.moveMarkupsToGroupBatchForTest(ids, groupId);
+            w.reorderMarkupsBatchForTest({ids.at(2)}, QStringLiteral("group:") + groupId,
+                                         ids.at(0));
+            auto orderOf = [&](const QString& id) {
+                for (const Markup& m : w.visibleMarkups())
+                    if (m.id == id) return m.mindOrder;
+                return -1;
+            };
+            const int firstOrder = orderOf(ids.at(2));
+            const int secondOrder = orderOf(ids.at(0));
+            check(firstOrder >= 0 && firstOrder < secondOrder,
+                  QStringLiteral("batch reorder puts the dragged note first"));
+            w.undoForTest();
+            check(orderOf(ids.at(0)) == orderOf(ids.at(2)),
+                  QStringLiteral("batch reorder is one undo step"));
+        }
+    }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

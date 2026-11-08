@@ -88,6 +88,10 @@ signals:
     void deleteManyRequested(const QStringList& markupIds);
     void selectionMenuRequested(const QStringList& keys, const QPoint& globalPos);
     void selectionReparentRequested(const QStringList& markupIds, const QString& groupKey);
+    // Batch reorder inside one group/page bucket: insert `markupIds` before `beforeId`
+    // (empty = append), preserving their current relative order.
+    void selectionReorderRequested(const QStringList& markupIds, const QString& groupKey,
+                                   const QString& beforeId);
     // An excerpt dragged out of the document was dropped on a group/page/empty canvas.
     void excerptDropped(const QByteArray& payload, const QString& groupKey);
     void deleteRequested(const QString& key);
@@ -129,6 +133,8 @@ private:
     void rebuild();
     QString nodeText(const QString& key) const;
     QStringList selectedNoteIds() const;
+    QString groupKeyOfNote(const QString& markupId) const;
+    QString collapseControlAt(const QPointF& scenePos) const;
     void syncSelectionBorders();
     void selectAllNotes();
 

@@ -9,7 +9,7 @@
 Windows 便携包自带本地 tesseract（eng+chi_sim）与精简版 ECDICT，离线即可 OCR 和查词。
 
 界面为浅色三栏（左书架/大纲，中原文，右 摘录/笔记/生词/脑图/AI），摘录与脑图卡片都可以就地编辑，
-支持光标锚定缩放/捏合/中键平移、脑图多选批量整理、把原文直接拖进脑图、右侧参考窗格并排第二本书；
+支持光标锚定缩放/捏合/中键平移、脑图多选批量整理、卡片折叠、把原文直接拖进脑图、右侧参考窗格并排第二本书；
 以 ReaderNote 为主、
 参考 macOS 版 MarginNote。合并来源、复用了哪些代码、什么没合并，见
 [`docs/merge-mn-readernote.md`](docs/merge-mn-readernote.md)。

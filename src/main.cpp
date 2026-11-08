@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <functional>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QStandardPaths>
@@ -48,6 +49,7 @@ int main(int argc, char** argv)
                                           "file");
     const QCommandLineOption optMultiSelect(
         "multi-select", "select every note card in the mind map (screenshots)");
+    const QCommandLineOption optFold("fold", "collapse the first container card (screenshots)");
     const QCommandLineOption optExportDir("export-dir", "export all formats into DIR", "dir");
     const QCommandLineOption optMindMap("mindmap", "render the note mind map to a PNG and exit", "png");
     const QCommandLineOption optLibrary("library", "screenshot the library window to PNG and exit",
@@ -73,6 +75,7 @@ int main(int argc, char** argv)
     parser.addOption(optExcerptEdit);
     parser.addOption(optReference);
     parser.addOption(optMultiSelect);
+    parser.addOption(optFold);
     parser.addOption(optExportDir);
     parser.addOption(optMindMap);
     parser.addOption(optLibrary);
@@ -143,6 +146,18 @@ int main(int argc, char** argv)
         if (parser.isSet(optMultiSelect)) {
             w.setWorkspaceMode(1);
             if (auto* map = w.mindMapView()) map->selectAllForTest();
+        }
+        if (parser.isSet(optFold) && w.mindMapView()) {
+            w.setWorkspaceMode(1);
+            QString foldKey;
+            std::function<void(const an::mind::Node&)> findFold =
+                [&](const an::mind::Node& node) {
+                    if (foldKey.isEmpty() && !node.groupKey.isEmpty() && !node.children.isEmpty())
+                        foldKey = node.groupKey;
+                    for (const an::mind::Node& child : node.children) findFold(child);
+                };
+            findFold(w.mindMapView()->tree());
+            if (!foldKey.isEmpty()) w.mindMapView()->setCollapsed(foldKey, true);
         }
         if (parser.isSet(optExcerptEdit)) {
             const auto notes = w.visibleMarkups();

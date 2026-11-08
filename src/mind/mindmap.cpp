@@ -554,13 +554,21 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
             QString targetGroup;
             QString before;
             const bool hasTarget = dropTargetAt(scenePos, &targetGroup, &before);
+            bool sameGroup = hasTarget && !targetGroup.isEmpty();
+            if (sameGroup)
+                for (const QString& noteId : batch)
+                    if (groupKeyOfNote(noteId) != targetGroup) sameGroup = false;
             dragMarkupId_.clear();
             dragMoved_ = false;
             nodePressActive_ = false;
             pressKey_.clear();
             dragContainerKey_.clear();
-            if (hasTarget && !targetGroup.isEmpty())
-                emit selectionReparentRequested(batch, targetGroup);
+            if (hasTarget && !targetGroup.isEmpty()) {
+                if (sameGroup)
+                    emit selectionReorderRequested(batch, targetGroup, before);
+                else
+                    emit selectionReparentRequested(batch, targetGroup);
+            }
             return;
         }
 
@@ -719,6 +727,13 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             return;
         }
 
+        const QString collapseKey = collapseControlAt(scenePos);
+        if (!collapseKey.isEmpty()) {
+            setSelectedKey(collapseKey);
+            setCollapsed(collapseKey, !isCollapsed(collapseKey));
+            event->accept();
+            return;
+        }
         const QString key = keyAt(scenePos);
         const bool ctrl = (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) != 0;
         const bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
@@ -1053,6 +1068,34 @@ QStringList MindMapView::selectedNoteIds() const
     return ids;
 }
 
+QString MindMapView::groupKeyOfNote(const QString& markupId) const
+{
+    QString result;
+    bool found = false;
+    std::function<void(const Node&)> walk = [&](const Node& node) {
+        if (found) return;
+        if (node.markupId == markupId) {
+            result = node.groupKey;
+            found = true;
+            return;
+        }
+        for (const Node& child : node.children) walk(child);
+    };
+    walk(root_);
+    return result;
+}
+
+QString MindMapView::collapseControlAt(const QPointF& scenePos) const
+{
+    if (!scene_) return {};
+    for (QGraphicsItem* item : scene_->items(scenePos)) {
+        if (!item->data(8).toBool()) continue;
+        const QString key = item->data(4).toString();
+        if (!key.isEmpty()) return key;
+    }
+    return {};
+}
+
 void MindMapView::syncSelectionBorders()
 {
     if (!scene_) return;
@@ -1308,12 +1351,33 @@ void MindMapView::rebuild()
             foot->setZValue(3);
         }
         if (!n.children.isEmpty()) {
-            auto* badge = scene_->addSimpleText(QStringLiteral("%1").arg(n.children.size()),
+            // Clickable fold control: "−" expanded, "+" collapsed. The child count sits
+            // just left of it so a folded branch still says how much is hidden.
+            const bool folded = collapsed_.contains(key);
+            auto* count = scene_->addSimpleText(QString::number(n.children.size()), smallFont);
+            count->setBrush(QBrush(accent));
+            count->setZValue(4);
+            count->setData(8, 1);
+            count->setData(4, key);
+
+            const qreal d = 18;
+            const QRectF circle(rect.right() - kPadX - d, rect.bottom() - kPadY - d, d, d);
+            auto* bg = scene_->addEllipse(circle, QPen(QColor(0x2f, 0x6b, 0xd8), 1.2),
+                                          QBrush(QColor(0xf2, 0xf7, 0xff)));
+            bg->setZValue(4);
+            bg->setData(8, 1);
+            bg->setData(4, key);
+
+            auto* glyph = scene_->addSimpleText(folded ? QStringLiteral("+") : QStringLiteral("−"),
                                                 smallFont);
-            badge->setBrush(QBrush(accent));
-            badge->setPos(rect.right() - kPadX - badge->boundingRect().width(),
-                          rect.bottom() - kPadY - badge->boundingRect().height());
-            badge->setZValue(3);
+            glyph->setBrush(QBrush(QColor(0x2f, 0x6b, 0xd8)));
+            glyph->setPos(circle.center() - QPointF(glyph->boundingRect().width() / 2.0,
+                                                    glyph->boundingRect().height() / 2.0));
+            glyph->setZValue(5);
+            glyph->setData(8, 1);
+            glyph->setData(4, key);
+
+            count->setPos(circle.left() - 4 - count->boundingRect().width(), circle.top() + 1);
         }
 
         ++nodeItems_;

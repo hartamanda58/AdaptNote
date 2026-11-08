@@ -90,6 +90,11 @@ public:
     {
         moveMarkupsToGroupBatch(ids, groupId);
     }
+    void reorderMarkupsBatchForTest(const QStringList& ids, const QString& groupKey,
+                                    const QString& beforeId)
+    {
+        reorderMarkupsBatch(ids, groupKey, beforeId);
+    }
     int mapSelectionCountForTest() const
     {
         return mindView_ ? mindView_->selectedKeys().size() : 0;
@@ -286,6 +291,7 @@ private:
     QToolButton* referenceCapture_ = nullptr;
     QToolButton* referenceButton_ = nullptr;
     QString referencePath_;
+    bool referenceRestorePending_ = true;
     void buildReferencePanel();
     void openReference(const QString& path);
     void closeReference();
@@ -328,6 +334,8 @@ private:
     void deleteMarkupsBatch(const QStringList& ids);
     void moveMarkupsToGroupBatch(const QStringList& ids, const QString& groupId);
     void colorMarkupsBatch(const QStringList& ids, const QColor& color);
+    void reorderMarkupsBatch(const QStringList& ids, const QString& groupKey,
+                             const QString& beforeId);
     Markup markupById(const QString& id) const;
     void wireMindBatch(mind::MindMapView* view);
     void showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos);
