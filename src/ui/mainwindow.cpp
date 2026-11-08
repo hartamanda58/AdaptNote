@@ -2174,6 +2174,7 @@ void MainWindow::buildDocks()
     connect(rightMindView, &mind::MindMapView::renameCommitted, this,
             &MainWindow::applyInlineRename);
     wireMindBatch(rightMindView);
+    wireMindDrag(rightMindView);
     leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
     // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
     // The page-outline tree is constructed before the excerpt list, so move it behind.
@@ -2772,6 +2773,24 @@ void MainWindow::storeUpsertStampedMarkup(const Markup& m)
 void MainWindow::storeRemoveMarkup(const QString& id)
 {
     store_.removeMarkup(id);
+}
+
+bool MainWindow::focusNote(const QString& id)
+{
+    if (findMarkup(id)) return true;
+    const QStringList paths = currentTopic_.isEmpty() ? QStringList{docPath_}
+                                                      : currentTopicDocPaths();
+    for (const QString& path : paths) {
+        for (const Markup& m : store_.markups(path)) {
+            if (m.id != id) continue;
+            if (path != docPath_) {
+                saveReadingState();
+                if (!openDocument(path)) return false;
+            }
+            return findMarkup(id) != nullptr;
+        }
+    }
+    return false;
 }
 
 Markup* MainWindow::findMarkup(const QString& id)
@@ -4952,6 +4971,10 @@ bool MainWindow::applyMindReorder(const QString& markupId, const QString& groupK
                                 const QString& beforeMarkupId)
 {
     Markup* moved = findMarkup(markupId);
+    if (!moved) {
+        focusNote(markupId);
+        moved = findMarkup(markupId);
+    }
     if (!moved) return false;
 
     // a page bucket means "no explicit group"
@@ -5021,6 +5044,10 @@ bool MainWindow::applyMindReorder(const QString& markupId, const QString& groupK
 bool MainWindow::applyMindReparent(const QString& markupId, const QString& groupKey)
 {
     Markup* m = findMarkup(markupId);
+    if (!m) {
+        focusNote(markupId);
+        m = findMarkup(markupId);
+    }
     if (!m) return false;
 
     // Group keys travel as "group:<id>" / "page:<n>"; a page group means "no explicit
@@ -5036,6 +5063,19 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
         bool known = false;
         for (const MindGroup& g : store_.mindGroups(docPath_))
             if (g.id == group) known = true;
+        if (!known && !currentTopic_.isEmpty()) {
+            for (const MindGroup& g : store_.mindGroupsForTopic(currentTopic_)) {
+                if (g.id != group) continue;
+                if (QFileInfo(g.docPath).absoluteFilePath() !=
+                    QFileInfo(docPath_).absoluteFilePath()) {
+                    statusBar()->showMessage(
+                        QStringLiteral("这个分组属于另一份资料，请把笔记拖到那本书的页节点"),
+                        3500);
+                    return false;
+                }
+                known = true;
+            }
+        }
         if (!known) {
             const QString id = store_.ensureMindGroup(docPath_, group);
             if (!id.isEmpty()) group = id;
@@ -5050,16 +5090,22 @@ bool MainWindow::applyMindReparent(const QString& markupId, const QString& group
         if (other.mindGroup == group && other.mindOrder >= nextOrder) nextOrder = other.mindOrder + 1;
     }
 
-    Markup after = *m;
+    Markup before = *m;
+    const QString noteDoc = before.docPath;
+    Markup after = before;
     after.mindGroup = group;
     after.parentMarkupId.clear();
     after.mindOrder = nextOrder;
     after.updated = QDateTime::currentMSecsSinceEpoch();
-    undo_->push(new MarkupCommand(this, CmdKind::Modify, *m, after,
+    undo_->push(new MarkupCommand(this, CmdKind::Modify, before, after,
                                   QStringLiteral("调整脑图结构")));
+    // never touch m after push(): refreshFromStore() rebuilds the markup vectors.
+    QString groupName = group;
+    for (const MindGroup& g : store_.mindGroups(noteDoc))
+        if (g.id == group) groupName = g.name;
     statusBar()->showMessage(group.isEmpty()
                                  ? QStringLiteral("已移回按页码分组")
-                                 : QStringLiteral("已移动到分组「%1」").arg(group),
+                                 : QStringLiteral("已移动到分组「%1」").arg(groupName),
                              2500);
     return true;
 }
@@ -5319,25 +5365,7 @@ void MainWindow::ensureMindPanel()
                 });
                 if (!kHeadless) menu.exec(globalPos);
             });
-    connect(mindView_, &mind::MindMapView::containerReparentRequested, this,
-            [this](const QString& markupId, const QString& sourcePath,
-                   const QString& targetKey, const QString& targetPath) {
-        if (!targetKey.startsWith(QStringLiteral("page:")) &&
-            !targetKey.startsWith(QStringLiteral("docpage:")) &&
-            !targetKey.startsWith(QStringLiteral("document:"))) {
-            if (reparentNoteWithinDocument(markupId, targetKey)) rebuildMindMap();
-            return;
-        }
-        if (moveMarkupToContainer(markupId, sourcePath, targetPath, targetKey)) rebuildMindMap();
-    });
-    connect(mindView_, &mind::MindMapView::nodeReparented, this,
-            [this](const QString& markupId, const QString& groupKey) {
-                if (applyMindReparent(markupId, groupKey)) rebuildMindMap();
-            });
-    connect(mindView_, &mind::MindMapView::noteReorderRequested, this,
-            [this](const QString& markupId, const QString& groupKey, const QString& beforeId) {
-                if (applyMindReorder(markupId, groupKey, beforeId)) rebuildMindMap();
-            });
+    wireMindDrag(mindView_);
     connect(mindView_, &mind::MindMapView::noteMenuRequested, this,
             [this](const QString& noteId, const QPoint& globalPos) {
         QMenu menu(mindView_);
@@ -5692,6 +5720,30 @@ void MainWindow::wireMindBatch(mind::MindMapView* view)
     connect(view, &mind::MindMapView::excerptDropped, this, &MainWindow::dropExcerpt);
 }
 
+void MainWindow::wireMindDrag(mind::MindMapView* view)
+{
+    if (!view) return;
+    connect(view, &mind::MindMapView::containerReparentRequested, this,
+            [this](const QString& markupId, const QString& sourcePath,
+                   const QString& targetKey, const QString& targetPath) {
+        if (!targetKey.startsWith(QStringLiteral("page:")) &&
+            !targetKey.startsWith(QStringLiteral("docpage:")) &&
+            !targetKey.startsWith(QStringLiteral("document:"))) {
+            if (reparentNoteWithinDocument(markupId, targetKey)) rebuildMindMap();
+            return;
+        }
+        if (moveMarkupToContainer(markupId, sourcePath, targetPath, targetKey)) rebuildMindMap();
+    });
+    connect(view, &mind::MindMapView::nodeReparented, this,
+            [this](const QString& markupId, const QString& groupKey) {
+                if (applyMindReparent(markupId, groupKey)) rebuildMindMap();
+            });
+    connect(view, &mind::MindMapView::noteReorderRequested, this,
+            [this](const QString& markupId, const QString& groupKey, const QString& beforeId) {
+                if (applyMindReorder(markupId, groupKey, beforeId)) rebuildMindMap();
+            });
+}
+
 void MainWindow::dropExcerpt(const QByteArray& payload, const QString& groupKey)
 {
     QJsonParseError parseError;
@@ -5934,6 +5986,7 @@ void MainWindow::showNotebookMindMap()
         connect(notebookMindView_, &mind::MindMapView::renameCommitted, this,
                 &MainWindow::applyInlineRename);
         wireMindBatch(notebookMindView_);
+        wireMindDrag(notebookMindView_);
         layout->addWidget(notebookMindView_, 1);
         connect(fit, &QPushButton::clicked, notebookMindView_, &mind::MindMapView::fitToContent);
         connect(link, &QPushButton::toggled, notebookMindView_, &mind::MindMapView::setLinkMode);
@@ -6029,12 +6082,6 @@ void MainWindow::showNotebookMindMap()
                     return;
                 }
             }
-        });
-        connect(notebookMindView_, &mind::MindMapView::noteReorderRequested, this,
-                [this](const QString& id, const QString& group, const QString& before) {
-            for (const QString& path : (currentTopic_.isEmpty() ? QStringList{docPath_} : currentTopicDocPaths()))
-                for (const Markup& note : store_.markups(path))
-                    if (note.id == id) { moveNotebookNote(id, path, group, before); return; }
         });
     }
     const bool scopeChanged = notebookMindWindow_->property("scope").toString() != mindScopeKey();

@@ -1710,6 +1710,22 @@ int main(int argc, char** argv)
         }
     }
 
+    // The right-dock map uses the same drag handlers as the workspace map.
+    {
+        auto* rightMap = w.rightMindViewForTest();
+        const QVector<Markup> notes = w.visibleMarkups();
+        if (rightMap && !notes.isEmpty()) {
+            const QString groupId = w.createMindGroupForTest(QStringLiteral("右侧拖拽组"));
+            const QString noteId = notes.first().id;
+            rightMap->nodeReparented(noteId, QStringLiteral("group:") + groupId);
+            bool grouped = false;
+            for (const Markup& m : w.visibleMarkups())
+                if (m.id == noteId && m.mindGroup == groupId) grouped = true;
+            check(grouped, QStringLiteral("right-dock map drag reparents a card"));
+            w.undoForTest();
+        }
+    }
+
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "FEATURE CHECKS PASSED" : "FEATURE CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

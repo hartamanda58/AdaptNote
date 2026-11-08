@@ -106,6 +106,7 @@ public:
     void openReferenceForTest(const QString& path) { openReference(path); }
     void closeReferenceForTest() { closeReference(); }
     PageView* referenceViewForTest() const { return referenceView_; }
+    mind::MindMapView* rightMindViewForTest() const { return shelfMindView_; }
     void annotateReferenceForTest(MarkupType type) { annotateReference(type); }
     QVector<Markup> referenceMarkupsForTest() const { return referenceMarkups_; }
     bool aiDockVisibleForTest() const;
@@ -348,6 +349,8 @@ private:
                              const QString& beforeId);
     Markup markupById(const QString& id) const;
     void wireMindBatch(mind::MindMapView* view);
+    void wireMindDrag(mind::MindMapView* view);
+    bool focusNote(const QString& id);
     void showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos);
     void dropExcerpt(const QByteArray& payload, const QString& groupKey);
     static QString noteIdOfKey(const QString& key);
