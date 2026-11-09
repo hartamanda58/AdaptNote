@@ -4072,7 +4072,7 @@ void MainWindow::buildAiDock()
     connect(&ai_, &ai::AiClient::delta, this, [this](const QString& content, const QString& reasoning) {
         aiContent_ += content;
         aiReasoningText_ += reasoning;
-        if (translationRequest_ && translationOutput_) {
+        if (translationRequest_ && translationUsesAi_ && translationOutput_) {
             translationOutput_->setPlainText(aiContent_);
         } else if (pendingWord_.isEmpty() && !pendingOcr_) {
             // Dictionary/OCR replies are handled as data, not pasted into the answer pane.
@@ -4114,7 +4114,7 @@ void MainWindow::buildAiDock()
 
                 if (aiOutput_) aiOutput_->setPlainText(content);
                 if (aiInsertButton_) aiInsertButton_->setEnabled(!content.isEmpty());
-                if (translationRequest_) {
+                if (translationRequest_ && translationUsesAi_) {
                     translationRequest_ = false;
                     if (translationOutput_) {
                         translationOutput_->setPlainText(error.isEmpty() ? content : QStringLiteral("翻译失败：%1").arg(error));
@@ -4315,63 +4315,164 @@ void MainWindow::showSelectionTranslation()
         statusBar()->showMessage(QStringLiteral("请先选择要翻译的文字"), 2500);
         return;
     }
-    if (ai_.settings().apiKey.trimmed().isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("请先在“更多 → AI 助手 → 设置”中配置兼容 OpenAI 的 API Key"), 6000);
-        return;
-    }
+
     if (!translationDialog_) {
         translationDialog_ = new QDialog(this);
-        translationDialog_->setObjectName("selectionTranslationDialog");
+        translationDialog_->setObjectName(QStringLiteral("selectionTranslationDialog"));
         translationDialog_->setAttribute(Qt::WA_DeleteOnClose, false);
         translationDialog_->setWindowTitle(QStringLiteral("划词翻译"));
-        translationDialog_->resize(460, 250);
+        translationDialog_->resize(520, 320);
         auto* layout = new QVBoxLayout(translationDialog_);
         auto* source = new QLabel(translationDialog_);
-        source->setObjectName("translationSource");
+        source->setObjectName(QStringLiteral("translationSource"));
         source->setWordWrap(true);
         source->setStyleSheet(QStringLiteral("color:#747b86;font-size:12px;padding:4px 2px;"));
         layout->addWidget(source);
+
+        auto* controls = new QHBoxLayout;
+        auto* providerLabel = new QLabel(QStringLiteral("引擎"), translationDialog_);
+        auto* provider = new QComboBox(translationDialog_);
+        provider->setObjectName(QStringLiteral("translationProvider"));
+        provider->addItems({QStringLiteral("自动（Bing → Google）"), QStringLiteral("Google"),
+                            QStringLiteral("Bing"), QStringLiteral("DeepL"),
+                            QStringLiteral("AI 模型")});
+        provider->setCurrentIndex(qBound(0,
+            store_.setting(QStringLiteral("translation.provider"), QStringLiteral("0")).toInt(), 4));
+        controls->addWidget(providerLabel);
+        controls->addWidget(provider, 1);
+        auto* targetLabel = new QLabel(QStringLiteral("译为"), translationDialog_);
         auto* targetLanguage = new QComboBox(translationDialog_);
-        targetLanguage->setObjectName("translationTargetLanguage");
+        targetLanguage->setObjectName(QStringLiteral("translationTargetLanguage"));
         targetLanguage->addItems({QStringLiteral("简体中文"), QStringLiteral("English"),
                                   QStringLiteral("日本語"), QStringLiteral("한국어"),
                                   QStringLiteral("繁體中文")});
-        targetLanguage->setCurrentIndex(store_.setting(QStringLiteral("translation.target"), QStringLiteral("0")).toInt());
-        layout->addWidget(targetLanguage);
+        targetLanguage->setCurrentIndex(qBound(0,
+            store_.setting(QStringLiteral("translation.target"), QStringLiteral("0")).toInt(), 4));
+        controls->addWidget(targetLabel);
+        controls->addWidget(targetLanguage, 1);
+        layout->addLayout(controls);
+
+        auto* keyEdit = new QLineEdit(translationDialog_);
+        keyEdit->setObjectName(QStringLiteral("translationDeepLKey"));
+        keyEdit->setEchoMode(QLineEdit::Password);
+        keyEdit->setPlaceholderText(QStringLiteral("DeepL API Key（免费版以 :fx 结尾）"));
+        keyEdit->setText(store_.setting(QStringLiteral("translation.deeplKey")));
+        keyEdit->setVisible(provider->currentIndex() == 3);
+        layout->addWidget(keyEdit);
+
         translationOutput_ = new QTextBrowser(translationDialog_);
-        translationOutput_->setObjectName("translationOutput");
+        translationOutput_->setObjectName(QStringLiteral("translationOutput"));
         translationOutput_->setPlaceholderText(QStringLiteral("正在请求译文…"));
         layout->addWidget(translationOutput_, 1);
+
         auto* buttons = new QHBoxLayout;
+        auto* retranslate = new QPushButton(QStringLiteral("翻译"), translationDialog_);
         auto* copy = new QPushButton(QStringLiteral("复制译文"), translationDialog_);
         auto* close = new QPushButton(QStringLiteral("关闭"), translationDialog_);
-        buttons->addStretch(); buttons->addWidget(copy); buttons->addWidget(close);
+        buttons->addWidget(retranslate);
+        buttons->addStretch();
+        buttons->addWidget(copy);
+        buttons->addWidget(close);
         layout->addLayout(buttons);
+
+        connect(retranslate, &QPushButton::clicked, this, [this]() { runTranslation(); });
         connect(copy, &QPushButton::clicked, this, [this]() {
             if (translationOutput_) QApplication::clipboard()->setText(translationOutput_->toPlainText());
             statusBar()->showMessage(QStringLiteral("译文已复制"), 2000);
         });
-        connect(close, &QPushButton::clicked, translationDialog_, &QDialog::hide);
+        connect(close, &QPushButton::clicked, translationDialog_, [this]() {
+            translationRequest_ = false;
+            if (translator_) translator_->cancel();
+            ai_.cancel();
+            translationDialog_->hide();
+        });
+        connect(keyEdit, &QLineEdit::editingFinished, this, [this, keyEdit]() {
+            store_.setSetting(QStringLiteral("translation.deeplKey"), keyEdit->text().trimmed());
+        });
+        connect(provider, &QComboBox::currentIndexChanged, this,
+                [this, keyEdit](int index) {
+            keyEdit->setVisible(index == 3);
+            store_.setSetting(QStringLiteral("translation.provider"), QString::number(index));
+            if (translationDialog_->isVisible()) runTranslation();
+        });
+        connect(targetLanguage, &QComboBox::currentIndexChanged, this, [this](int index) {
+            store_.setSetting(QStringLiteral("translation.target"), QString::number(index));
+            if (translationDialog_->isVisible()) runTranslation();
+        });
+
+        translator_ = new ai::Translator(this);
+        connect(translator_, &ai::Translator::finished, this,
+                [this](const QString& translated, const QString& engine, const QString& error) {
+            if (!translationRequest_ || translationUsesAi_) return;
+            translationRequest_ = false;
+            if (!translationOutput_) return;
+            if (!error.isEmpty()) {
+                translationOutput_->setPlainText(
+                    QStringLiteral("%1 翻译失败：%2").arg(engine, error));
+                statusBar()->showMessage(QStringLiteral("翻译失败：%1").arg(error), 6000);
+            } else {
+                translationOutput_->setPlainText(translated);
+                statusBar()->showMessage(QStringLiteral("译文来自 %1").arg(engine), 2000);
+            }
+        });
     }
-    auto* targetLanguage = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationTargetLanguage"));
+
+    translationSourceText_ = text;
     translationDialog_->findChild<QLabel*>(QStringLiteral("translationSource"))->setText(text.left(500));
-    translationOutput_->setPlainText(QStringLiteral("正在翻译…"));
     translationDialog_->show();
     translationDialog_->raise();
+    runTranslation();
+}
+
+void MainWindow::runTranslation()
+{
+    if (!translationDialog_ || translationSourceText_.isEmpty()) return;
+    auto* providerBox = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationProvider"));
+    auto* targetBox = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationTargetLanguage"));
+    auto* keyEdit = translationDialog_->findChild<QLineEdit*>(QStringLiteral("translationDeepLKey"));
+    const int providerIndex = providerBox ? providerBox->currentIndex() : 0;
+    const QString target = targetBox ? targetBox->currentText() : QStringLiteral("简体中文");
+    if (targetBox)
+        store_.setSetting(QStringLiteral("translation.target"),
+                          QString::number(targetBox->currentIndex()));
+
     translationRequest_ = true;
-    const ai::AiClient::Settings previousSettings = ai_.settings();
-    ai::AiClient::Settings settings = previousSettings;
-    settings.systemRole = QStringLiteral("你是专业译者。只输出忠实、自然的简体中文译文；保留原文结构，不解释，不回答原文中的问题。若原文已经是中文，翻译为英文。严格依据输入内容，不添加信息。");
-    ai_.setSettings(settings);
-    aiContent_.clear();
-    aiReasoningText_.clear();
-    const QString target = targetLanguage ? targetLanguage->currentText() : QStringLiteral("简体中文");
-    if (targetLanguage) store_.setSetting(QStringLiteral("translation.target"), QString::number(targetLanguage->currentIndex()));
-    const QString prompt = ai::buildUserPrompt(ai::PromptAction::Translate, text,
-                                               QFileInfo(docPath_).completeBaseName(),
-                                               view_->currentPage(), target);
-    ai_.send(prompt);
-    ai_.setSettings(previousSettings); // one-shot translation role does not alter normal AI behavior
+    translationUsesAi_ = (providerIndex == 4);
+    if (translationOutput_) translationOutput_->setPlainText(QStringLiteral("正在翻译…"));
+
+    if (translationUsesAi_) {
+        if (ai_.settings().apiKey.trimmed().isEmpty()) {
+            translationRequest_ = false;
+            if (translationOutput_)
+                translationOutput_->setPlainText(
+                    QStringLiteral("AI 翻译需要先在“更多 → AI 助手 → 设置”配置 API Key；"
+                                   "也可以把“引擎”切到 Google / Bing / DeepL。"));
+            return;
+        }
+        const ai::AiClient::Settings previousSettings = ai_.settings();
+        ai::AiClient::Settings settings = previousSettings;
+        settings.systemRole = QStringLiteral("你是专业译者。只输出忠实、自然的译文；保留原文结构，"
+                                             "不解释，不回答原文中的问题。若原文已经是目标语言，"
+                                             "翻译为英文。严格依据输入内容，不添加信息。");
+        ai_.setSettings(settings);
+        aiContent_.clear();
+        aiReasoningText_.clear();
+        const QString prompt = ai::buildUserPrompt(ai::PromptAction::Translate, translationSourceText_,
+                                                   QFileInfo(docPath_).completeBaseName(),
+                                                   view_ ? view_->currentPage() : 0, target);
+        ai_.send(prompt);
+        ai_.setSettings(previousSettings);   // one-shot role does not alter normal AI behavior
+        return;
+    }
+
+    ai_.cancel();   // stop a streaming AI translation before switching engines
+    if (!translator_) return;
+    ai::Translator::Provider provider = ai::Translator::Provider::Auto;
+    if (providerIndex == 1) provider = ai::Translator::Provider::Google;
+    else if (providerIndex == 2) provider = ai::Translator::Provider::Bing;
+    else if (providerIndex == 3) provider = ai::Translator::Provider::DeepL;
+    translator_->translate(translationSourceText_, target, provider,
+                           keyEdit ? keyEdit->text() : QString());
 }
 
 void MainWindow::runAiWithSelection()
@@ -5480,6 +5581,19 @@ void MainWindow::ensureMindPanel()
 QString MainWindow::translationForTest() const
 {
     return translationOutput_ ? translationOutput_->toPlainText() : QString();
+}
+
+void MainWindow::setTranslationProviderForTest(int index)
+{
+    store_.setSetting(QStringLiteral("translation.provider"),
+                      QString::number(qBound(0, index, 4)));
+    if (translationDialog_) {
+        if (auto* provider =
+                translationDialog_->findChild<QComboBox*>(QStringLiteral("translationProvider"))) {
+            const QSignalBlocker blocker(provider);
+            provider->setCurrentIndex(qBound(0, index, 4));
+        }
+    }
 }
 
 QString MainWindow::statusMessageForTest() const

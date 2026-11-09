@@ -94,10 +94,12 @@ int main(int argc, char** argv)
     settle();
     check(translateButton && !translateButton->isVisible(), QStringLiteral("clearing selection hides floating translate action"));
     w.storeSettingForTest(QStringLiteral("ai.key"), QString());
+    w.setTranslationProviderForTest(4);   // force the AI path: no network without a key
     w.view()->setSelection(Selection{0, 0, 5, {Quad::fromRect(QRectF(80, 120, 120, 18))}, QStringLiteral("bonjour")});
     w.translateSelectionForTest();
-    check(w.statusMessageForTest().contains(QStringLiteral("配置")),
-          QStringLiteral("unconfigured translation clearly asks for API setup without network access"));
+    check(w.translationForTest().contains(QStringLiteral("API Key")),
+          QStringLiteral("unconfigured AI translation clearly asks for API setup without network access"));
+    w.setTranslationProviderForTest(0);
     w.view()->clearSelection();
     check(w.view()->appearanceTheme() == 0, QStringLiteral("reader default appearance is paper white"));
     w.view()->setAppearanceTheme(1);

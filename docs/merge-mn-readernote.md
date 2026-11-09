@@ -135,6 +135,16 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 - 右侧 dock 的「脑图」标签此前从未接到数据（永远是空白）；现在与工作区脑图同步，
   并支持点击定位、双击改名。
 
+### 6.4 渲染清晰度与翻译源
+
+- PDF 页不再按 1x/72dpi 出图：`imageFor()` 取 `max(scale*dpr, 2.0)`，即至少 144dpi，
+  再交给 `QPainter` 降采样；高分屏按真实 DPR 叠加。视觉回归改为断言“≥144dpi + 覆盖物理像素”，
+  不再假设 dpr 比例严格 2x/3x。
+- 划词翻译新增 **Google**（keyless）、**Bing**（Edge `translate/auth` + `api-edge`）、
+  **DeepL**（官方 API，Key 存 settings；免费版以 `:fx` 结尾），以及原有 **AI 模型**。
+  “自动”优先 Bing 再 Google（大陆网络下 Bing 更常可达）；中文原文且目标为中文时自动改译英文。
+  DeepL 无 Key 时在输出区给出注册提示，不静默失败。
+
 ### 6.3 批量、拖拽、双文档（向 MarginNote 靠拢）
 
 - **脑图多选**：`Ctrl+点击`加减选、`Shift+拖`框选、`Ctrl+A` 全选、`Esc` 取消；

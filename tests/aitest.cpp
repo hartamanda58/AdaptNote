@@ -2,6 +2,7 @@
 // against scripts/fake_openai_server.py (auth header, request body, deltas, cancel).
 #include "ai/ai_client.h"
 #include "ai/prompts.h"
+#include "ai/translator.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -16,6 +17,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUrlQuery>
 
 #include <cstdio>
 
@@ -286,6 +288,53 @@ int main(int argc, char** argv)
 
     server.kill();
     server.waitForFinished(3000);
+
+    // ---- web translators: pure parsing / URL building (no network) ----
+    {
+        using an::ai::Translator;
+        check(Translator::targetCode(Translator::Provider::Google, QStringLiteral("简体中文")) ==
+                  QStringLiteral("zh-CN"),
+              QStringLiteral("Google target code for simplified Chinese"));
+        check(Translator::targetCode(Translator::Provider::Bing, QStringLiteral("繁體中文")) ==
+                  QStringLiteral("zh-Hant"),
+              QStringLiteral("Bing target code for traditional Chinese"));
+        check(Translator::targetCode(Translator::Provider::DeepL, QStringLiteral("English")) ==
+                  QStringLiteral("EN"),
+              QStringLiteral("DeepL target code is upper-case"));
+
+        const QUrl url = Translator::googleUrl(QStringLiteral("hello world"), QStringLiteral("简体中文"));
+        check(url.host() == QStringLiteral("translate.googleapis.com") &&
+                  QUrlQuery(url).queryItemValue(QStringLiteral("tl")) == QStringLiteral("zh-CN") &&
+                  QUrlQuery(url).queryItemValue(QStringLiteral("q")) == QStringLiteral("hello world"),
+              QStringLiteral("Google URL carries text and target"));
+
+        const QByteArray google =
+            R"([[["你好","hello",null,null,10]],null,"en"])";
+        check(Translator::parseGoogle(google) == QStringLiteral("你好"),
+              QStringLiteral("Google response parser"));
+        const QByteArray googleLines =
+            R"([[["Hello ","你好"],["world","世界"]],null,"zh-CN"])";
+        check(Translator::parseGoogle(googleLines) == QStringLiteral("Hello world"),
+              QStringLiteral("Google multi-segment parser keeps order"));
+
+        const QByteArray bing = R"([{"translations":[{"text":"你好","to":"zh-Hans"}]}])";
+        check(Translator::parseBing(bing) == QStringLiteral("你好"),
+              QStringLiteral("Bing response parser"));
+        const QByteArray deepl =
+            R"({"translations":[{"detected_source_language":"EN","text":"你好"}]})";
+        check(Translator::parseDeepL(deepl) == QStringLiteral("你好"),
+              QStringLiteral("DeepL response parser"));
+        const QString body = QString::fromUtf8(
+            Translator::deeplBody(QStringLiteral("hello world"), QStringLiteral("简体中文")));
+        check(body.contains(QStringLiteral("target_lang=ZH")) &&
+                  body.contains(QStringLiteral("text=hello")),
+              QStringLiteral("DeepL form body"));
+        check(Translator::providerName(Translator::Provider::DeepL) == QStringLiteral("DeepL"),
+              QStringLiteral("translator provider label"));
+        check(Translator::looksChinese(QStringLiteral("阅读的本质不是把书看完")) &&
+                  !Translator::looksChinese(QStringLiteral("hello world")),
+              QStringLiteral("Chinese source detection for target switching"));
+    }
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "AI CHECKS PASSED" : "AI CHECKS FAILED", g_fail);
     return g_fail == 0 ? 0 : 1;

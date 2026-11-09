@@ -126,16 +126,23 @@ int main(int argc, char** argv)
 
         check(!at1.isNull() && !at2.isNull() && !at3.isNull(),
               QStringLiteral("pages render at every dpr"));
-        const double ratio2 = at1.isNull() ? 0.0 : double(at2.width()) / double(at1.width());
-        const double ratio3 = at1.isNull() ? 0.0 : double(at3.width()) / double(at1.width());
-        check(qAbs(ratio2 - 2.0) < 0.06,
-              QStringLiteral("dpr 2 renders ~2x pixels (%1x -> %2x, ratio %3)")
-                  .arg(at1.width()).arg(at2.width()).arg(ratio2, 0, 'f', 2));
-        check(qAbs(ratio3 - 3.0) < 0.06,
-              QStringLiteral("dpr 3 renders ~3x pixels (ratio %1)").arg(ratio3, 0, 'f', 2));
-        check(at2.width() >= pageRect.width() * 1.9,
-              QStringLiteral("2x bitmap is not smaller than the logical page (%1 vs %2)")
-                  .arg(at2.width()).arg(pageRect.width()));
+        // Rendering is supersampled: 1x is promoted to >=144 dpi, and higher device
+        // pixel ratios add more pixels on top. Absolute checks are more meaningful than
+        // the old "exactly 2x/3x of dpr1" ratio, which the floor intentionally changes.
+        const QSizeF pagePt = v->engine()->pageSize(0);
+        const double logicalScale = pagePt.width() > 0 ? pageRect.width() / pagePt.width() : 1.0;
+        check(at1.width() >= pagePt.width() * 1.95,
+              QStringLiteral("1x render is supersampled to >=144 dpi (%1 of %2 pt)")
+                  .arg(at1.width()).arg(pagePt.width()));
+        check(at2.width() >= pagePt.width() * logicalScale * 2.0 * 0.98,
+              QStringLiteral("2x screen bitmap covers its physical pixels (%1)")
+                  .arg(at2.width()));
+        check(at3.width() >= pagePt.width() * logicalScale * 3.0 * 0.98,
+              QStringLiteral("3x screen bitmap covers its physical pixels (%1)")
+                  .arg(at3.width()));
+        check(at1.width() <= at2.width() && at2.width() < at3.width(),
+              QStringLiteral("higher dpr does not reduce the bitmap (%1/%2/%3)")
+                  .arg(at1.width()).arg(at2.width()).arg(at3.width()));
         v->setDevicePixelRatioOverride(0.0);   // back to the real screen
     }
 

@@ -304,3 +304,6 @@ QWidget#referencePill QToolButton {
     padding: 5px 8px; color: #1d1d1f; font-size: 12px;
 }
 QWidget#referencePill QToolButton:hover { background: #e2efff; color: #0a5bd3; }
+
+QLineEdit#translationDeepLKey { padding: 6px 8px; }
+QComboBox#translationProvider, QComboBox#translationTargetLanguage { padding: 4px 8px; }

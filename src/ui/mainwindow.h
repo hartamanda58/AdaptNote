@@ -5,6 +5,7 @@
 #include "render/mupdf_engine.h"
 #include "ai/ai_client.h"
 #include "ai/prompts.h"
+#include "ai/translator.h"
 #include "read/reader.h"
 #include "mind/mindmap.h"
 #include "ui/libraryview.h"
@@ -118,6 +119,7 @@ public:
     bool aiDockVisibleForTest() const;
     void translateSelectionForTest();
     QString translationForTest() const;
+    void setTranslationProviderForTest(int index);
     QString statusMessageForTest() const;
     // The mind-map panel (null until the workspace is built); tests use it to assert that
     // the map really shows the same notes the reader sees.
@@ -402,6 +404,10 @@ private:
     QAction* readAction_ = nullptr;
     an::read::Reader reader_;
     an::ai::AiClient ai_;
+    an::ai::Translator* translator_ = nullptr;
+    QString translationSourceText_;
+    bool translationUsesAi_ = false;
+    void runTranslation();
     QVector<an::ai::Role> aiRoles_;
     QComboBox* aiRoleCombo_ = nullptr;
     QComboBox* aiActionCombo_ = nullptr;

@@ -317,7 +317,11 @@ QImage PageView::imageFor(int page)
     // Render at scale * dpr physical pixels. The painter lays it into the logical page
     // rectangle, so on a 2x screen the bitmap maps 1:1 to device pixels instead of being
     // stretched up from a 1x image.
-    float renderScale = scale_ * dpr;
+    //
+    // PDF pages are vector art: at 100% zoom a 1x bitmap is only 72 dpi, which looks soft
+    // next to native UI text. Render at >=144 dpi and let QPainter downsample; this is
+    // effectively 2x supersampling for fit-width and normal zoom levels.
+    float renderScale = qMax(scale_ * dpr, 2.0f);
     const QSizeF pt = engine_->pageSize(page);
     if (pt.width() > 0 && pt.height() > 0) {
         // Guard against absurd allocations on very large pages at high zoom.
