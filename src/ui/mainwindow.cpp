@@ -5663,6 +5663,93 @@ void MainWindow::reorderMarkupsBatch(const QStringList& ids, const QString& grou
     statusBar()->showMessage(QStringLiteral("已重新排序 %1 条摘录").arg(moving.size()), 2000);
 }
 
+bool MainWindow::reorderMindGroup(const QString& draggedKey, const QString& beforeKey)
+{
+    const QString draggedId = groupIdOf(draggedKey);
+    const QString beforeId = groupIdOf(beforeKey);
+    if (draggedId.isEmpty() || draggedId == beforeId) return false;
+
+    const QVector<MindGroup> all = currentTopic_.isEmpty()
+                                       ? store_.mindGroups(docPath_)
+                                       : store_.mindGroupsForTopic(currentTopic_);
+    MindGroup dragged;
+    MindGroup target;
+    for (const MindGroup& g : all) {
+        if (g.id == draggedId) dragged = g;
+        if (!beforeId.isEmpty() && g.id == beforeId) target = g;
+    }
+    if (dragged.id.isEmpty()) return false;
+
+    // Groups belong to a document; dropping onto another book's group moves the dragged
+    // group to the end of its own document rather than stealing a foreign parent.
+    const bool crossDoc = !target.id.isEmpty() &&
+                          QFileInfo(target.docPath).absoluteFilePath() !=
+                              QFileInfo(dragged.docPath).absoluteFilePath();
+    const QString parentId = (!target.id.isEmpty() && !crossDoc) ? target.parentId : QString();
+    const QString insertBefore = crossDoc ? QString() : beforeId;
+
+    // Reject cycles: a group cannot be placed under one of its own descendants.
+    QString cursor = parentId;
+    while (!cursor.isEmpty()) {
+        if (cursor == draggedId) {
+            statusBar()->showMessage(QStringLiteral("不能把分组拖进它自己的子分组"), 3000);
+            return false;
+        }
+        QString next;
+        for (const MindGroup& g : all)
+            if (g.id == cursor) { next = g.parentId; break; }
+        cursor = next;
+    }
+
+    QVector<MindGroup> siblings;
+    for (const MindGroup& g : all) {
+        if (g.id == draggedId || g.deleted) continue;
+        if (g.parentId != parentId) continue;
+        if (QFileInfo(g.docPath).absoluteFilePath() !=
+            QFileInfo(dragged.docPath).absoluteFilePath())
+            continue;
+        siblings.append(g);
+    }
+    std::sort(siblings.begin(), siblings.end(), [](const MindGroup& a, const MindGroup& b) {
+        if (a.order != b.order) return a.order < b.order;
+        return a.name < b.name;
+    });
+
+    int insertAt = siblings.size();
+    if (!insertBefore.isEmpty()) {
+        for (int i = 0; i < siblings.size(); ++i)
+            if (siblings.at(i).id == insertBefore) { insertAt = i; break; }
+    }
+    MindGroup moved = dragged;
+    moved.parentId = parentId;
+    siblings.insert(insertAt, moved);
+
+    QVector<QPair<MindGroup, MindGroup>> pairs;
+    int order = 0;
+    for (const MindGroup& g : siblings) {
+        MindGroup after = g;
+        after.order = order * 10;
+        ++order;
+        if (after.order == g.order && after.parentId == g.parentId) continue;
+        pairs.append({g, after});
+    }
+    if (pairs.isEmpty()) return false;
+
+    QString draggedName = dragged.name;
+    QString targetName = target.name;
+    undo_->beginMacro(QStringLiteral("拖动分组"));
+    for (const auto& pair : pairs)
+        undo_->push(new MindGroupCommand(this, MindGroupCommand::Modify, pair.first, pair.second,
+                                         QStringLiteral("调整分组顺序")));
+    undo_->endMacro();
+    statusBar()->showMessage(targetName.isEmpty()
+                                 ? QStringLiteral("已把分组「%1」移到末尾").arg(draggedName)
+                                 : QStringLiteral("已把分组「%1」移到「%2」前")
+                                       .arg(draggedName, targetName),
+                             2500);
+    return true;
+}
+
 void MainWindow::showMapSelectionMenu(const QStringList& keys, const QPoint& globalPos)
 {
     QStringList ids;
@@ -5715,6 +5802,10 @@ void MainWindow::wireMindBatch(mind::MindMapView* view)
             });
     connect(view, &mind::MindMapView::selectionReorderRequested, this,
             &MainWindow::reorderMarkupsBatch);
+    connect(view, &mind::MindMapView::groupReorderRequested, this,
+            [this](const QString& draggedKey, const QString& beforeKey) {
+                if (reorderMindGroup(draggedKey, beforeKey)) rebuildMindMap();
+            });
     connect(view, &mind::MindMapView::selectionMenuRequested, this,
             &MainWindow::showMapSelectionMenu);
     connect(view, &mind::MindMapView::excerptDropped, this, &MainWindow::dropExcerpt);

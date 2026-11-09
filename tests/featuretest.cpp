@@ -112,8 +112,9 @@ int main(int argc, char** argv)
     if (auto* thumbs = w.findChild<QListWidget*>(QStringLiteral("pageThumbs"))) {
         check(thumbs->count() == w.view()->engine()->pageCount(),
               QStringLiteral("page thumbnails match the document (%1)").arg(thumbs->count()));
-        check(thumbs->item(0)->data(Qt::UserRole).toInt() == 0,
-              QStringLiteral("first thumbnail points at page 0"));
+        if (thumbs->count() > 0)
+            check(thumbs->item(0)->data(Qt::UserRole).toInt() == 0,
+                  QStringLiteral("first thumbnail points at page 0"));
     } else {
         check(false, QStringLiteral("page thumbnail tab exists"));
     }
@@ -210,7 +211,8 @@ int main(int argc, char** argv)
     extra.page = 0;
     extra.type = MarkupType::Highlight;
     extra.color = QColor("#3D8BFD");
-    extra.quads = demo.first().quads;
+    extra.quads = demo.isEmpty() ? QVector<Quad>{Quad::fromRect(QRectF(70, 120, 160, 16))}
+                                 : demo.first().quads;
     extra.text = QStringLiteral("撤销测试");
     extra.tags = {QStringLiteral("临时")};
     extra.created = extra.updated = QDateTime::currentMSecsSinceEpoch();
@@ -270,8 +272,9 @@ int main(int argc, char** argv)
                   .arg(before)
                   .arg(w.visibleMarkups().size()));
         // demo data already contains a 90-point stroke, so pick ours explicitly
+        const QVector<Markup> inkMarkups = w.visibleMarkups();
         const Markup* inkMarkup = nullptr;
-        for (const Markup& m : w.visibleMarkups())
+        for (const Markup& m : inkMarkups)
             if (m.type == MarkupType::Ink && m.ink.size() == 40) inkMarkup = &m;
         check(inkMarkup != nullptr,
               QStringLiteral("ink markup persisted with all 40 sample points"));
@@ -1723,6 +1726,45 @@ int main(int argc, char** argv)
                 if (m.id == noteId && m.mindGroup == groupId) grouped = true;
             check(grouped, QStringLiteral("right-dock map drag reparents a card"));
             w.undoForTest();
+        }
+    }
+
+    // The right-dock map uses the same drag handlers as the workspace map.
+    {
+        auto* rightMap = w.rightMindViewForTest();
+        const QVector<Markup> notes = w.visibleMarkups();
+        if (rightMap && !notes.isEmpty()) {
+            const QString groupId = w.createMindGroupForTest(QStringLiteral("右侧拖拽组"));
+            const QString noteId = notes.first().id;
+            rightMap->nodeReparented(noteId, QStringLiteral("group:") + groupId);
+            bool grouped = false;
+            for (const Markup& m : w.visibleMarkups())
+                if (m.id == noteId && m.mindGroup == groupId) grouped = true;
+            check(grouped, QStringLiteral("right-dock map drag reparents a card"));
+            w.undoForTest();
+        }
+    }
+
+    // Group cards can be reordered by dragging (and the change is one undo step).
+    {
+        const QString g1 = w.createMindGroupForTest(QStringLiteral("拖拽甲"));
+        const QString g2 = w.createMindGroupForTest(QStringLiteral("拖拽乙"));
+        const QString g3 = w.createMindGroupForTest(QStringLiteral("拖拽丙"));
+        if (!g1.isEmpty() && !g2.isEmpty() && !g3.isEmpty()) {
+            auto orderOf = [&](const QString& id) {
+                for (const MindGroup& g : w.mindGroupsForTest())
+                    if (g.id == id) return g.order;
+                return -1;
+            };
+            const int before1 = orderOf(g1);
+            const int before3 = orderOf(g3);
+            w.reorderMindGroupForTest(QStringLiteral("group:") + g3,
+                                      QStringLiteral("group:") + g1);
+            check(orderOf(g3) < orderOf(g1),
+                  QStringLiteral("group drag moves one group card before another"));
+            w.undoForTest();
+            check(orderOf(g1) == before1 && orderOf(g3) == before3,
+                  QStringLiteral("group drag is one undo step"));
         }
     }
 

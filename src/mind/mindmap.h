@@ -95,6 +95,8 @@ signals:
     // (empty = append), preserving their current relative order.
     void selectionReorderRequested(const QStringList& markupIds, const QString& groupKey,
                                    const QString& beforeId);
+    // Group cards can be dragged among siblings; beforeGroupKey empty means "move to the end".
+    void groupReorderRequested(const QString& groupKey, const QString& beforeGroupKey);
     // An excerpt dragged out of the document was dropped on a group/page/empty canvas.
     void excerptDropped(const QByteArray& payload, const QString& groupKey);
     void deleteRequested(const QString& key);
@@ -150,6 +152,7 @@ private:
     // External (document -> map) drag in progress; updateDropIndicator uses it to draw
     // feedback for a drag that has no internal dragMarkupId_.
     bool externalDropActive_ = false;
+    QString dragGroupKey_;
 
     QGraphicsTextItem* renameEditor_ = nullptr;
     QGraphicsItem* renameBackdrop_ = nullptr;

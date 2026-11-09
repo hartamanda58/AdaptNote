@@ -505,6 +505,20 @@ int main(int argc, char** argv)
             check(renamedKey == QStringLiteral("note:a") &&
                       renamedText == QStringLiteral("改名后的卡片"),
                   QStringLiteral("in-place editor commits the edited text"));
+            // Enter goes through the view while the text item is alive; the window then
+            // rebuilds the tree from the rename signal, exactly like renameCommitted.
+            QObject::connect(&view, &mind::MindMapView::renameCommitted, [&view](const QString&, const QString&) {
+                mind::Node copy = view.tree();
+                view.setTree(copy);
+            });
+            renamedText.clear();
+            view.beginInlineRename(QStringLiteral("note:a"));
+            view.setInlineRenameTextForTest(QStringLiteral("第二名字"));
+            QKeyEvent enterKey(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+            QApplication::sendEvent(&view, &enterKey);
+            QCoreApplication::processEvents();
+            check(renamedText == QStringLiteral("第二名字") && !view.inlineRenameActive(),
+                  QStringLiteral("Enter commits a rename even when the tree is rebuilt"));
             QContextMenuEvent context(QContextMenuEvent::Mouse, start, view.viewport()->mapToGlobal(start));
             QApplication::sendEvent(view.viewport(), &context);
             check(noteMenus == 1 && context.isAccepted(), QStringLiteral("right click on note opens its context menu request"));

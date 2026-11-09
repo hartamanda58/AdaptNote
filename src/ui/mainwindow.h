@@ -95,6 +95,12 @@ public:
     {
         reorderMarkupsBatch(ids, groupKey, beforeId);
     }
+    bool reorderMindGroupForTest(const QString& draggedKey, const QString& beforeKey)
+    {
+        return reorderMindGroup(draggedKey, beforeKey);
+    }
+    QVector<MindGroup> mindGroupsForTest() const { return store_.mindGroups(docPath_); }
+    QString currentDocPathForTest() const { return docPath_; }
     int mapSelectionCountForTest() const
     {
         return mindView_ ? mindView_->selectedKeys().size() : 0;
@@ -347,6 +353,7 @@ private:
     void colorMarkupsBatch(const QStringList& ids, const QColor& color);
     void reorderMarkupsBatch(const QStringList& ids, const QString& groupKey,
                              const QString& beforeId);
+    bool reorderMindGroup(const QString& draggedKey, const QString& beforeGroupKey);
     Markup markupById(const QString& id) const;
     void wireMindBatch(mind::MindMapView* view);
     void wireMindDrag(mind::MindMapView* view);

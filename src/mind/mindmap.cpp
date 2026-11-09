@@ -261,9 +261,33 @@ void MindMapView::clearDropIndicator()
 void MindMapView::updateDropIndicator(const QPointF& scenePos)
 {
     clearDropIndicator();
-    if (!scene_ || (dragMarkupId_.isEmpty() && !externalDropActive_) ||
+    if (!scene_ ||
+        (dragMarkupId_.isEmpty() && dragGroupKey_.isEmpty() && !externalDropActive_) ||
         (!dragMoved_ && !externalDropActive_))
         return;
+
+    if (!dragGroupKey_.isEmpty()) {
+        const QColor accent(0x2f, 0x6b, 0xd8);
+        const QString target = groupKeyAt(scenePos);
+        if (target.isEmpty() || target == dragGroupKey_) {
+            QFont font;
+            font.setPixelSize(11);
+            auto* hint = scene_->addSimpleText(QStringLiteral("放开：移到分组末尾"), font);
+            hint->setBrush(QBrush(QColor(0x98, 0xa2, 0xb3)));
+            hint->setPos(scenePos + QPointF(14, 8));
+            hint->setZValue(20);
+            dropIndicator_ = hint;
+            return;
+        }
+        const QRectF box = rectForKey(target);
+        if (!box.isNull()) {
+            auto* line = scene_->addLine(box.left() - 2, box.top() - 6, box.right() + 2,
+                                         box.top() - 6, QPen(accent, 2.6));
+            line->setZValue(20);
+            dropIndicator_ = line;
+        }
+        return;
+    }
 
     QString group;
     QString beforeId;
@@ -349,7 +373,7 @@ void MindMapView::mouseMoveEvent(QMouseEvent* event)
         return;
     }
     if (nodePressActive_ && (event->pos() - pressStart_).manhattanLength() >= QApplication::startDragDistance()) {
-        if (!dragMarkupId_.isEmpty()) {
+        if (!dragMarkupId_.isEmpty() || !dragGroupKey_.isEmpty()) {
             dragStartScene_ = mapToScene(pressStart_);
             dragMoved_ = true;
             nodePressActive_ = false;
@@ -363,7 +387,7 @@ void MindMapView::mouseMoveEvent(QMouseEvent* event)
             nodePressActive_ = false;
         }
     }
-    if (!dragMarkupId_.isEmpty()) {
+    if (!dragMarkupId_.isEmpty() || !dragGroupKey_.isEmpty()) {
         const QPointF scenePos = mapToScene(event->pos());
         if (!dragMoved_ && (scenePos - dragStartScene_).manhattanLength() > 6.0)
             dragMoved_ = true;
@@ -375,11 +399,21 @@ void MindMapView::mouseMoveEvent(QMouseEvent* event)
 void MindMapView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) { QGraphicsView::mouseDoubleClickEvent(event); return; }
+    if (renameEditor_) {
+        const QPointF scenePos = mapToScene(event->pos());
+        if (renameEditor_->sceneBoundingRect().contains(scenePos)) {
+            QGraphicsView::mouseDoubleClickEvent(event);   // select a word, not a new rename
+            return;
+        }
+    }
     if (scene_) {
         const QString key = keyAt(mapToScene(event->pos()));
         if (!key.isEmpty()) {
             setSelectedKey(key);
-            beginInlineRename(key);
+            if (key.startsWith(QStringLiteral("group:")))
+                emit renameRequested(key);
+            else
+                beginInlineRename(key);
             event->accept();
             return;
         }
@@ -402,10 +436,14 @@ protected:
     void keyPressEvent(QKeyEvent* event) override
     {
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            // Accept before committing: an unaccepted key would bubble to the view and
+            // trigger its "create sibling" shortcut while the rename dialog is closing.
+            event->accept();
             queueCommit(true);
             return;
         }
         if (event->key() == Qt::Key_Escape) {
+            event->accept();
             queueCommit(false);
             return;
         }
@@ -529,6 +567,17 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if (!dragGroupKey_.isEmpty() && dragMoved_) {
+        const QString dragged = dragGroupKey_;
+        const QString target = groupKeyAt(mapToScene(event->pos()));
+        dragGroupKey_.clear();
+        dragMoved_ = false;
+        nodePressActive_ = false;
+        pressKey_.clear();
+        dragContainerKey_.clear();
+        if (target != dragged) emit groupReorderRequested(dragged, target);
+        return;
+    }
     if (nodePressActive_) {
         nodePressActive_ = false;
         const QString key = pressKey_;
@@ -580,6 +629,7 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
         const QString sourceContainer = dragContainerKey_;
 
         dragMarkupId_.clear();
+        dragGroupKey_.clear();
         dragMoved_ = false;
         nodePressActive_ = false;
         pressKey_.clear();
@@ -611,6 +661,23 @@ void MindMapView::mouseReleaseEvent(QMouseEvent* event)
 
 void MindMapView::keyPressEvent(QKeyEvent* event)
 {
+    // If the inline editor somehow does not receive the key (focus can move while the
+    // scene is rebuilt), never let Enter fall through to "create sibling".
+    if (renameEditor_) {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter ||
+            event->key() == Qt::Key_Escape) {
+            const bool commit = event->key() != Qt::Key_Escape;
+            event->accept();
+            // Queue the commit: deleting the focused QGraphicsTextItem from inside a key
+            // event that may still be travelling through the scene corrupts the heap.
+            QMetaObject::invokeMethod(
+                this, [this, commit]() { commitInlineRename(commit); }, Qt::QueuedConnection);
+            return;
+        }
+        // Do not let map shortcuts (space/Tab/Delete...) rebuild the scene while renaming.
+        event->accept();
+        return;
+    }
     if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_A) {
         selectAllNotes();
         event->accept();
@@ -659,7 +726,11 @@ void MindMapView::keyPressEvent(QKeyEvent* event)
     if (!selectedKey_.isEmpty()) {
         switch (event->key()) {
         case Qt::Key_F2:
-            beginInlineRename(selectedKey_);
+            // Groups get the safe rename dialog; only note cards use the inline editor.
+            if (selectedKey_.startsWith(QStringLiteral("group:")))
+                emit renameRequested(selectedKey_);
+            else
+                beginInlineRename(selectedKey_);
             event->accept();
             return;
         case Qt::Key_Delete:
@@ -707,6 +778,17 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
         return;
     }
     if (event->button() != Qt::LeftButton) { QGraphicsView::mousePressEvent(event); return; }
+    if (renameEditor_) {
+        const QPointF scenePos = mapToScene(event->pos());
+        // Clicks inside the editor must reach the text item so the caret can be placed;
+        // clicks outside commit the rename and then proceed as a normal card click.
+        if (renameEditor_->sceneBoundingRect().contains(scenePos) ||
+            (renameBackdrop_ && renameBackdrop_->sceneBoundingRect().contains(scenePos))) {
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
+        commitInlineRename(true);
+    }
     if (scene_) {
         const QPointF scenePos = mapToScene(event->pos());
 
@@ -768,6 +850,7 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             pressKey_ = key;
             pressStart_ = event->pos();
             nodePressActive_ = true;
+            dragGroupKey_ = key.startsWith(QStringLiteral("group:")) ? key : QString();
             dragMarkupId_ = key.startsWith(QStringLiteral("note:")) ? key.mid(5) : markupIdAt(scenePos);
             dragContainerKey_ = (key.startsWith(QStringLiteral("page:")) ||
                                  key.startsWith(QStringLiteral("docpage:")) ||
@@ -786,6 +869,7 @@ void MindMapView::mousePressEvent(QMouseEvent* event)
             return;
         }
         setSelectedKey(QString());
+        dragGroupKey_.clear();
         if (event->button() == Qt::LeftButton) {
             pressKey_.clear();
             pressStart_ = event->pos();
@@ -1214,6 +1298,15 @@ void MindMapView::drawFreeLinks(const QHash<QString, QRectF>& rectOf)
 
 void MindMapView::rebuild()
 {
+    // A rebuild clears every scene item, including a live inline editor. Drop the editor
+    // pointers first so a queued commit cannot dereference a deleted QGraphicsTextItem.
+    if (renameEditor_) {
+        // scene_->clear() below owns and deletes these items; just forget the pointers so
+        // a queued commit cannot dereference them after the clear.
+        renameEditor_ = nullptr;
+        renameBackdrop_ = nullptr;
+        renameKey_.clear();
+    }
     dropIndicator_ = nullptr;   // destroyed by clear() below
     scene_->clear();
     nodeItems_ = 0;
