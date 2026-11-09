@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867` → `40403e3`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,42 +17,44 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-09，DeepLX 版）
+### 最近一次验收（2026-11-09，界面刷新版）
 
 ```text
-run 42652722172  Windows 构建（main @ d6a3867）  success
-12/12 套测试在 Windows runner 上全部 PASSED
-新增断言：DeepLX URL 归一化/请求体/响应解析 + 本机 fake DeepLX 真实请求（Token/401）
-自带 tesseract --list-langs 通过，ecdict 43,823 条 / 8 MB，zip 76.0 MB
-附带 38 秒整体演示 + 卡片/分组拖拽片段 + 体验包
+run 42669136585  Windows 构建（main @ 40403e3）  success
+12/12 套测试在 Windows runner 上全部 PASSED，视觉回归通过
+改动集中在 QSS/绘制/图标：无数据库或同步格式变化
+自带 tesseract + ECDICT，zip 76.0 MB
+附带整理/阅读/翻译三张截图 + 38 秒演示 + 体验包
 ```
 
-之前全绿：42644688948（cd43fb9）、42578862213（dfa3933）、42457738576（1bfc57c）、
-42447994594（1ca897c）、42444699623（edb6c40）、42433464805（7ccc5d1）、
-42393475215（818dcfb）、42387890013（01c238b）、42373627839（58efc35）、
-42353005512（900e60a）。
+之前全绿：42652722172（d6a3867）、42644688948（cd43fb9）、42578862213（dfa3933）、
+42457738576（1bfc57c）、42447994594（1ca897c）、42444699623（edb6c40）、
+42433464805（7ccc5d1）、42393475215（818dcfb）、42387890013（01c238b）、
+42373627839（58efc35）、42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-windows-x64-deeplx.zip
-sha256: fd923cf90f74fc13870ec4f79d37b81e8be618e3959cafa989b67384c8bb58d3
+https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-windows-x64-ui.zip
+sha256: 8f7f57ee2f3c683b0fdf583195b956dd9db3ac8ca10a99e2281b5b7e55f811a0
 ```
 
-**DeepLX 版**（压缩 76 MB / 解压 ~150 MB）：划词翻译新增免费 **DeepLX**（默认
-`http://127.0.0.1:1188/translate`，可填自建/公开实例和 Token），并保留 Google / Bing /
-DeepL 官方 API / AI；PDF 至少 144dpi 超采样（高分屏再乘 DPR）。此前的拖拽、折叠、
-参考窗格标注、双文档并排、多选批量都在。
+**界面刷新版**（压缩 76 MB / 解压 ~150 MB）：暖纸色外壳、统一线性图标、圆角脑图卡片
+（色条/阴影/渐变根节点）、白色摘录卡片、圆角页面与柔和投影；功能不变（DeepLX/Google/
+Bing/DeepL/AI 翻译、拖拽、分组、双文档、词卡、OCR 都在）。
 
-- 38 秒整体演示：`releases/download/deeplx-d6a3867/AdaptNote-demo.mp4`
+- 整理模式截图：`shots/merged-ui-main.png`
+- 阅读模式截图：`shots/merged-ui-read.png`
+- 划词翻译截图：`shots/merged-translate.png`
+- 38 秒整体演示：`releases/download/ui-40403e3/AdaptNote-demo.mp4`
   （sha256 48f7ae6f…）
-- 10 秒卡片拖拽：`releases/download/deeplx-d6a3867/AdaptNote-map-drag.mp4`
+- 10 秒卡片拖拽：`releases/download/ui-40403e3/AdaptNote-map-drag.mp4`
   （sha256 5405b3c2…）
-- 6 秒分组拖拽：`releases/download/deeplx-d6a3867/AdaptNote-group-drag.mp4`
+- 6 秒分组拖拽：`releases/download/ui-40403e3/AdaptNote-group-drag.mp4`
   （sha256 89419ada…）
-- 体验包：`releases/download/deeplx-d6a3867/AdaptNote-demo-pack-d6a3867.zip`
-  （sha256 4b7b751d…）
+- 体验包：`releases/download/ui-40403e3/AdaptNote-demo-pack-40403e3.zip`
+  （sha256 72dcb08a…）
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -63,10 +65,10 @@ DeepL 官方 API / AI；PDF 至少 144dpi 超采样（高分屏再乘 DPR）。�
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（cd43fb9，清晰渲染 + Google/Bing/DeepL）：
-`releases/download/sharp-translate-cd43fb9/AdaptNote-windows-x64-sharp.zip`
-更早：dfa3933（分组拖拽）、1bfc57c（卡片拖拽三处打通）、
-1ca897c（演示版+布局修复）、edb6c40（全部折叠/参考标注）。
+上一个版本（d6a3867，DeepLX 免费翻译）：
+`releases/download/deeplx-d6a3867/AdaptNote-windows-x64-deeplx.zip`
+更早：cd43fb9（清晰渲染 + Google/Bing/DeepL）、dfa3933（分组拖拽）、
+1bfc57c（卡片拖拽三处打通）、1ca897c（演示版+布局修复）。
 更早：7ccc5d1（折叠/排序/参考记忆）、818dcfb（多选/拖拽/双文档）、
 01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：
