@@ -2,10 +2,11 @@
 
 ## 演示
 
-- [10 秒脑图拖拽片段](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-map-drag.mp4)
-- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-demo.mp4)
-- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-demo-pack-1bfc57c.zip)
-- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/map-drag-1bfc57c/AdaptNote-windows-x64-mapdrag.zip
+- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-group-drag.mp4)
+- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-map-drag.mp4)
+- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-demo-pack-dfa3933.zip)
+- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-windows-x64-groupdrag.zip
 - 截图：`shots/merged-*.png`
 
 
