@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,42 +17,40 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-09，分组卡片拖拽版）
+### 最近一次验收（2026-11-09，渲染/翻译版）
 
 ```text
-run 42578862213  Windows 构建（main @ dfa3933）  success
+run 42644688948  Windows 构建（main @ cd43fb9）  success
 12/12 套测试在 Windows runner 上全部 PASSED
-新增断言：分组拖动 + 单步撤销、右侧 dock 拖动、分组改名对话框路径
-Windows runner 当次下载 tesseract/ECDICT 失败（7z/下载超时），zip 仅 41 MB；
-已用上一版**已校验**的 ocr\ 与 data\ecdict.db 补回并重新打包，zip 78 MB，
-最终包 sha256 已二次下载核对（详见下方）
-附带 38 秒整体演示 + 10 秒卡片拖拽 + 6 秒分组拖拽 + 体验包
+新增断言：≥144dpi 渲染契约、翻译 URL/JSON/form 解析、中文源检测、目标语言码
+自带 tesseract --list-langs 通过，ecdict 43,823 条 / 8 MB，zip 76.0 MB
+附带 38 秒整体演示 + 卡片/分组拖拽片段 + 体验包
 ```
 
-之前全绿：42457738576（1bfc57c）、42447994594（1ca897c）、42444699623（edb6c40）、
-42433464805（7ccc5d1）、42393475215（818dcfb）、42387890013（01c238b）、
-42373627839（58efc35）、42353005512（900e60a）。
+之前全绿：42578862213（dfa3933）、42457738576（1bfc57c）、42447994594（1ca897c）、
+42444699623（edb6c40）、42433464805（7ccc5d1）、42393475215（818dcfb）、
+42387890013（01c238b）、42373627839（58efc35）、42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/group-drag-dfa3933/AdaptNote-windows-x64-groupdrag.zip
-sha256: 71d0e8bcf21a26b6e2b4b00ea1a7b9d69e4a636405c0d808e7ac36beb6c7ee30
+https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-windows-x64-sharp.zip
+sha256: 051173b6566b0be387516555c1117c79d00b4a401d958522e71d1c1795a85578
 ```
 
-**分组拖拽版**（压缩 78 MB / 解压 ~150 MB）：分组卡片可拖到同级分组前/末尾（单步撤销），
-分组双击/F2 弹窗改名，右击新建子分组/删除；笔记卡片仍支持归组、组内排序、多选整组移动、
-跨书移动出处；另有全部折叠、参考窗格标注、多选批量、原文拖入脑图、双文档并排、手势缩放。
+**清晰渲染 / 多翻译源版**（压缩 76 MB / 解压 ~150 MB）：PDF 至少 144dpi 超采样（高分屏再乘 DPR），
+划词翻译可选 Google / Bing / DeepL / AI（自动优先 Bing，再 Google；中文原文自动改译英文）；
+此前的分组/卡片拖拽、全部折叠、参考窗格标注、双文档并排、多选批量、原文拖入脑图都在。
 
-- 38 秒整体演示：`releases/download/group-drag-dfa3933/AdaptNote-demo.mp4`
+- 38 秒整体演示：`releases/download/sharp-translate-cd43fb9/AdaptNote-demo.mp4`
   （sha256 48f7ae6f…）
-- 10 秒卡片拖拽：`releases/download/group-drag-dfa3933/AdaptNote-map-drag.mp4`
+- 10 秒卡片拖拽：`releases/download/sharp-translate-cd43fb9/AdaptNote-map-drag.mp4`
   （sha256 5405b3c2…）
-- 6 秒分组拖拽：`releases/download/group-drag-dfa3933/AdaptNote-group-drag.mp4`
+- 6 秒分组拖拽：`releases/download/sharp-translate-cd43fb9/AdaptNote-group-drag.mp4`
   （sha256 89419ada…）
-- 体验包：`releases/download/group-drag-dfa3933/AdaptNote-demo-pack-dfa3933.zip`
-  （sha256 2dd2786f…）
+- 体验包：`releases/download/sharp-translate-cd43fb9/AdaptNote-demo-pack-cd43fb9.zip`
+  （sha256 6897bdd3…）
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -63,10 +61,10 @@ sha256: 71d0e8bcf21a26b6e2b4b00ea1a7b9d69e4a636405c0d808e7ac36beb6c7ee30
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（1bfc57c，脑图卡片拖拽三处打通）：
-`releases/download/map-drag-1bfc57c/AdaptNote-windows-x64-mapdrag.zip`
-更早：1ca897c（演示版+布局修复）、edb6c40（全部折叠/参考标注）、
-7ccc5d1（折叠/排序/参考记忆）。
+上一个版本（dfa3933，分组卡片拖拽）：
+`releases/download/group-drag-dfa3933/AdaptNote-windows-x64-groupdrag.zip`
+更早：1bfc57c（卡片拖拽三处打通）、1ca897c（演示版+布局修复）、
+edb6c40（全部折叠/参考标注）。
 更早：7ccc5d1（折叠/排序/参考记忆）、818dcfb（多选/拖拽/双文档）、
 01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：
@@ -292,7 +290,9 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 5. 主题 WebDAV **未做真实双机验证**（只有本地 Python DAV 测试）；本地目录/S3 也只在测试里验过
 6. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
 7. 分组只能拖到**同级**位置，不能拖成另一分组的子分组；暂未做“全部折叠到某一层”
-8. 参考窗格可标注但右栏摘录列表仍只列主文档；真实数位板/Anki/XMind/WebDAV 仍未人工验收
+8. 参考窗格可标注但右栏摘录列表仍只列主文档；Google 在部分网络需代理，
+   Bing 的 Edge 接口与 DeepL 也可能被网络拦截，Auto 会 Bing→Google 回退
+9. DeepL 只支持官方 API Key（免费版 :fx），未做无 Key 的网页接口；真实数位板/Anki/XMind/WebDAV 仍未人工验收
 9. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
 
 ---
