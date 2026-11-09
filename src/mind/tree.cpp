@@ -26,6 +26,7 @@ Node buildFromNotes(const QString& docTitle, const QVector<Markup>& markups,
 
     auto leafOf = [](const Markup& m) {
         Node leaf;
+        leaf.accent = m.color;
         QString text = m.text.simplified();
         if (text.isEmpty()) text = m.comment.simplified();
         if (text.isEmpty()) {

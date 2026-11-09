@@ -27,6 +27,7 @@ struct Node {
     QString comment;    // the reader's own note (may be empty)
     QString source;     // human readable origin, e.g. "第 3 页" / "第 2 章"
     bool isGroup = false;
+    QColor accent;      // note colour, used for the card's left stripe
 };
 
 // One document inside a reading topic (cross-document mind map).

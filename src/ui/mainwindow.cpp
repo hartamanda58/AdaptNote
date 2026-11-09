@@ -251,7 +251,7 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const override
     {
-        return QSize(qMax(120, option.rect.width()), 66);
+        return QSize(qMax(120, option.rect.width()), 78);
     }
 
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
@@ -259,54 +259,59 @@ public:
     {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, true);
-        const QRect row = option.rect.adjusted(3, 2, -4, -2);
+        const QRect row = option.rect.adjusted(6, 3, -8, -3);
         const bool selected = option.state & QStyle::State_Selected;
         const bool hovered = option.state & QStyle::State_MouseOver;
-        if (selected || hovered) {
-            painter->setPen(selected ? QColor("#b9d4ff") : Qt::NoPen);
-            painter->setBrush(selected ? QColor("#dfeaff") : QColor("#f2f4f7"));
-            painter->drawRoundedRect(row, 9, 9);
-        }
+
+        // Every excerpt is a small white card; hover lifts it, selection tints it.
+        painter->setPen(QPen(selected ? QColor("#b9d4ff") : hovered ? QColor("#dbe6f8")
+                                                                   : QColor("#e8ebf1"),
+                            1.0));
+        painter->setBrush(selected ? QColor("#eef5ff") : hovered ? QColor("#f8faff")
+                                                                 : QColor("#ffffff"));
+        painter->drawRoundedRect(row, 10, 10);
 
         const QColor color = index.data(Qt::UserRole + 6).value<QColor>();
         if (color.isValid()) {
             painter->setPen(Qt::NoPen);
             painter->setBrush(color);
-            painter->drawRoundedRect(QRect(row.left() + 6, row.top() + 8, 3, row.height() - 16),
-                                     1.5, 1.5);
+            painter->drawRoundedRect(QRectF(row.left() + 10, row.top() + 11, 3,
+                                            row.height() - 22), 1.5, 1.5);
         }
 
-        const int left = row.left() + 16;
-        const int right = row.right() - 8;
+        const int left = row.left() + 20;
+        const int right = row.right() - 10;
         QFont meta = option.font;
-        meta.setPointSizeF(8.5);
+        meta.setPointSizeF(8.8);
         painter->setFont(meta);
-        painter->setPen(QColor("#8a8a8e"));
+        painter->setPen(QColor("#8590a2"));
         const QString kind = index.data(Qt::UserRole + 2).toString();
         const QString page = QStringLiteral("P%1").arg(index.data(Qt::UserRole + 1).toInt());
-        painter->drawText(QRect(left, row.top() + 6, right - left - 44, 15),
+        painter->drawText(QRect(left, row.top() + 8, right - left - 44, 15),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(kind, Qt::ElideRight, right - left - 48));
-        painter->drawText(QRect(right - 42, row.top() + 6, 42, 15),
+        painter->drawText(QRect(right - 42, row.top() + 8, 42, 15),
                           Qt::AlignRight | Qt::AlignVCenter, page);
 
         QFont quoteFont = option.font;
-        quoteFont.setPointSizeF(11.0);
+        quoteFont.setPointSizeF(11.2);
         quoteFont.setWeight(QFont::DemiBold);
         painter->setFont(quoteFont);
-        painter->setPen(QColor("#1d1d1f"));
+        painter->setPen(QColor("#111827"));
         const QString quote = index.data(Qt::UserRole + 3).toString();
-        painter->drawText(QRect(left, row.top() + 22, right - left, 20),
+        painter->drawText(QRect(left, row.top() + 25, right - left, 20),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(quote, Qt::ElideRight, right - left));
 
-        painter->setFont(meta);
-        painter->setPen(QColor("#6b6b70"));
+        QFont secondFont = option.font;
+        secondFont.setPointSizeF(9.2);
+        painter->setFont(secondFont);
+        painter->setPen(QColor("#667085"));
         const QString comment = index.data(Qt::UserRole + 4).toString();
         const QString tags = index.data(Qt::UserRole + 5).toString();
         QString second = comment.isEmpty() ? tags : comment;
         if (second.isEmpty()) second = index.data(Qt::UserRole + 7).toString();
-        painter->drawText(QRect(left, row.top() + 43, right - left, 16),
+        painter->drawText(QRect(left, row.top() + 48, right - left, 16),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(second, Qt::ElideRight, right - left));
         painter->restore();
@@ -390,152 +395,249 @@ QString identityKey(const QString& docPath)
                 .left(16)));
 }
 
-QIcon glyphIcon(const QString& kind, const QColor& accent = QColor(0x3d, 0x8b, 0xfd))
+QIcon glyphIcon(const QString& kind, const QColor& accent = QColor())
 {
-    QPixmap pm(20, 20);
+    // One line-art family for the whole chrome. 2x pixmap + round caps keeps the icons
+    // crisp on high-DPI screens and visually consistent with the rounded panels.
+    QPixmap pm(40, 40);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
+    p.scale(2.0, 2.0);
+
+    const QColor ink(0x3f, 0x46, 0x52);
+    const QColor blue = accent.isValid() ? accent : QColor(0x2f, 0x6b, 0xff);
+    const QColor soft(0xe8, 0xf0, 0xff);
+    const QColor yellow(0xf6, 0xc9, 0x44);
+    const QColor red(0xe0, 0x5a, 0x52);
+    const QColor amber(0xb4, 0x7a, 0x12);
+    QPen pen(ink, 1.5);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    p.setPen(pen);
 
     if (kind == "open") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 1.4));
-        p.setBrush(QColor(0xf2, 0xc4, 0x4d));
-        QPainterPath path;
-        path.moveTo(3, 6);
-        path.lineTo(8, 6);
-        path.lineTo(9.5, 8);
-        path.lineTo(17, 8);
-        path.lineTo(17, 16);
-        path.lineTo(3, 16);
-        path.closeSubpath();
-        p.drawPath(path);
+        QPainterPath folder;
+        folder.moveTo(2.6, 6.2);
+        folder.lineTo(7.6, 6.2);
+        folder.lineTo(9.1, 8.0);
+        folder.lineTo(17.4, 8.0);
+        folder.lineTo(17.4, 15.6);
+        folder.lineTo(2.6, 15.6);
+        folder.closeSubpath();
+        p.setPen(QPen(blue, 1.5));
+        p.setBrush(soft);
+        p.drawPath(folder);
+        p.setPen(QPen(QColor(0x2f, 0x6b, 0xff, 90), 1.2));
+        p.drawLine(3.6, 10.2, 16.4, 10.2);
     } else if (kind == "highlight") {
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0xff, 0xd5, 0x00, 190));
-        p.drawRect(3, 10, 14, 5);
-        p.setPen(QPen(QColor(0x8a, 0x6d, 0x00), 2));
-        p.drawLine(4, 6, 16, 6);
+        p.setBrush(yellow);
+        QPainterPath marker;
+        marker.addRoundedRect(QRectF(3.2, 9.6, 13.6, 4.6), 2.1, 2.1);
+        p.drawPath(marker);
+        p.setPen(QPen(QColor(0xd9, 0xa5, 0x1a), 1.2));
+        p.drawLine(4.6, 8.1, 15.4, 8.1);
+        p.setPen(QPen(ink, 1.4));
+        p.drawLine(4.2, 16.7, 15.8, 16.7);
     } else if (kind == "underline") {
-        p.setPen(QPen(QColor(0x33, 0x33, 0x33), 2));
-        p.drawLine(3, 7, 17, 7);
-        p.setPen(QPen(QColor(0x34, 0xa8, 0x53), 2.4));
-        p.drawLine(3, 13, 17, 13);
+        p.setPen(QPen(ink, 1.5));
+        p.drawLine(3.4, 5.4, 16.6, 5.4);
+        p.drawLine(3.4, 9.2, 13.8, 9.2);
+        p.setPen(QPen(blue, 2.0));
+        p.drawLine(3.4, 14.4, 16.6, 14.4);
     } else if (kind == "squiggly") {
-        p.setPen(QPen(QColor(0x33, 0x33, 0x33), 2));
-        p.drawLine(3, 5, 17, 5);
-        p.setPen(QPen(QColor(0xd9, 0x30, 0x25), 1.6));
-        QPainterPath path;
-        path.moveTo(3, 12);
-        for (int x = 3; x <= 17; x += 3) {
-            path.lineTo(x + 1.5, 9.5);
-            path.lineTo(x + 3, 12);
+        p.setPen(QPen(ink, 1.5));
+        p.drawLine(3.4, 5.6, 16.6, 5.6);
+        p.setPen(QPen(red, 1.5));
+        QPainterPath wave;
+        wave.moveTo(3.4, 12.2);
+        for (int x = 3; x <= 16; x += 3) {
+            wave.cubicTo(x + 0.8, 10.2, x + 2.2, 10.2, x + 3.0, 12.2);
         }
-        p.drawPath(path);
+        p.drawPath(wave);
     } else if (kind == "note") {
-        p.setPen(QPen(QColor(0xa66a, 0x3a, 0x00), 1));
-        p.setBrush(QColor(0xff, 0xf0, 0xb3));
-        p.drawRoundedRect(QRectF(3, 3, 14, 14), 2, 2);
-        p.setPen(QPen(QColor(0x9b, 0x76, 0x16), 1));
-        p.drawLine(6, 7, 14, 7); p.drawLine(6, 10, 14, 10); p.drawLine(6, 13, 11, 13);
+        p.setPen(QPen(amber, 1.4));
+        p.setBrush(QColor(0xff, 0xf6, 0xdb));
+        QPainterPath page;
+        page.addRoundedRect(QRectF(4.0, 3.0, 12.0, 14.0), 2.4, 2.4);
+        p.drawPath(page);
+        p.setPen(QPen(QColor(0xb4, 0x7a, 0x12, 170), 1.2));
+        p.drawLine(6.6, 7.2, 13.4, 7.2);
+        p.drawLine(6.6, 10.2, 13.4, 10.2);
+        p.drawLine(6.6, 13.2, 10.9, 13.2);
     } else if (kind == "pen") {
-        p.setPen(QPen(QColor(0x4b, 0x55, 0x63), 1.2));
-        p.setBrush(QColor(0xd9, 0xe7, 0xfb));
-        QPolygonF nib{{4, 15}, {14, 4}, {17, 7}, {7, 17}};
+        p.setPen(QPen(ink, 1.3));
+        p.setBrush(QColor(0xe2, 0xec, 0xfb));
+        QPolygonF nib{{3.6, 16.2}, {14.6, 4.0}, {17.0, 6.6}, {6.2, 17.2}};
         p.drawPolygon(nib);
-        p.setPen(QPen(accent, 2)); p.drawLine(3, 18, 8, 16);
+        p.setPen(QPen(QColor(0x2f, 0x6b, 0xff), 2.0));
+        p.drawLine(2.8, 17.2, 7.8, 15.6);
     } else if (kind == "eraser") {
-        p.setPen(QPen(QColor(0xa0, 0x4a, 0x4a), 1.1));
-        p.setBrush(QColor(0xf7, 0xce, 0xd0));
-        QPolygonF body{{4, 13}, {12, 4}, {18, 9}, {10, 17}};
-        p.drawPolygon(body);
-        p.setPen(QPen(QColor(0xa0, 0x4a, 0x4a), 1)); p.drawLine(8, 13, 13, 17);
+        p.save();
+        p.translate(10, 10);
+        p.rotate(-38);
+        p.setPen(QPen(QColor(0xc2, 0x6b, 0x6b), 1.3));
+        p.setBrush(QColor(0xfb, 0xe3, 0xe3));
+        p.drawRoundedRect(QRectF(-3.0, -6.0, 9.0, 12.0), 2.0, 2.0);
+        p.setPen(QPen(QColor(0xc2, 0x6b, 0x6b), 1.1));
+        p.drawLine(-3.0, 0.5, 6.0, 0.5);
+        p.restore();
     } else if (kind == "export") {
-        p.setPen(QPen(QColor(0x3d, 0x6f, 0x55), 1.3));
-        p.setBrush(QColor(0xe6, 0xf3, 0xe9));
-        p.drawRoundedRect(QRectF(3, 8, 14, 9), 1, 1);
-        p.setBrush(QColor(0xff, 0xff, 0xff)); p.drawRect(QRectF(6, 3, 8, 10));
-        p.setPen(QPen(QColor(0x45, 0x8b, 0x5b), 1)); p.drawLine(8, 6, 12, 6); p.drawLine(8, 8, 12, 8);
+        p.setPen(QPen(ink, 1.5));
+        p.drawLine(10, 3.2, 10, 12.2);
+        p.drawLine(6.6, 6.6, 10, 3.2);
+        p.drawLine(13.4, 6.6, 10, 3.2);
+        p.setPen(QPen(QColor(0x3f, 0x46, 0x52, 150), 1.5));
+        p.drawLine(3.6, 13.4, 3.6, 16.4);
+        p.drawLine(16.4, 13.4, 16.4, 16.4);
+        p.drawLine(3.6, 16.4, 16.4, 16.4);
     } else if (kind == "image") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 1.2));
-        p.setBrush(QColor(0xdfe6f0));
-        p.drawRect(QRectF(3, 5, 14, 11));
-        p.setBrush(QColor(0x9ec1f0));
+        p.setPen(QPen(ink, 1.4));
+        p.setBrush(QColor(0xf2, 0xf6, 0xfc));
+        p.drawRoundedRect(QRectF(2.8, 4.0, 14.4, 12.0), 2.2, 2.2);
         p.setPen(Qt::NoPen);
-        p.drawPolygon(QPolygonF{{4, 15}, {8, 9}, {11, 13}, {13, 10}, {16, 15}});
+        p.setBrush(QColor(0xf6, 0xc9, 0x44));
+        p.drawEllipse(QPointF(7.0, 8.2), 1.6, 1.6);
+        p.setPen(QPen(QColor(0x5b, 0x8d, 0xd6), 1.3));
+        p.setBrush(QColor(0xd9, 0xe8, 0xfb));
+        QPolygonF hill{{4.2, 14.2}, {8.4, 9.8}, {11.0, 12.6}, {13.0, 10.6}, {15.8, 14.2}};
+        p.drawPolygon(hill);
     } else if (kind == "undo" || kind == "redo") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 2));
         const bool left = kind == "undo";
-        p.drawArc(QRectF(4, 5, 13, 12), left ? 30 * 16 : 150 * 16, left ? 220 * 16 : 220 * 16);
-        p.setBrush(QColor(0x55, 0x5b, 0x66));
-        p.setPen(Qt::NoPen);
-        if (left)
-            p.drawPolygon(QPolygonF{{3.0, 4.0}, {8.0, 6.0}, {3.5, 9.5}});
-        else
-            p.drawPolygon(QPolygonF{{17.0, 4.0}, {12.0, 6.0}, {16.5, 9.5}});
-    } else if (kind == "delete") {
-        p.setPen(QPen(QColor(0xd9, 0x30, 0x25), 2));
-        p.drawLine(5, 5, 15, 15);
-        p.drawLine(15, 5, 5, 15);
-    } else if (kind == "color") {
-        p.setPen(QPen(QColor(0x99, 0x99, 0x99), 1));
-        p.setBrush(accent);
-        p.drawEllipse(QRectF(4, 4, 12, 12));
-    } else if (kind == "rotate") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 2));
-        p.drawArc(QRectF(4, 4, 12, 12), 40 * 16, 280 * 16);
-        p.setBrush(QColor(0x55, 0x5b, 0x66));
-        p.setPen(Qt::NoPen);
-        p.drawPolygon(QPolygonF{{14.5, 3.0}, {17.5, 6.5}, {13.0, 7.0}});
-    } else if (kind == "save") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 1.4));
-        p.setBrush(QColor(0xdfe3e8));
-        p.drawRoundedRect(QRectF(3, 3, 14, 14), 2, 2);
-        p.setBrush(accent);
-        p.drawRect(QRectF(6, 11, 8, 5));
-    } else if (kind == "find") {
-        p.setPen(QPen(QColor(0x55, 0x5b, 0x66), 1.8));
-        p.setBrush(Qt::NoBrush);
-        p.drawEllipse(QRectF(4, 4, 9, 9));
-        p.drawLine(QPointF(11.5, 11.5), QPointF(16, 16));
-    } else if (kind == "sync") {
-        p.setPen(QPen(QColor(0x2a, 0x6f, 0xd0), 2));
-        p.setBrush(Qt::NoBrush);
-        p.drawArc(QRectF(3.5, 3.5, 13, 13), 30 * 16, 150 * 16);
-        p.drawArc(QRectF(3.5, 3.5, 13, 13), 210 * 16, 150 * 16);
-        p.setBrush(QColor(0x2a, 0x6f, 0xd0));
-        p.setPen(Qt::NoPen);
-        p.drawPolygon(QPolygonF{{12.5, 3.0}, {17.0, 6.0}, {12.0, 7.5}});
-        p.drawPolygon(QPolygonF{{7.5, 17.0}, {3.0, 14.0}, {8.0, 12.5}});
-    } else if (kind == "read" || kind == "organize" || kind == "mind") {
-        p.setPen(QPen(QColor(0x4b, 0x5b, 0x73), 1.4));
-        p.setBrush(QColor(0xf7, 0xf9, 0xfc));
-        if (kind == "read") {
-            p.drawRoundedRect(QRectF(3, 3, 14, 14), 2, 2);
-            p.drawLine(10, 4, 10, 16);
-            p.drawLine(5, 7, 8, 7); p.drawLine(12, 7, 15, 7);
-            p.drawLine(5, 10, 8, 10); p.drawLine(12, 10, 15, 10);
-        } else if (kind == "organize") {
-            p.drawRoundedRect(QRectF(2.5, 5, 6, 5), 1, 1);
-            p.drawRoundedRect(QRectF(11.5, 3, 6, 5), 1, 1);
-            p.drawRoundedRect(QRectF(11.5, 12, 6, 5), 1, 1);
-            p.drawLine(8.5, 7.5, 10, 7.5); p.drawLine(10, 5.5, 10, 14.5);
-            p.drawLine(10, 5.5, 11.5, 5.5); p.drawLine(10, 14.5, 11.5, 14.5);
-        } else {
-            p.drawLine(4, 5, 10, 3); p.drawLine(10, 3, 16, 5);
-            p.drawLine(4, 5, 4, 14); p.drawLine(16, 5, 16, 14);
-            p.drawLine(4, 14, 10, 17); p.drawLine(16, 14, 10, 17);
-            p.drawEllipse(QRectF(7, 1, 6, 5));
-            p.drawEllipse(QRectF(1, 12, 6, 6)); p.drawEllipse(QRectF(13, 12, 6, 6));
+        p.save();
+        if (!left) {
+            p.translate(20, 0);
+            p.scale(-1, 1);
         }
-    } else if (kind == "prev" || kind == "next") {
+        QPainterPath path;
+        path.moveTo(6.4, 7.2);
+        path.cubicTo(8.2, 4.6, 12.6, 4.6, 14.4, 7.4);
+        path.cubicTo(16.0, 10.0, 14.2, 13.0, 11.0, 13.2);
+        p.setPen(QPen(ink, 1.6));
+        p.drawPath(path);
+        p.setPen(QPen(ink, 1.6));
+        p.drawLine(6.4, 7.2, 5.4, 3.8);
+        p.drawLine(6.4, 7.2, 9.8, 5.8);
+        p.restore();
+    } else if (kind == "delete") {
+        p.setPen(QPen(red, 1.4));
+        p.drawLine(4.0, 6.0, 16.0, 6.0);
+        p.drawLine(8.0, 3.4, 12.0, 3.4);
+        p.drawRoundedRect(QRectF(5.2, 6.0, 9.6, 10.2), 1.8, 1.8);
+        p.setPen(QPen(QColor(0xe0, 0x5a, 0x52, 190), 1.2));
+        p.drawLine(8.4, 8.6, 8.4, 13.8);
+        p.drawLine(11.6, 8.6, 11.6, 13.8);
+    } else if (kind == "color") {
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0x55, 0x5b, 0x66));
-        QPolygonF tri;
-        if (kind == "prev")
-            tri << QPointF(13, 4) << QPointF(13, 16) << QPointF(6, 10);
-        else
-            tri << QPointF(7, 4) << QPointF(7, 16) << QPointF(14, 10);
-        p.drawPolygon(tri);
+        p.setBrush(QColor(0xf6, 0xc9, 0x44));
+        p.drawEllipse(QPointF(7.4, 7.4), 3.6, 3.6);
+        p.setBrush(QColor(0xe0, 0x5a, 0x52));
+        p.drawEllipse(QPointF(12.6, 7.4), 3.6, 3.6);
+        p.setBrush(QColor(0x2f, 0x6b, 0xff));
+        p.drawEllipse(QPointF(10.0, 12.4), 3.6, 3.6);
+    } else if (kind == "rotate") {
+        p.setPen(QPen(ink, 1.6));
+        p.drawArc(QRectF(3.2, 3.2, 13.6, 13.6), 40 * 16, 280 * 16);
+        p.setBrush(ink);
+        p.setPen(Qt::NoPen);
+        QPolygonF head{{14.6, 2.4}, {17.2, 7.0}, {12.2, 6.2}};
+        p.drawPolygon(head);
+    } else if (kind == "save") {
+        p.setPen(QPen(QColor(0x2f, 0x9d, 0x6d), 1.5));
+        p.setBrush(QColor(0xe9, 0xf7, 0xf0));
+        p.drawRoundedRect(QRectF(3.2, 3.2, 13.6, 13.6), 2.6, 2.6);
+        p.setPen(QPen(QColor(0x2f, 0x9d, 0x6d), 1.8));
+        p.drawLine(6.6, 10.2, 9.2, 12.8);
+        p.drawLine(9.2, 12.8, 13.8, 7.2);
+    } else if (kind == "find") {
+        p.setPen(QPen(ink, 1.5));
+        p.setBrush(QColor(0xf6, 0xf8, 0xfb));
+        p.drawEllipse(QPointF(8.4, 8.4), 4.8, 4.8);
+        p.setPen(QPen(ink, 1.8));
+        p.drawLine(12.0, 12.0, 16.4, 16.4);
+    } else if (kind == "sync") {
+        p.setPen(QPen(blue, 1.5));
+        p.drawArc(QRectF(3.0, 3.0, 14.0, 14.0), 30 * 16, 140 * 16);
+        p.drawArc(QRectF(3.0, 3.0, 14.0, 14.0), 210 * 16, 140 * 16);
+        p.setPen(Qt::NoPen);
+        p.setBrush(blue);
+        p.drawPolygon(QPolygonF{{14.8, 3.4}, {17.2, 7.4}, {13.0, 7.0}});
+        p.drawPolygon(QPolygonF{{5.2, 16.6}, {2.8, 12.6}, {7.0, 13.0}});
+    } else if (kind == "read") {
+        p.setPen(QPen(ink, 1.4));
+        p.setBrush(QColor(0xf7, 0xf9, 0xfd));
+        QPainterPath book;
+        book.moveTo(3.0, 5.0);
+        book.cubicTo(6.0, 4.0, 8.4, 4.6, 10.0, 6.2);
+        book.cubicTo(11.6, 4.6, 14.0, 4.0, 17.0, 5.0);
+        book.lineTo(17.0, 15.2);
+        book.cubicTo(14.0, 14.2, 11.6, 14.8, 10.0, 16.4);
+        book.cubicTo(8.4, 14.8, 6.0, 14.2, 3.0, 15.2);
+        book.closeSubpath();
+        p.drawPath(book);
+        p.setPen(QPen(QColor(0x9a, 0xa7, 0xb8), 1.1));
+        p.drawLine(10, 6.2, 10, 16.4);
+    } else if (kind == "organize") {
+        p.setPen(QPen(ink, 1.4));
+        p.setBrush(QColor(0xf7, 0xf9, 0xfd));
+        p.drawRoundedRect(QRectF(2.8, 4.2, 7.6, 11.6), 1.8, 1.8);
+        p.setPen(QPen(blue, 1.4));
+        p.setBrush(soft);
+        p.drawRoundedRect(QRectF(12.4, 4.2, 4.8, 4.2), 1.4, 1.4);
+        p.drawRoundedRect(QRectF(12.4, 11.6, 4.8, 4.2), 1.4, 1.4);
+        p.setPen(QPen(QColor(0x2f, 0x6b, 0xff, 150), 1.2));
+        p.drawLine(10.4, 9.6, 12.2, 6.4);
+        p.drawLine(10.4, 10.4, 12.2, 13.6);
+    } else if (kind == "mind") {
+        p.setPen(QPen(blue, 1.4));
+        p.setBrush(soft);
+        p.drawRoundedRect(QRectF(2.8, 7.6, 6.2, 4.8), 1.6, 1.6);
+        p.drawRoundedRect(QRectF(12.2, 3.0, 5.2, 4.0), 1.4, 1.4);
+        p.drawRoundedRect(QRectF(12.2, 13.0, 5.2, 4.0), 1.4, 1.4);
+        p.setPen(QPen(QColor(0x2f, 0x6b, 0xff, 160), 1.2));
+        p.drawLine(9.0, 10.0, 10.6, 10.0);
+        p.drawLine(10.6, 5.0, 10.6, 15.0);
+        p.drawLine(10.6, 5.0, 12.2, 5.0);
+        p.drawLine(10.6, 15.0, 12.2, 15.0);
+    } else if (kind == "add") {
+        p.setPen(QPen(blue, 1.6));
+        p.setBrush(soft);
+        p.drawEllipse(QPointF(10, 10), 7.0, 7.0);
+        p.setPen(QPen(blue, 1.8));
+        p.drawLine(10, 6.4, 10, 13.6);
+        p.drawLine(6.4, 10, 13.6, 10);
+    } else if (kind == "reference") {
+        p.setPen(QPen(QColor(0x8a, 0x96, 0xa8), 1.3));
+        p.setBrush(QColor(0xf7, 0xf9, 0xfd));
+        QPainterPath back;
+        back.addRoundedRect(QRectF(6.2, 3.4, 10.2, 12.4), 2.0, 2.0);
+        p.drawPath(back);
+        p.setPen(QPen(blue, 1.4));
+        p.setBrush(QColor(0xff, 0xff, 0xff));
+        QPainterPath front;
+        front.addRoundedRect(QRectF(3.4, 6.0, 10.2, 11.0), 2.0, 2.0);
+        p.drawPath(front);
+        p.setPen(QPen(QColor(0x9a, 0xa7, 0xb8), 1.0));
+        p.drawLine(5.6, 9.2, 11.4, 9.2);
+        p.drawLine(5.6, 12.0, 11.4, 12.0);
+    } else if (kind == "theme") {
+        p.setPen(QPen(ink, 1.4));
+        p.setBrush(QColor(0xff, 0xff, 0xff));
+        p.drawEllipse(QPointF(10, 10), 6.6, 6.6);
+        QPainterPath half;
+        half.moveTo(10, 3.4);
+        half.arcTo(QRectF(3.4, 3.4, 13.2, 13.2), 90, -180);
+        half.closeSubpath();
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0x25, 0x63, 0xeb));
+        p.drawPath(half);
+    } else if (kind == "prev" || kind == "next") {
+        p.setPen(QPen(ink, 1.8));
+        const bool left = kind == "prev";
+        const double x = left ? 12.2 : 7.8;
+        p.drawLine(left ? 12.4 : 7.6, 5.0, left ? 7.6 : 12.4, 10.0);
+        p.drawLine(left ? 7.6 : 12.4, 10.0, left ? 12.4 : 7.6, 15.0);
     }
     p.end();
     return QIcon(pm);
@@ -846,16 +948,24 @@ void MainWindow::buildUi()
     documentStripLayout->setSpacing(6);
     documentStripLayout->addWidget(notebookDocuments_, 1);
     auto* newNotebookButton = new QToolButton(documentStrip);
-    newNotebookButton->setText(QStringLiteral("+ 笔记本"));
+    newNotebookButton->setText(QStringLiteral("笔记本"));
+    newNotebookButton->setIcon(glyphIcon("add"));
+    newNotebookButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     newNotebookButton->setToolTip(QStringLiteral("新建笔记本"));
     auto* addDocumentButton = new QToolButton(documentStrip);
-    addDocumentButton->setText(QStringLiteral("+ 资料"));
+    addDocumentButton->setText(QStringLiteral("资料"));
+    addDocumentButton->setIcon(glyphIcon("open"));
+    addDocumentButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     addDocumentButton->setToolTip(QStringLiteral("添加 PDF 或 EPUB 到当前笔记本"));
     auto* mindWindowButton = new QToolButton(documentStrip);
-    mindWindowButton->setText(QStringLiteral("脑图 ↗"));
+    mindWindowButton->setText(QStringLiteral("脑图"));
+    mindWindowButton->setIcon(glyphIcon("mind"));
+    mindWindowButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     mindWindowButton->setToolTip(QStringLiteral("在独立窗口查看当前笔记本脑图"));
     referenceButton_ = new QToolButton(documentStrip);
-    referenceButton_->setText(QStringLiteral("参考 ▾"));
+    referenceButton_->setText(QStringLiteral("参考"));
+    referenceButton_->setIcon(glyphIcon("reference"));
+    referenceButton_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     referenceButton_->setToolTip(QStringLiteral("在右侧并排打开另一份资料（只读参考）"));
     referenceButton_->setPopupMode(QToolButton::InstantPopup);
     auto* referenceMenu = new QMenu(referenceButton_);
@@ -893,6 +1003,7 @@ void MainWindow::buildUi()
     documentStripLayout->addWidget(mindWindowButton);
     documentStripLayout->addWidget(referenceButton_);
     auto* appearance = new QComboBox(documentStrip);
+    appearance->setObjectName(QStringLiteral("appearanceBox"));
     appearance->setObjectName("readerAppearance");
     appearance->addItems({QStringLiteral("纸白"), QStringLiteral("暖纸"), QStringLiteral("夜间")});
     documentStripLayout->addWidget(appearance);
@@ -1484,6 +1595,7 @@ void MainWindow::buildToolbar()
         });
         // Named modes read better than three abstract glyphs (MarginNote uses words too).
         if (auto* modeButton = qobject_cast<QToolButton*>(tb->widgetForAction(a))) {
+            modeButton->setObjectName(QStringLiteral("modeButton"));
             modeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             modeButton->setAutoRaise(true);
         }
@@ -1648,9 +1760,6 @@ void MainWindow::buildToolbar()
     moreMenu_ = more;
     moreBtn->setMenu(more);
     tb->addWidget(moreBtn);
-    // Compact labelled controls retain discoverability while keeping low-frequency
-    // mode/export controls reachable without the native overflow extension.
-    tb->setStyleSheet(QStringLiteral("QToolButton{padding:3px 3px;min-width:28px;} QToolBar{spacing:1px;}"));
     for (QAction* action : tb->actions()) {
         if (!action || action->isSeparator() || action->text().isEmpty()) continue;
         if (action->toolTip().isEmpty()) action->setToolTip(action->text());
@@ -1758,12 +1867,17 @@ void MainWindow::buildDocks()
     bookshelfList_ = new QListWidget(booksPane);
     bookshelfList_->setObjectName("bookshelfList");
     booksLayout->addWidget(bookshelfList_, 1);
+    auto* shelfHint = new QLabel(QStringLiteral("拖入 PDF / EPUB 也可打开"), booksPane);
+    shelfHint->setObjectName("shelfHint");
+    shelfHint->setWordWrap(true);
+    booksLayout->addWidget(shelfHint);
     shelfTabs->addTab(booksPane, QStringLiteral("书架"));
 
     auto* topicsPane = new QWidget(shelfTabs);
     auto* topicsLayout = new QVBoxLayout(topicsPane);
     topicsLayout->setContentsMargins(4, 8, 4, 4);
     auto* addTopic = new QPushButton(QStringLiteral("+ 新建笔记本"), topicsPane);
+    addTopic->setObjectName("shelfAddBook");
     topicsLayout->addWidget(addTopic);
     topicShelfList_ = new QListWidget(topicsPane);
     topicShelfList_->setObjectName("topicShelfList");
@@ -2178,6 +2292,7 @@ void MainWindow::buildDocks()
     leftTabs_->addTab(mapTab, QStringLiteral("脑图"));
     // ReaderNote/MN order: excerpts first, then the note outline, words and the map.
     // The page-outline tree is constructed before the excerpt list, so move it behind.
+    leftTabs_->tabBar()->setObjectName(QStringLiteral("sideTabsBar"));
     leftTabs_->tabBar()->moveTab(leftTabs_->indexOf(notesTab), 0);
     // moveTab keeps the previously current tab; excerpts should be the default view.
     leftTabs_->setCurrentWidget(notesTab);
@@ -5340,16 +5455,18 @@ void MainWindow::ensureMindPanel()
     if (mindPanel_ || !splitter_) return;
 
     mindPanel_ = new QWidget(splitter_);
+    mindPanel_->setObjectName(QStringLiteral("mindPanel"));
     auto* vbox = new QVBoxLayout(mindPanel_);
     vbox->setContentsMargins(0, 0, 0, 0);
     vbox->setSpacing(0);
 
     auto* bar = new QWidget(mindPanel_);
+    bar->setObjectName(QStringLiteral("mindBar"));
     auto* row = new QHBoxLayout(bar);
     row->setContentsMargins(8, 4, 8, 4);
     row->setSpacing(6);
     auto* title = new QLabel(QStringLiteral("脑图"), bar);
-    title->setStyleSheet(QStringLiteral("font-weight:600;"));
+    title->setObjectName(QStringLiteral("panelTitle"));
     row->addWidget(title);
     row->addStretch(1);
 

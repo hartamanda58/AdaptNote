@@ -5,6 +5,8 @@
 #include <QFontMetricsF>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsPathItem>
+#include <QLinearGradient>
 #include <QGraphicsSimpleTextItem>
 #include <QGraphicsTextItem>
 #include <QFocusEvent>
@@ -342,7 +344,7 @@ void MindMapView::mouseMoveEvent(QMouseEvent* event)
         for (QGraphicsItem* item : scene_->items()) {
             const QString key = item->data(4).toString();
             if (!key.startsWith(QStringLiteral("note:"))) continue;
-            auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
+            auto* card = dynamic_cast<QAbstractGraphicsShapeItem*>(item);
             if (!card || !card->data(7).toBool()) continue;
             if (band.intersects(rectForKey(key)) && !selectedKeys_.contains(key))
                 selectedKeys_.append(key);
@@ -1073,19 +1075,23 @@ CardMetrics measureCard(const Node& n, double width, bool isRoot)
 
     CardMetrics m;
     m.width = width;
-    m.titleH = qMin(2, wrapToLines(n.text, titleFm, width - 2 * kPadX, 2).size()) *
+    const bool noteLeaf = !n.isGroup && !isRoot;
+    m.titleH = qMin(2, wrapToLines(n.text, titleFm,
+                                   width - 2 * kPadX - (noteLeaf ? 6 : 0), 2).size()) *
                titleFm.height();
 
     double body = 0;
     if (!n.excerpt.isEmpty() && !n.isGroup) {
         // The excerpt is a quote block: 2px rule on the left, muted text, max 3 lines.
-        const QStringList lines = wrapToLines(n.excerpt, bodyFm, width - 2 * kPadX - 8, 3);
+        const QStringList lines = wrapToLines(n.excerpt, bodyFm,
+                                              width - 2 * kPadX - 14, 3);
         m.excerptLines = lines.size();
         m.excerptH = lines.size() * bodyFm.height() + 8;
         body += m.excerptH + 6;
     }
     if (!n.comment.isEmpty()) {
-        const QStringList lines = wrapToLines(n.comment, bodyFm, width - 2 * kPadX, 3);
+        const QStringList lines = wrapToLines(n.comment, bodyFm,
+                                              width - 2 * kPadX - (noteLeaf ? 6 : 0), 3);
         m.commentH = lines.size() * bodyFm.height();
         body += m.commentH + 4;
     } else if (n.isGroup && !n.children.isEmpty()) {
@@ -1209,13 +1215,18 @@ void MindMapView::syncSelectionBorders()
     for (QGraphicsItem* item : scene_->items()) {
         const QString key = item->data(4).toString();
         if (key.isEmpty()) continue;
-        auto* card = qgraphicsitem_cast<QGraphicsRectItem*>(item);
+        auto* card = dynamic_cast<QAbstractGraphicsShapeItem*>(item);
         // data(7) marks the card background; text/decoration items are separate.
         if (!card || !card->data(7).toBool()) continue;
         const bool selected = selectedKeys_.contains(key);
+        const bool rootCard = key.startsWith(QStringLiteral("root:"));
+        const bool group = key.startsWith(QStringLiteral("group:"));
         QPen pen = card->pen();
-        pen.setColor(selected ? QColor(0x2f, 0x6b, 0xd8) : QColor(0xe3, 0xe7, 0xee));
-        pen.setWidthF(selected ? 1.6 : 1.0);
+        pen.setColor(selected ? QColor(0x2563eb)
+                              : rootCard ? QColor(0x1d4ed8)
+                              : group ? QColor(0xd3e2f8)
+                                      : QColor(0xe6e9ef));
+        pen.setWidthF(selected ? 2.0 : 1.0);
         card->setPen(pen);
     }
 }
@@ -1320,7 +1331,7 @@ void MindMapView::rebuild()
 
     std::function<void(const Node&, int)> measure = [&](const Node& n, int depth) {
         const QString key = nodeKey(n);
-        const double width = depth == 0 ? 190.0 : 206.0;
+        const double width = depth == 0 ? 178.0 : 224.0;
         const CardMetrics m = measureCard(n, width, depth == 0);
         byKey.insert(key, &n);
         heights.insert(key, m.height);
@@ -1331,8 +1342,8 @@ void MindMapView::rebuild()
     measure(root_, 0);
 
     LayoutOptions opts;
-    opts.nodeWidth = 206.0;
-    opts.columnGap = 34.0;
+    opts.nodeWidth = 224.0;
+    opts.columnGap = 38.0;
     opts.rowGap = 14.0;
     opts.padding = 16.0;
 
@@ -1385,13 +1396,51 @@ void MindMapView::rebuild()
         const QFontMetricsF bodyFm(bodyFont);
 
         const bool selected = isKeySelected(key);
-        QPen border(selected ? QColor(0x2f, 0x6b, 0xd8) : QColor(0xe3, 0xe7, 0xee),
-                    selected ? 1.6 : 1.0);
-        QColor fill = QColor(0xff, 0xff, 0xff);
-        if (n.isGroup) fill = QColor(0xf2, 0xf7, 0xff);
-        if (depth == 0) fill = QColor(0x2f, 0x6b, 0xd8);
+        const bool isRoot = depth == 0;
+        const bool isGroup = n.isGroup && !isRoot;
+        const bool isBucket = key.startsWith(QStringLiteral("page:")) ||
+                              key.startsWith(QStringLiteral("docpage:")) ||
+                              key.startsWith(QStringLiteral("document:"));
+        const bool isNote = !isRoot && !isGroup && !isBucket && !n.markupId.isEmpty();
+        const QColor noteAccent = n.accent.isValid() ? n.accent : QColor(0x3b82f6);
 
-        auto* card = scene_->addRect(rect, border, QBrush(fill));
+        // Rounded card with a soft two-layer shadow. QGraphicsDropShadowEffect would be
+        // smoother but costs a render pass per card; on a 100-card map the flat + offset
+        // paths are indistinguishable and much cheaper.
+        const qreal radius = isRoot ? 14.0 : 12.0;
+        QPainterPath shape;
+        shape.addRoundedRect(rect, radius, radius);
+        QPainterPath shadow = shape;
+        shadow.translate(0, 3);
+        auto* shade = scene_->addPath(shadow, QPen(Qt::NoPen), QBrush(QColor(15, 23, 42, 16)));
+        shade->setZValue(1.70);
+        QPainterPath tight = shape;
+        tight.translate(0, 1);
+        auto* shade2 = scene_->addPath(tight, QPen(Qt::NoPen), QBrush(QColor(15, 23, 42, 10)));
+        shade2->setZValue(1.75);
+
+        QColor fill = QColor(0xff, 0xff, 0xff);
+        QColor stroke = QColor(0xe6, 0xe9, 0xef);
+        if (isGroup) { fill = QColor(0xef, 0xf5, 0xff); stroke = QColor(0xd3, 0xe2, 0xf8); }
+        if (isBucket) { fill = QColor(0xfa, 0xfb, 0xfd); stroke = QColor(0xe5, 0xe9, 0xf0); }
+        QBrush fillBrush(fill);
+        if (isRoot) {
+            QLinearGradient grad(rect.topLeft(), rect.bottomLeft());
+            grad.setColorAt(0.0, QColor(0x2f, 0x77, 0xf0));
+            grad.setColorAt(1.0, QColor(0x1d, 0x4e, 0xd8));
+            fillBrush = QBrush(grad);
+            stroke = QColor(0x1d, 0x4e, 0xd8);
+        }
+        if (selected) {
+            QPainterPath halo;
+            halo.addRoundedRect(rect.adjusted(-3, -3, 3, 3), radius + 3, radius + 3);
+            auto* glow = scene_->addPath(halo, QPen(Qt::NoPen),
+                                         QBrush(QColor(0x25, 0x63, 0xeb, 28)));
+            glow->setZValue(1.65);
+            stroke = QColor(0x25, 0x63, 0xeb);
+        }
+
+        auto* card = scene_->addPath(shape, QPen(stroke, selected ? 2.0 : 1.0), fillBrush);
         card->setData(7, 1); // identifies the card background, distinct from its text children
         card->setZValue(2);
         card->setData(0, n.page);
@@ -1401,15 +1450,29 @@ void MindMapView::rebuild()
         if (!n.docPath.isEmpty()) card->setData(6, n.docPath);
         if (selected) card->setData(3, 1);   // hit-test helper: selected marker
 
+        const double textLeft = rect.left() + kPadX + (isNote ? 6 : 0);
         double y = rect.top() + kPadY;
-        const QColor titleColor = depth == 0 ? QColor(Qt::white) : QColor(0x1d, 0x21, 0x29);
-        const QColor bodyColor = depth == 0 ? QColor(0xe8, 0xef, 0xfb) : QColor(0x5b, 0x64, 0x72);
-        const QColor accent = depth == 0 ? QColor(0xc9, 0xdc, 0xfb) : QColor(0x2f, 0x6b, 0xd8);
+        const QColor titleColor = isRoot ? QColor(Qt::white)
+                                : isGroup ? QColor(0x1e, 0x40, 0x7a)
+                                          : QColor(0x11, 0x18, 0x27);
+        const QColor bodyColor = isRoot ? QColor(0xdc, 0xe9, 0xff) : QColor(0x5b, 0x66, 0x78);
+        const QColor accent = isRoot ? QColor(0xd7, 0xe5, 0xff) : QColor(0x2f, 0x6b, 0xd8);
 
-        for (const QString& line : wrapToLines(n.text, titleFm, rect.width() - 2 * kPadX, 2)) {
+        if (isNote) {
+            // Coloured spine: the same colour the note uses in the page/panel.
+            QPainterPath spine;
+            spine.addRoundedRect(QRectF(rect.left() + 7, rect.top() + 11, 3,
+                                        qMax(10.0, rect.height() - 22)), 1.5, 1.5);
+            auto* bar = scene_->addPath(spine, QPen(Qt::NoPen), QBrush(noteAccent));
+            bar->setZValue(2.4);
+            bar->setData(4, key);
+        }
+
+        for (const QString& line : wrapToLines(n.text, titleFm,
+                                              rect.width() - 2 * kPadX - (isNote ? 6 : 0), 2)) {
             auto* t = scene_->addSimpleText(line, titleFont);
             t->setBrush(QBrush(titleColor));
-            t->setPos(rect.left() + kPadX, y);
+            t->setPos(textLeft, y);
             t->setZValue(3);
             if (!n.markupId.isEmpty()) t->setData(1, n.markupId);
             t->setData(4, key);
@@ -1418,17 +1481,19 @@ void MindMapView::rebuild()
 
         if (!n.excerpt.isEmpty() && !n.isGroup) {
             y += 3;
-            const double textW = rect.width() - 2 * kPadX - 8;
+            const double textW = rect.width() - 2 * kPadX - (isNote ? 14 : 8);
             const QStringList lines = wrapToLines(n.excerpt, bodyFm, textW, 3);
             const double blockH = lines.size() * bodyFm.height() + 8;
-            auto* rule = scene_->addRect(QRectF(rect.left() + kPadX, y + 2, 2, blockH - 4),
-                                         QPen(Qt::NoPen), QBrush(QColor(0xd7, 0xe1, 0xf2)));
+            auto* rule = scene_->addRect(QRectF(textLeft - 5, y + 2, 2, blockH - 4),
+                                         QPen(Qt::NoPen),
+                                         QBrush(QColor(noteAccent.red(), noteAccent.green(),
+                                                       noteAccent.blue(), 110)));
             rule->setZValue(3);
             double ly = y + 4;
             for (const QString& line : lines) {
                 auto* t = scene_->addSimpleText(line, bodyFont);
                 t->setBrush(QBrush(bodyColor));
-                t->setPos(rect.left() + kPadX + 8, ly);
+                t->setPos(textLeft + 7, ly);
                 t->setZValue(3);
                 t->setData(4, key);
                 ly += bodyFm.height();
@@ -1437,10 +1502,11 @@ void MindMapView::rebuild()
         }
 
         if (!n.comment.isEmpty()) {
-            for (const QString& line : wrapToLines(n.comment, bodyFm, rect.width() - 2 * kPadX, 3)) {
+            for (const QString& line : wrapToLines(
+                     n.comment, bodyFm, rect.width() - 2 * kPadX - (isNote ? 6 : 0), 3)) {
                 auto* t = scene_->addSimpleText(line, bodyFont);
                 t->setBrush(QBrush(depth == 0 ? bodyColor : QColor(0x1d, 0x21, 0x29)));
-                t->setPos(rect.left() + kPadX, y);
+                t->setPos(textLeft, y);
                 t->setZValue(3);
                 t->setData(4, key);
                 y += bodyFm.height();
@@ -1450,20 +1516,19 @@ void MindMapView::rebuild()
             auto* t = scene_->addSimpleText(
                 QStringLiteral("%1 个子节点").arg(n.children.size()), bodyFont);
             t->setBrush(QBrush(bodyColor));
-            t->setPos(rect.left() + kPadX, y);
+            t->setPos(textLeft, y);
             t->setZValue(3);
             y += bodyFm.height() + 2;
         }
 
         // footer: source on the left, affordance on the right. Page buckets are containers,
         // not quotations, so they do not claim to be "原文".
-        const bool isBucket = key.startsWith(QStringLiteral("page:"));
         if (!isBucket && (!n.source.isEmpty() || n.page >= 0)) {
             auto* foot = scene_->addSimpleText(n.source.isEmpty() ? QStringLiteral("原文")
                                                                   : n.source,
                                                smallFont);
             foot->setBrush(QBrush(accent));
-            foot->setPos(rect.left() + kPadX, rect.bottom() - kPadY - foot->boundingRect().height());
+            foot->setPos(textLeft, rect.bottom() - kPadY - foot->boundingRect().height());
             foot->setZValue(3);
         }
         if (!n.children.isEmpty()) {
@@ -1478,15 +1543,16 @@ void MindMapView::rebuild()
 
             const qreal d = 18;
             const QRectF circle(rect.right() - kPadX - d, rect.bottom() - kPadY - d, d, d);
-            auto* bg = scene_->addEllipse(circle, QPen(QColor(0x2f, 0x6b, 0xd8), 1.2),
-                                          QBrush(QColor(0xf2, 0xf7, 0xff)));
+            auto* bg = scene_->addEllipse(
+                circle, QPen(isRoot ? QColor(255, 255, 255, 120) : QColor(0xd7, 0xdf, 0xea), 1.0),
+                QBrush(isRoot ? QColor(255, 255, 255, 36) : QColor(0xff, 0xff, 0xff)));
             bg->setZValue(4);
             bg->setData(8, 1);
             bg->setData(4, key);
 
             auto* glyph = scene_->addSimpleText(folded ? QStringLiteral("+") : QStringLiteral("−"),
                                                 smallFont);
-            glyph->setBrush(QBrush(QColor(0x2f, 0x6b, 0xd8)));
+            glyph->setBrush(QBrush(isRoot ? QColor(Qt::white) : QColor(0x25, 0x63, 0xeb)));
             glyph->setPos(circle.center() - QPointF(glyph->boundingRect().width() / 2.0,
                                                     glyph->boundingRect().height() / 2.0));
             glyph->setZValue(5);

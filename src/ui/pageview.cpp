@@ -706,9 +706,9 @@ void PageView::paintEvent(QPaintEvent*)
     // Pages are usually downscaled a little (or a lot at high DPI); without this Qt uses
     // nearest-neighbour and small text looks ragged even from a correct bitmap.
     p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    const QColor canvas = appearanceTheme_ == 2 ? QColor(0x1f, 0x21, 0x25)
-                         : appearanceTheme_ == 1 ? QColor(0xe7, 0xe1, 0xd4)
-                                                 : QColor(0xe9, 0xeb, 0xef);
+    const QColor canvas = appearanceTheme_ == 2 ? QColor(0x1b, 0x1d, 0x21)
+                         : appearanceTheme_ == 1 ? QColor(0xe9, 0xe4, 0xda)
+                                                 : QColor(0xef, 0xed, 0xe8);
     p.fillRect(viewport()->rect(), canvas);
 
     if (!engine_ || !engine_->isOpen()) {
@@ -727,13 +727,25 @@ void PageView::paintEvent(QPaintEvent*)
         const PageGeom& g = geoms_.at(i);
         if (!g.valid || !g.rect.intersects(QRectF(viewRect))) continue;
 
-        // page background + soft shadow
-        p.fillRect(g.rect.adjusted(2, 2, 3, 3), QColor(0, 0, 0, 60));
-        p.fillRect(g.rect, Qt::white);
+        // Page sheet: a soft floating shadow and a 3px corner radius. The bitmap is
+        // clipped to the same path so its square corners do not poke through.
+        QPainterPath sheet;
+        sheet.addRoundedRect(g.rect, 3.5, 3.5);
+        QPainterPath shadowPath = sheet;
+        shadowPath.translate(0, 4);
+        p.fillPath(shadowPath, QColor(15, 23, 42, 20));
+        QPainterPath closeShadow = sheet;
+        closeShadow.translate(0, 1);
+        p.fillPath(closeShadow, QColor(15, 23, 42, 14));
+        p.fillPath(sheet, appearanceTheme_ == 2 ? QColor(0x2a, 0x2d, 0x33) : Qt::white);
 
         const QImage img = imageFor(i);
-        if (!img.isNull()) p.drawImage(g.rect, img);
-        else {
+        if (!img.isNull()) {
+            p.save();
+            p.setClipPath(sheet);
+            p.drawImage(g.rect, img);
+            p.restore();
+        } else {
             p.setPen(QColor(0x99, 0x99, 0x99));
             p.drawText(g.rect, Qt::AlignCenter, QStringLiteral("…"));
         }
