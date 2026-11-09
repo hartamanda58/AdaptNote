@@ -2,11 +2,11 @@
 
 ## 演示
 
-- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-group-drag.mp4)
-- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-map-drag.mp4)
-- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-demo.mp4)
-- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-demo-pack-cd43fb9.zip)
-- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/sharp-translate-cd43fb9/AdaptNote-windows-x64-sharp.zip
+- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-group-drag.mp4)
+- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-map-drag.mp4)
+- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-demo-pack-d6a3867.zip)
+- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/deeplx-d6a3867/AdaptNote-windows-x64-deeplx.zip
 - 截图：`shots/merged-*.png`
 
 
