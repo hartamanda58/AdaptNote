@@ -254,7 +254,9 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 - 笔记大纲拖动落点提示：上半区插入线 / 下半区“成为子笔记”块
 - 阅读区 `Ctrl+滚轮` 光标锚定缩放、触控板捏合、中键平移
 - PDF 页至少按 144dpi 渲染（高分屏再乘 DPR），解决 100% 下的矢量字发虚
-- 划词翻译支持 Google / Bing / DeepL / AI；“自动”Bing→Google，中文原文自动改译英文
+- 划词翻译支持 Google / Bing / DeepL / **DeepLX（免费代理，默认 127.0.0.1:1188）** / AI；
+  “自动”Bing→Google，中文原文自动改译英文
+- DeepLX 可填自建或公开实例 URL + 可选 Token；兼容 `{code,data}`/`{translations}`/纯文本响应
 - 回到有笔记的书默认「整理」布局（文档+脑图），新模式会记住
 - 右侧 dock 的「脑图」标签接通数据（之前一直是空白）
 - **脑图多选与批量**：Ctrl 点选 / Shift 框选 / Ctrl+A / Esc；批量删除、移组、改色；
@@ -292,7 +294,8 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 7. 分组只能拖到**同级**位置，不能拖成另一分组的子分组；暂未做“全部折叠到某一层”
 8. 参考窗格可标注但右栏摘录列表仍只列主文档；Google 在部分网络需代理，
    Bing 的 Edge 接口与 DeepL 也可能被网络拦截，Auto 会 Bing→Google 回退
-9. DeepL 只支持官方 API Key（免费版 :fx），未做无 Key 的网页接口；真实数位板/Anki/XMind/WebDAV 仍未人工验收
+9. DeepL 官方 API 需 Key（免费版 :fx）；免费路径走 DeepLX（需本机 Docker 或自备实例/Token）；
+   公开 DeepLX 实例稳定性不由本项目保证；真实数位板/Anki/XMind/WebDAV 仍未人工验收
 9. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
 
 ---

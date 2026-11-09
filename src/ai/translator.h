@@ -17,13 +17,14 @@ namespace ai {
 class Translator : public QObject {
     Q_OBJECT
 public:
-    enum class Provider { Auto, Google, Bing, DeepL };
+    enum class Provider { Auto, Google, Bing, DeepL, DeepLX };
 
     explicit Translator(QObject* parent = nullptr);
     ~Translator() override;
 
     void translate(const QString& text, const QString& uiTarget, Provider provider,
-                   const QString& deeplKey = {});
+                   const QString& deeplKey = {}, const QString& deeplxUrl = {},
+                   const QString& deeplxToken = {});
     void cancel();
 
     // Pure helpers, unit tested without network access.
@@ -33,6 +34,9 @@ public:
     static QString parseBing(const QByteArray& json);
     static QByteArray deeplBody(const QString& text, const QString& uiTarget);
     static QString parseDeepL(const QByteArray& json);
+    static QString normalizeDeepLXUrl(const QString& url);
+    static QByteArray deeplxBody(const QString& text, const QString& uiTarget);
+    static QString parseDeepLX(const QByteArray& body);
     static QString providerName(Provider provider);
     static bool looksChinese(const QString& text);
 
@@ -45,6 +49,8 @@ private:
     void requestBingToken();
     void requestBing(const QString& token);
     void requestDeepL();
+    void requestDeepLX();
+    void handleDeepLX();
     void handleGoogle();
     void handleBingToken();
     void handleBing();
@@ -58,6 +64,8 @@ private:
     QString text_;
     QString target_;
     QString deeplKey_;
+    QString deeplxUrl_;
+    QString deeplxToken_;
     Provider provider_ = Provider::Auto;
     bool autoFellBack_ = false;
 };

@@ -56,6 +56,7 @@ QString Translator::targetCode(Provider provider, const QString& uiTarget)
 
     switch (provider) {
     case Provider::DeepL:
+    case Provider::DeepLX:
         if (traditional) return QStringLiteral("ZH-HANT");
         if (chinese) return QStringLiteral("ZH");
         if (english) return QStringLiteral("EN");
@@ -101,6 +102,7 @@ QString Translator::providerName(Provider provider)
     case Provider::Google: return QStringLiteral("Google");
     case Provider::Bing: return QStringLiteral("Bing");
     case Provider::DeepL: return QStringLiteral("DeepL");
+    case Provider::DeepLX: return QStringLiteral("DeepLX");
     case Provider::Auto:
     default: return QStringLiteral("自动");
     }
@@ -146,6 +148,51 @@ QByteArray Translator::deeplBody(const QString& text, const QString& uiTarget)
     return query.toString(QUrl::FullyEncoded).toUtf8();
 }
 
+QString Translator::normalizeDeepLXUrl(const QString& url)
+{
+    const QString trimmed = url.trimmed();
+    if (trimmed.isEmpty()) return QStringLiteral("http://127.0.0.1:1188/translate");
+    QUrl parsed(trimmed);
+    if (!parsed.isValid() || parsed.scheme().isEmpty()) return trimmed;
+    if (parsed.path().isEmpty() || parsed.path() == QStringLiteral("/"))
+        parsed.setPath(QStringLiteral("/translate"));
+    return parsed.toString();
+}
+
+QByteArray Translator::deeplxBody(const QString& text, const QString& uiTarget)
+{
+    QJsonObject body;
+    body.insert(QStringLiteral("text"), text);
+    body.insert(QStringLiteral("source_lang"), QStringLiteral("auto"));
+    body.insert(QStringLiteral("target_lang"), targetCode(Provider::DeepLX, uiTarget));
+    return QJsonDocument(body).toJson(QJsonDocument::Compact);
+}
+
+QString Translator::parseDeepLX(const QByteArray& body)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
+    if (doc.isObject()) {
+        const QJsonObject object = doc.object();
+        const QJsonValue data = object.value(QStringLiteral("data"));
+        if (data.isString() && !data.toString().trimmed().isEmpty())
+            return data.toString().trimmed();
+        const QJsonArray items = object.value(QStringLiteral("translations")).toArray();
+        if (!items.isEmpty() && items.at(0).isObject())
+            return items.at(0).toObject().value(QStringLiteral("text")).toString().trimmed();
+        return {};
+    }
+    if (doc.isArray()) {
+        const QJsonArray root = doc.array();
+        if (!root.isEmpty() && root.at(0).isObject())
+            return root.at(0).toObject().value(QStringLiteral("text")).toString().trimmed();
+    }
+    // Some self-hosted forks return the translation as plain text.
+    const QString plain = QString::fromUtf8(body).trimmed();
+    if (!plain.startsWith(QLatin1Char('{')) && !plain.startsWith(QLatin1Char('[')))
+        return plain;
+    return {};
+}
+
 QString Translator::parseDeepL(const QByteArray& json)
 {
     // DeepL wraps translations in an object, unlike Bing/Google's array envelope.
@@ -168,7 +215,8 @@ void Translator::cancel()
 }
 
 void Translator::translate(const QString& text, const QString& uiTarget, Provider provider,
-                           const QString& deeplKey)
+                           const QString& deeplKey, const QString& deeplxUrl,
+                           const QString& deeplxToken)
 {
     cancel();
     text_ = text;
@@ -179,12 +227,15 @@ void Translator::translate(const QString& text, const QString& uiTarget, Provide
         looksChinese(text))
         target_ = QStringLiteral("English");
     deeplKey_ = deeplKey.trimmed();
+    deeplxUrl_ = normalizeDeepLXUrl(deeplxUrl);
+    deeplxToken_ = deeplxToken.trimmed();
     provider_ = provider;
     autoFellBack_ = false;
     switch (provider_) {
     case Provider::Google: requestGoogle(); break;
     case Provider::Bing: requestBingToken(); break;
     case Provider::DeepL: requestDeepL(); break;
+    case Provider::DeepLX: requestDeepLX(); break;
     // Bing's Edge endpoint is reachable from mainland China more often than Google,
     // so "auto" tries Bing first and falls back to Google.
     case Provider::Auto: requestBingToken(); break;
@@ -350,6 +401,48 @@ void Translator::requestDeepL()
     request.setTransferTimeout(20000);
     reply_ = net_->post(request, deeplBody(text_, target_));
     connect(reply_, &QNetworkReply::finished, this, &Translator::handleDeepL);
+}
+
+void Translator::requestDeepLX()
+{
+    QNetworkRequest request{QUrl(deeplxUrl_)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (!deeplxToken_.isEmpty())
+        request.setRawHeader("Authorization", "Bearer " + deeplxToken_.toUtf8());
+    request.setTransferTimeout(30000);
+    reply_ = net_->post(request, deeplxBody(text_, target_));
+    connect(reply_, &QNetworkReply::finished, this, &Translator::handleDeepLX);
+}
+
+void Translator::handleDeepLX()
+{
+    QNetworkReply* reply = reply_.data();
+    if (!reply) return;
+    reply_ = nullptr;
+    const QByteArray body = reply->readAll();
+    const QNetworkReply::NetworkError error = reply->error();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    QString netError = reply->errorString();
+    dropReply(reply);
+    if (error != QNetworkReply::NoError) {
+        const QString detail = QString::fromUtf8(body).trimmed().left(140);
+        if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
+        if (!detail.isEmpty()) netError += QStringLiteral("：%1").arg(detail);
+        const QString hint =
+            (status == 401 || status == 403)
+                ? QStringLiteral("DeepLX 需要 Token，或实例不可用；也可以换成本机 http://127.0.0.1:1188/translate")
+                : QStringLiteral("检查 DeepLX 地址是否已启动（Docker 默认 1188 端口）");
+        emit finished(QString(), QStringLiteral("DeepLX"),
+                      QStringLiteral("%1；%2").arg(netError, hint));
+        return;
+    }
+    const QString text = parseDeepLX(body);
+    if (text.isEmpty()) {
+        emit finished(QString(), QStringLiteral("DeepLX"),
+                      QStringLiteral("DeepLX 返回为空或格式无法识别"));
+        return;
+    }
+    finishWith(text, QStringLiteral("DeepLX"));
 }
 
 void Translator::handleDeepL()

@@ -144,6 +144,9 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
   **DeepL**（官方 API，Key 存 settings；免费版以 `:fx` 结尾），以及原有 **AI 模型**。
   “自动”优先 Bing 再 Google（大陆网络下 Bing 更常可达）；中文原文且目标为中文时自动改译英文。
   DeepL 无 Key 时在输出区给出注册提示，不静默失败。
+- **DeepLX（免费 DeepL 代理）**：独立引擎，默认 `http://127.0.0.1:1188/translate`，也接受任意
+  自建/公开实例 URL 和可选 Bearer Token；请求体 `{text, source_lang:auto, target_lang}`。
+  解析兼容 `{code,data}`、`{translations:[...]}` 与纯文本返回。
 
 ### 6.3 批量、拖拽、双文档（向 MarginNote 靠拢）
 

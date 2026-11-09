@@ -4335,9 +4335,9 @@ void MainWindow::showSelectionTranslation()
         provider->setObjectName(QStringLiteral("translationProvider"));
         provider->addItems({QStringLiteral("自动（Bing → Google）"), QStringLiteral("Google"),
                             QStringLiteral("Bing"), QStringLiteral("DeepL"),
-                            QStringLiteral("AI 模型")});
+                            QStringLiteral("AI 模型"), QStringLiteral("DeepL（DeepLX 免费）")});
         provider->setCurrentIndex(qBound(0,
-            store_.setting(QStringLiteral("translation.provider"), QStringLiteral("0")).toInt(), 4));
+            store_.setting(QStringLiteral("translation.provider"), QStringLiteral("0")).toInt(), 5));
         controls->addWidget(providerLabel);
         controls->addWidget(provider, 1);
         auto* targetLabel = new QLabel(QStringLiteral("译为"), translationDialog_);
@@ -4359,6 +4359,29 @@ void MainWindow::showSelectionTranslation()
         keyEdit->setText(store_.setting(QStringLiteral("translation.deeplKey")));
         keyEdit->setVisible(provider->currentIndex() == 3);
         layout->addWidget(keyEdit);
+
+        auto* deeplxBox = new QWidget(translationDialog_);
+        deeplxBox->setObjectName(QStringLiteral("translationDeepLXBox"));
+        auto* deeplxLayout = new QVBoxLayout(deeplxBox);
+        deeplxLayout->setContentsMargins(0, 0, 0, 0);
+        deeplxLayout->setSpacing(4);
+        auto* deeplxUrl = new QLineEdit(deeplxBox);
+        deeplxUrl->setObjectName(QStringLiteral("translationDeepLXUrl"));
+        deeplxUrl->setText(store_.setting(QStringLiteral("translation.deeplxUrl"),
+                                          QStringLiteral("http://127.0.0.1:1188/translate")));
+        deeplxUrl->setPlaceholderText(QStringLiteral("DeepLX 地址，如 http://127.0.0.1:1188/translate"));
+        deeplxUrl->setToolTip(QStringLiteral(
+            "本机运行：docker run -itd -p 1188:1188 ghcr.io/owo-network/deeplx:latest\n"
+            "部分公开实例需要 Token；地址会自动补 /translate"));
+        deeplxLayout->addWidget(deeplxUrl);
+        auto* deeplxToken = new QLineEdit(deeplxBox);
+        deeplxToken->setObjectName(QStringLiteral("translationDeepLXToken"));
+        deeplxToken->setEchoMode(QLineEdit::Password);
+        deeplxToken->setPlaceholderText(QStringLiteral("Token（可选，公开实例可能需要）"));
+        deeplxToken->setText(store_.setting(QStringLiteral("translation.deeplxToken")));
+        deeplxLayout->addWidget(deeplxToken);
+        deeplxBox->setVisible(provider->currentIndex() == 5);
+        layout->addWidget(deeplxBox);
 
         translationOutput_ = new QTextBrowser(translationDialog_);
         translationOutput_->setObjectName(QStringLiteral("translationOutput"));
@@ -4389,9 +4412,18 @@ void MainWindow::showSelectionTranslation()
         connect(keyEdit, &QLineEdit::editingFinished, this, [this, keyEdit]() {
             store_.setSetting(QStringLiteral("translation.deeplKey"), keyEdit->text().trimmed());
         });
+        connect(deeplxUrl, &QLineEdit::editingFinished, this, [this, deeplxUrl]() {
+            store_.setSetting(QStringLiteral("translation.deeplxUrl"),
+                              deeplxUrl->text().trimmed());
+        });
+        connect(deeplxToken, &QLineEdit::editingFinished, this, [this, deeplxToken]() {
+            store_.setSetting(QStringLiteral("translation.deeplxToken"),
+                              deeplxToken->text().trimmed());
+        });
         connect(provider, &QComboBox::currentIndexChanged, this,
-                [this, keyEdit](int index) {
+                [this, keyEdit, deeplxBox](int index) {
             keyEdit->setVisible(index == 3);
+            deeplxBox->setVisible(index == 5);
             store_.setSetting(QStringLiteral("translation.provider"), QString::number(index));
             if (translationDialog_->isVisible()) runTranslation();
         });
@@ -4430,6 +4462,8 @@ void MainWindow::runTranslation()
     auto* providerBox = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationProvider"));
     auto* targetBox = translationDialog_->findChild<QComboBox*>(QStringLiteral("translationTargetLanguage"));
     auto* keyEdit = translationDialog_->findChild<QLineEdit*>(QStringLiteral("translationDeepLKey"));
+    auto* deeplxUrl = translationDialog_->findChild<QLineEdit*>(QStringLiteral("translationDeepLXUrl"));
+    auto* deeplxToken = translationDialog_->findChild<QLineEdit*>(QStringLiteral("translationDeepLXToken"));
     const int providerIndex = providerBox ? providerBox->currentIndex() : 0;
     const QString target = targetBox ? targetBox->currentText() : QStringLiteral("简体中文");
     if (targetBox)
@@ -4471,8 +4505,11 @@ void MainWindow::runTranslation()
     if (providerIndex == 1) provider = ai::Translator::Provider::Google;
     else if (providerIndex == 2) provider = ai::Translator::Provider::Bing;
     else if (providerIndex == 3) provider = ai::Translator::Provider::DeepL;
+    else if (providerIndex == 5) provider = ai::Translator::Provider::DeepLX;
     translator_->translate(translationSourceText_, target, provider,
-                           keyEdit ? keyEdit->text() : QString());
+                           keyEdit ? keyEdit->text() : QString(),
+                           deeplxUrl ? deeplxUrl->text() : QString(),
+                           deeplxToken ? deeplxToken->text() : QString());
 }
 
 void MainWindow::runAiWithSelection()
@@ -5586,12 +5623,12 @@ QString MainWindow::translationForTest() const
 void MainWindow::setTranslationProviderForTest(int index)
 {
     store_.setSetting(QStringLiteral("translation.provider"),
-                      QString::number(qBound(0, index, 4)));
+                      QString::number(qBound(0, index, 5)));
     if (translationDialog_) {
         if (auto* provider =
                 translationDialog_->findChild<QComboBox*>(QStringLiteral("translationProvider"))) {
             const QSignalBlocker blocker(provider);
-            provider->setCurrentIndex(qBound(0, index, 4));
+            provider->setCurrentIndex(qBound(0, index, 5));
         }
     }
 }

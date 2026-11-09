@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +16,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QUrlQuery>
@@ -286,6 +288,65 @@ int main(int argc, char** argv)
         check(!client.busy(), QStringLiteral("client is idle after cancel"));
     }
 
+    // ---------------------------------------------------------------- 4. DeepLX round trip
+    {
+        const QString dlxScript =
+            QFileInfo(serverScript).absoluteDir().filePath(QStringLiteral("fake_deeplx_server.py"));
+        if (!QFileInfo::exists(dlxScript)) {
+            check(false, QStringLiteral("fake DeepLX server script exists"));
+        } else {
+            QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+            if (python.isEmpty())
+                python = QStandardPaths::findExecutable(QStringLiteral("python"));
+            QProcess dlx;
+            dlx.start(python,
+                      {dlxScript, QStringLiteral("18089"), QStringLiteral("secret")});
+            check(dlx.waitForStarted(3000), QStringLiteral("fake DeepLX server starts"));
+            QElapsedTimer startup;
+            startup.start();
+            while (startup.elapsed() < 400) QCoreApplication::processEvents();
+
+            using an::ai::Translator;
+            Translator translator;
+            QString text;
+            QString provider;
+            QString error;
+            bool done = false;
+            QObject::connect(&translator, &Translator::finished,
+                             [&](const QString& t, const QString& p, const QString& e) {
+                                 text = t;
+                                 provider = p;
+                                 error = e;
+                                 done = true;
+                             });
+            translator.translate(QStringLiteral("hello"), QStringLiteral("简体中文"),
+                                 Translator::Provider::DeepLX, QString(),
+                                 QStringLiteral("http://127.0.0.1:18089/translate"),
+                                 QStringLiteral("secret"));
+            check(waitFor([&]() { return done; }, 5000),
+                  QStringLiteral("DeepLX request completes"));
+            check(error.isEmpty() && text == QStringLiteral("DLX[ZH] hello") &&
+                      provider == QStringLiteral("DeepLX"),
+                  QStringLiteral("DeepLX translated via the local server (%1 / %2)")
+                      .arg(provider, error));
+
+            done = false;
+            text.clear();
+            provider.clear();
+            error.clear();
+            translator.translate(QStringLiteral("hello"), QStringLiteral("简体中文"),
+                                 Translator::Provider::DeepLX, QString(),
+                                 QStringLiteral("http://127.0.0.1:18089/translate"), QString());
+            check(waitFor([&]() { return done; }, 5000),
+                  QStringLiteral("DeepLX auth failure completes"));
+            check(!error.isEmpty() && text.isEmpty(),
+                  QStringLiteral("DeepLX reports a token failure: %1").arg(error));
+
+            dlx.kill();
+            dlx.waitForFinished(2000);
+        }
+    }
+
     server.kill();
     server.waitForFinished(3000);
 
@@ -334,6 +395,30 @@ int main(int argc, char** argv)
         check(Translator::looksChinese(QStringLiteral("阅读的本质不是把书看完")) &&
                   !Translator::looksChinese(QStringLiteral("hello world")),
               QStringLiteral("Chinese source detection for target switching"));
+
+        // ---- DeepLX (free/self-hosted DeepL proxy) ----
+        check(Translator::targetCode(Translator::Provider::DeepLX, QStringLiteral("简体中文")) ==
+                  QStringLiteral("ZH"),
+              QStringLiteral("DeepLX uses DeepL target codes"));
+        check(Translator::normalizeDeepLXUrl(QStringLiteral("http://127.0.0.1:1188")) ==
+                  QStringLiteral("http://127.0.0.1:1188/translate"),
+              QStringLiteral("DeepLX URL gets /translate appended"));
+        check(Translator::normalizeDeepLXUrl(QStringLiteral("https://example.test/translate")) ==
+                  QStringLiteral("https://example.test/translate"),
+              QStringLiteral("DeepLX URL with a path is kept"));
+        check(Translator::parseDeepLX(
+                  R"({"code":200,"message":"success","data":"你好"})") == QStringLiteral("你好"),
+              QStringLiteral("DeepLX {code,data} response parser"));
+        check(Translator::parseDeepLX(
+                  R"({"translations":[{"text":"你好"}]})") == QStringLiteral("你好"),
+              QStringLiteral("DeepLX translations response parser"));
+        check(Translator::parseDeepLX("plain text") == QStringLiteral("plain text"),
+              QStringLiteral("DeepLX plain-text fallback"));
+        const QString dlxBody = QString::fromUtf8(
+            Translator::deeplxBody(QStringLiteral("hello"), QStringLiteral("简体中文")));
+        check(dlxBody.contains(QStringLiteral("\"source_lang\":\"auto\"")) &&
+                  dlxBody.contains(QStringLiteral("\"target_lang\":\"ZH\"")),
+              QStringLiteral("DeepLX request body is JSON with auto source"));
     }
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "AI CHECKS PASSED" : "AI CHECKS FAILED", g_fail);
