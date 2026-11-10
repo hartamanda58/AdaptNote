@@ -2,11 +2,11 @@
 
 ## 演示
 
-- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-group-drag.mp4)
-- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-map-drag.mp4)
-- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-demo.mp4)
-- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-demo-pack-40403e3.zip)
-- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/ui-40403e3/AdaptNote-windows-x64-ui.zip
+- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-group-drag.mp4)
+- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-map-drag.mp4)
+- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-demo-pack-08b8e87.zip)
+- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-windows-x64-deeplfree.zip
 - 截图：`shots/merged-*.png`
 
 
