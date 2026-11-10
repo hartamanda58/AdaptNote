@@ -73,16 +73,19 @@ jobs:
             } else { Say "  (no $d dir)" }
           }
 
-          Say "--- launcher ---"
-          $bats = Get-ChildItem $root.FullName -Filter *.bat
-          if ($bats.Count -eq 0) { Say "  MISSING launcher .bat"; $failed = $true }
-          foreach ($b in $bats) {
-            Say "  $($b.Name):"
-            Get-Content $b.FullName | ForEach-Object { Say "    $_" }
-            if ((Get-Content $b.FullName -Raw) -notmatch 'XDG_DATA_HOME') {
-              Say "  ERROR: launcher does not set XDG_DATA_HOME"; $failed = $true
-            }
-          }
+          Say "--- portable flag / subsystem ---"
+          if (-not (Test-Path (Join-Path $root.FullName "portable.flag"))) {
+            Say "  MISSING portable.flag"; $failed = $true
+          } else { Say "  portable.flag present" }
+          $exePath = Join-Path $root.FullName "bin\adaptnote.exe"
+          $fs = [IO.File]::OpenRead($exePath)
+          try {
+            $pe = [System.Reflection.PortableExecutable.PEReader]::new($fs)
+            $subsystem = [int]$pe.PEHeaders.PEHeader.Subsystem
+            $pe.Dispose()
+          } finally { $fs.Dispose() }
+          Say "  exe subsystem: $subsystem (2 = Windows GUI)"
+          if ($subsystem -ne 2) { Say "  ERROR: console window will appear"; $failed = $true }
 
           Say "--- samples ---"
           $sampleDir = Join-Path $root.FullName "samples"

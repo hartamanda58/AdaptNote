@@ -3,7 +3,6 @@
 #   pwsh -File scripts\make_portable.ps1 [-QtDir "C:\Qt\6.8.3\msvc2022_64"]
 #
 # Produces dist\AdaptNote-<version>-windows-x64.zip containing:
-#   AdaptNote.bat        optional launcher (data stays inside the folder)
 #   portable.flag       lets bin\adaptnote.exe resolve ..\data\ by itself
 #   bin\adaptnote.exe    the app (+ bundled MuPDF is static)
 #   bin\*.dll            Qt 6 runtime, plugins and the MSVC runtime, staged by windeployqt
@@ -54,6 +53,17 @@ $exe = Get-ChildItem -Path $BuildDir -Recurse -Filter adaptnote.exe |
        Where-Object { $_.FullName -notmatch "CMakeFiles" } | Select-Object -First 1
 if (-not $exe) { throw "adaptnote.exe not found under $BuildDir" }
 Copy-Item $exe.FullName (Join-Path $bin "adaptnote.exe")
+
+# A console-subsystem exe pops a black terminal on double-click. Fail the package
+# build instead of shipping that regression.
+$fs = [IO.File]::OpenRead((Join-Path $bin "adaptnote.exe"))
+try {
+    $pe = [System.Reflection.PortableExecutable.PEReader]::new($fs)
+    $subsystem = [int]$pe.PEHeaders.PEHeader.Subsystem
+    $pe.Dispose()
+} finally { $fs.Dispose() }
+if ($subsystem -ne 2) { throw "adaptnote.exe uses subsystem $subsystem (expected 2 = Windows GUI, no console)" }
+Write-Host "   exe subsystem: Windows GUI (no console window)"
 
 $windeployqt = if ($QtDir) { Join-Path $QtDir "bin\windeployqt.exe" } else { "windeployqt.exe" }
 Write-Host "== windeployqt ($windeployqt)"
@@ -198,30 +208,12 @@ foreach ($f in (Get-ChildItem $bin -File | Where-Object { $_.Extension -eq ".dll
     if ($kept -notcontains $f.Name) { Write-Host "   note: extra file in bin\$($f.Name)" }
 }
 
-Write-Host "== launcher"
-$launcher = @"
-@echo off
-rem Portable launcher: keeps every byte of data inside this folder.
-setlocal
-set "HERE=%~dp0"
-rem Qt ignores XDG_* on Windows, so point the app at the folder explicitly.
-set "ADAPT_DATA_DIR=%HERE%data"
-set "XDG_DATA_HOME=%HERE%data"
-set "XDG_CONFIG_HOME=%HERE%data\config"
-set "XDG_CACHE_HOME=%HERE%data\cache"
-if not exist "%ADAPT_DATA_DIR%" mkdir "%ADAPT_DATA_DIR%"
-if not exist "%XDG_CONFIG_HOME%" mkdir "%XDG_CONFIG_HOME%"
-if not exist "%XDG_CACHE_HOME%" mkdir "%XDG_CACHE_HOME%"
-start "" "%HERE%bin\adaptnote.exe" %*
-"@
-Set-Content -Path (Join-Path $stage "AdaptNote.bat") -Value $launcher -Encoding ASCII
-
 Write-Host "== readme"
 @"
 AdaptNote（Windows 便携版）
 ==========================
 
-运行：双击 bin\adaptnote.exe 或 AdaptNote.bat（可带 --doc 某本书.pdf）
+运行：双击 bin\adaptnote.exe（可带 --doc 某本书.pdf）
       程序已配置为直接运行时将数据保存在本目录 data\ 中。
 数据：全部在 data\ 目录里（笔记库 data\library.db，图片 data\images\）；
       整个文件夹拷到 U 盘即可带走，删掉 data\ 恢复出厂状态。

@@ -156,7 +156,15 @@ qt_add_resources(adapt_ui "appres"
 )
 
 # ---- application ----
-add_executable(adaptnote src/main.cpp)
+# Windows: link the GUI subsystem so double-clicking never spawns a console window.
+# qt_add_executable supplies the Qt entry point (WinMain) on Windows.
+qt_add_executable(adaptnote src/main.cpp)
+if(WIN32)
+  set_target_properties(adaptnote PROPERTIES WIN32_EXECUTABLE TRUE)
+  if(TARGET Qt6::EntryPoint)
+    target_link_libraries(adaptnote PRIVATE Qt6::EntryPoint)
+  endif()
+endif()
 target_link_libraries(adaptnote PRIVATE adapt_ui)
 
 # ---- tools: test document generator ----

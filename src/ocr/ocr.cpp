@@ -4,6 +4,10 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QProcess>
+
+#ifdef Q_OS_WIN
+#  include <windows.h>
+#endif
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
@@ -84,6 +88,13 @@ Result recognize(const QImage& image, const QString& lang, int timeoutMs)
     if (QFileInfo::exists(tessdata))
         args << QStringLiteral("--tessdata-dir") << tessdata;
     args << QStringLiteral("-l") << lang << QStringLiteral("--psm") << QStringLiteral("6");
+#ifdef Q_OS_WIN
+    // tesseract is a console program; without CREATE_NO_WINDOW Windows flashes a
+    // black console every time OCR runs from the GUI app.
+    proc.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) {
+        args->flags |= CREATE_NO_WINDOW;
+    });
+#endif
     proc.start(exe, args);
     if (!proc.waitForStarted(5000)) {
         out.error = QStringLiteral("无法启动 tesseract：%1").arg(proc.errorString());

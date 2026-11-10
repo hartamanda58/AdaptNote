@@ -259,6 +259,8 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 - 阅读区 `Ctrl+滚轮` 光标锚定缩放、触控板捏合、中键平移
 - 视觉刷新：暖纸色外壳、统一线性图标、圆角脑图卡片（色条/阴影/渐变根节点）、
   白色摘录卡片、圆角页面与柔和投影
+- Windows 包改为 GUI 子系统：双击 `bin\adaptnote.exe` 不再弹黑色终端；
+  OCR 调用 tesseract 时用 CREATE_NO_WINDOW，不再闪控制台；`AdaptNote.bat` 已移除
 - PDF 页至少按 144dpi 渲染（高分屏再乘 DPR），解决 100% 下的矢量字发虚
 - 划词翻译支持 **DeepL 免费（内置，无需终端）** / Google / Bing / DeepL / DeepLX / AI；
   “自动”Bing→Google，中文原文自动改译英文
