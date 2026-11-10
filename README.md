@@ -2,11 +2,11 @@
 
 ## 演示
 
-- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-group-drag.mp4)
-- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-map-drag.mp4)
-- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-demo.mp4)
-- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-demo-pack-828fc77.zip)
-- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-windows-x64-gui.zip
+- [6 秒分组卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-group-drag.mp4)
+- [10 秒卡片拖拽](https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-map-drag.mp4)
+- [38 秒整体演示（GitHub Release）](https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-demo.mp4)
+- [体验包：两本演示书 + 上手步骤](https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-demo-pack-71a26cc.zip)
+- Windows 便携包（含演示视频里的修复）：https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-windows-x64-update.zip
 - 截图：`shots/merged-*.png`
 
 
@@ -18,7 +18,8 @@
 **OCR（tesseract / 视觉模型）**、页面缩略图、摘录卡片。
 划词翻译支持 **DeepL 免费（内置，无需终端/Key）/ Google / Bing / DeepL / DeepLX / AI 模型**；
 Bing 在 Edge 授权接口失败时会自动回退到网页版 `ttranslatev3`。
-软件每天自动检查 GitHub Release，发现新版可一键下载、校验 sha256、重启替换（保留 `data\`）。
+软件每天自动检查 GitHub Release，发现新版可一键下载、校验 sha256、重启替换（保留 `data\`）；
+旧包（没有更新器的版本）需要手动下载这一次。
 「DeepL 免费（内置）」直接走 DeepL 客户端的匿名接口，选一下就能翻译，不用开终端；
 超过 1500 字符会自动按句切分。DeepLX 仍保留给自建/公开实例（可选 Token）。中文原文选中文时自动改译英文。
 Windows 便携包自带本地 tesseract（eng+chi_sim）与精简版 ECDICT，离线即可 OCR 和查词。

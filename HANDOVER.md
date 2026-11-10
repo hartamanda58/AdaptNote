@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867` → `40403e3` → `08b8e87` → `828fc77`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867` → `40403e3` → `08b8e87` → `828fc77` → `71a26cc`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,45 +17,44 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-10，GUI 子系统版）
+### 最近一次验收（2026-11-10，自动更新 + Bing 回退版）
 
 ```text
-run 42804067519  Windows 构建（main @ 828fc77）  success
-12/12 套测试在 Windows runner 上全部 PASSED
-打包检查：adaptnote.exe subsystem = 2 (Windows GUI)，不会弹终端
-包内已移除 AdaptNote.bat，保留 portable.flag
-自带 tesseract + ECDICT，zip 76.0 MB
+run 42819753940  Windows 构建（main @ 71a26cc）  success
+12/12 套测试在 Windows runner 上全部 PASSED，DIALOG GUARD 通过
+新增：Release 解析/commit 提取/发布时间比较/更新脚本、Bing 页面解析
+包内 exe subsystem = 2，无 .bat，保留 portable.flag；zip 76.1 MB
 ```
 
-之前全绿：42760150369（08b8e87）、42669136585（40403e3）、42652722172（d6a3867）、
-42644688948（cd43fb9）、42578862213（dfa3933）、42457738576（1bfc57c）、
-42447994594（1ca897c）、42444699623（edb6c40）、42433464805（7ccc5d1）、
-42393475215（818dcfb）、42387890013（01c238b）、42373627839（58efc35）、
-42353005512（900e60a）。
+之前全绿：42804067519（828fc77）、42760150369（08b8e87）、42669136585（40403e3）、
+42652722172（d6a3867）、42644688948（cd43fb9）、42578862213（dfa3933）、
+42457738576（1bfc57c）、42447994594（1ca897c）、42444699623（edb6c40）、
+42433464805（7ccc5d1）、42393475215（818dcfb）、42387890013（01c238b）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-windows-x64-gui.zip
-sha256: a621f427c6dfd8e4484bca5a134912259c3ab0ce06af98ccb4ebeae66e63ccf2
+https://github.com/hartamanda58/AdaptNote/releases/download/updater-bing-71a26cc/AdaptNote-windows-x64-update.zip
+sha256: 45c9eb1b1da756e90cc73756f61106715d5f3523d963f1f3402ecdade1b13b76
 ```
 
-**GUI 子系统版**（压缩 76 MB / 解压 ~150 MB）：双击 `bin\adaptnote.exe` 直接进界面，
-不再弹黑色终端；OCR 也不再闪控制台；`AdaptNote.bat` 已移除。翻译仍含
-「DeepL 免费（内置）」以及 Google/Bing/DeepL 官方/DeepLX/AI。
+**自动更新 + Bing 回退版**（压缩 76.1 MB / 解压 ~150 MB）：Bing 授权失败自动走
+`www.bing.com/ttranslatev3`；新增每日更新检查、sha256 校验、退出后替换并重启（保留 `data\`）。
+双击 `bin\adaptnote.exe`，不弹终端。这个版本还需要手动下载一次，之后的新版会自动提示。
 
 - 整理模式截图：`shots/merged-ui-main.png`
 - 阅读模式截图：`shots/merged-ui-read.png`
 - 划词翻译截图：`shots/merged-translate.png`
-- 38 秒整体演示：`releases/download/gui-828fc77/AdaptNote-demo.mp4`
+- 38 秒整体演示：`releases/download/updater-bing-71a26cc/AdaptNote-demo.mp4`
   （sha256 48f7ae6f…）
-- 10 秒卡片拖拽：`releases/download/gui-828fc77/AdaptNote-map-drag.mp4`
+- 10 秒卡片拖拽：`releases/download/updater-bing-71a26cc/AdaptNote-map-drag.mp4`
   （sha256 5405b3c2…）
-- 6 秒分组拖拽：`releases/download/gui-828fc77/AdaptNote-group-drag.mp4`
+- 6 秒分组拖拽：`releases/download/updater-bing-71a26cc/AdaptNote-group-drag.mp4`
   （sha256 89419ada…）
-- 体验包：`releases/download/gui-828fc77/AdaptNote-demo-pack-828fc77.zip`
-  （sha256 c4620f55…）
+- Bing 回退截图：`shots/merged-bing.png`
+- 体验包：`releases/download/updater-bing-71a26cc/AdaptNote-demo-pack-71a26cc.zip`
+  （sha256 9afbe23c…）
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -66,9 +65,9 @@ sha256: a621f427c6dfd8e4484bca5a134912259c3ab0ce06af98ccb4ebeae66e63ccf2
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（08b8e87，内置免费 DeepL）：
-`releases/download/deepl-free-08b8e87/AdaptNote-windows-x64-deeplfree.zip`
-更早：40403e3（界面刷新）、d6a3867（DeepLX）、cd43fb9（清晰渲染 + 翻译源）。
+上一个版本（828fc77，GUI 子系统）：
+`releases/download/gui-828fc77/AdaptNote-windows-x64-gui.zip`
+更早：08b8e87（内置免费 DeepL）、40403e3（界面刷新）、d6a3867（DeepLX）。
 更早：7ccc5d1（折叠/排序/参考记忆）、818dcfb（多选/拖拽/双文档）、
 01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：
