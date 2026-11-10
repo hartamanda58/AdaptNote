@@ -47,6 +47,7 @@
 #include <QListView>
 #include <QIcon>
 #include <QMenu>
+#include <QProgressDialog>
 #include <QSplitter>
 #include <QMessageBox>
 #include <QPainter>
@@ -871,6 +872,18 @@ MainWindow::MainWindow(QWidget* parent)
     stateTimer_->setInterval(600);
 
     buildUi();
+
+    // Silent daily check. A release tag carries the short commit, so the running
+    // package can tell whether it is already the latest one.
+    const bool demoRun = qApp->property("adaptnote.demo").toBool();
+    if (!kHeadless && !demoRun) {
+        QTimer::singleShot(7000, this, [this]() {
+            const qint64 last =
+                store_.setting(QStringLiteral("update.lastCheck"), QStringLiteral("0")).toLongLong();
+            if (QDateTime::currentSecsSinceEpoch() - last < 86400) return;
+            checkForUpdates(false);
+        });
+    }
 }
 
 void MainWindow::buildUi()
@@ -4176,6 +4189,17 @@ void MainWindow::buildAiDock()
         connect(pageOcr, &QAction::triggered, this, &MainWindow::ocrCurrentPage);
         QAction* ocrSettings = moreMenu_->addAction(QStringLiteral("OCR 设置…"));
         connect(ocrSettings, &QAction::triggered, this, &MainWindow::openOcrSettings);
+        moreMenu_->addSeparator();
+        moreMenu_->addAction(QStringLiteral("检查更新…"), this,
+                             [this]() { checkForUpdates(true); });
+        moreMenu_->addAction(QStringLiteral("关于 AdaptNote"), this, [this]() {
+            QMessageBox::about(
+                this, QStringLiteral("关于 AdaptNote"),
+                QStringLiteral("<b>AdaptNote</b> %1<br>commit %2<br><br>"
+                               "阅读 · 标注 · 脑图 · 生词 · 翻译")
+                    .arg(an::update::Updater::currentVersion(),
+                         an::update::Updater::currentCommit()));
+        });
     }
 
     ai::AiClient::Settings s;
@@ -6821,4 +6845,114 @@ void MainWindow::applyDemoMarkups()
     updateStatus();
 }
 
+void MainWindow::checkForUpdates(bool userInitiated)
+{
+    if (!updater_) {
+        updater_ = new an::update::Updater(this);
+        connect(updater_, &an::update::Updater::checkFinished, this,
+                [this](const an::update::ReleaseInfo& info, bool available,
+                       const QString& error) {
+                    store_.setSetting(QStringLiteral("update.lastCheck"),
+                                      QString::number(QDateTime::currentSecsSinceEpoch()));
+                    const bool wasUser = pendingUpdateCheck_;
+                    pendingUpdateCheck_ = false;
+                    if (!error.isEmpty()) {
+                        if (wasUser) warnUser(this, QStringLiteral("检查更新"), error);
+                        return;
+                    }
+                    if (available) {
+                        showUpdateDialog(info);
+                    } else if (wasUser) {
+                        inform(this, QStringLiteral("检查更新"),
+                               QStringLiteral("已经是最新版本（%1 · %2）")
+                                   .arg(an::update::Updater::currentVersion(),
+                                        an::update::Updater::currentCommit()));
+                    }
+                });
+        connect(updater_, &an::update::Updater::downloadProgress, this,
+                [this](qint64 received, qint64 total) {
+                    if (!updateProgress_) return;
+                    if (total > 0) updateProgress_->setMaximum(100);
+                    updateProgress_->setValue(
+                        total > 0 ? static_cast<int>(received * 100 / total) : 0);
+                });
+        connect(updater_, &an::update::Updater::failed, this, [this](const QString& error) {
+            if (updateProgress_) {
+                updateProgress_->close();
+                updateProgress_->deleteLater();
+                updateProgress_ = nullptr;
+            }
+            warnUser(this, QStringLiteral("更新失败"), error);
+        });
+        connect(updater_, &an::update::Updater::downloadFinished, this, [this]() {
+            if (updateProgress_) {
+                updateProgress_->close();
+                updateProgress_->deleteLater();
+                updateProgress_ = nullptr;
+            }
+            QMessageBox::information(
+                this, QStringLiteral("更新已就绪"),
+                QStringLiteral("更新包已校验并下载，软件现在会重启完成替换。\n"
+                               "你的书、笔记和设置都在 data\\ 里，不会被覆盖。"));
+            QTimer::singleShot(300, qApp, &QCoreApplication::quit);
+        });
+    }
+    pendingUpdateCheck_ = userInitiated;
+    updater_->check();
+}
+
+void MainWindow::showUpdateDialog(const an::update::ReleaseInfo& info)
+{
+    if (kHeadless) return;
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("updateDialog"));
+    dialog.setWindowTitle(QStringLiteral("发现新版本"));
+    dialog.resize(560, 420);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* title = new QLabel(info.name.isEmpty() ? info.tag : info.name, &dialog);
+    title->setObjectName(QStringLiteral("updateTitle"));
+    layout->addWidget(title);
+    auto* meta = new QLabel(QStringLiteral("%1 · 当前 %2")
+                                .arg(info.tag,
+                                     an::update::Updater::currentVersion() + QStringLiteral(" / ") +
+                                         an::update::Updater::currentCommit()),
+                            &dialog);
+    meta->setObjectName(QStringLiteral("updateMeta"));
+    layout->addWidget(meta);
+    auto* notes = new QTextBrowser(&dialog);
+    notes->setOpenExternalLinks(true);
+    notes->document()->setMarkdown(info.notes);
+    layout->addWidget(notes, 1);
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch(1);
+    auto* later = new QPushButton(QStringLiteral("稍后"), &dialog);
+    auto* install = new QPushButton(QStringLiteral("下载并更新"), &dialog);
+    install->setDefault(true);
+    buttons->addWidget(later);
+    buttons->addWidget(install);
+    layout->addLayout(buttons);
+    connect(later, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(install, &QPushButton::clicked, &dialog, &QDialog::accept);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    updateProgress_ = new QProgressDialog(QStringLiteral("正在下载更新…"),
+                                          QStringLiteral("取消"), 0, 0, this);
+    updateProgress_->setWindowTitle(QStringLiteral("更新 AdaptNote"));
+    updateProgress_->setWindowModality(Qt::WindowModal);
+    updateProgress_->setMinimumDuration(0);
+    updateProgress_->setAutoClose(false);
+    updateProgress_->setAutoReset(false);
+    updateProgress_->show();
+    connect(updateProgress_, &QProgressDialog::canceled, this, [this]() {
+        if (updater_) updater_->abort();
+        if (updateProgress_) {
+            updateProgress_->close();
+            updateProgress_->deleteLater();
+            updateProgress_ = nullptr;
+        }
+    });
+    updater_->downloadAndInstall(info);
+}
+
 }  // namespace an
+

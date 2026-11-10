@@ -613,3 +613,15 @@ QWidget#mindBar { background: #fffdfa; border-bottom-color: #e8e4dc; }
 QStatusBar { background: #fbf9f6; border-top-color: #e6e2db; }
 QPushButton#shelfAddBook { background: #fffdfa; border-color: #ddd6ca; }
 QTabBar#sideTabsBar { background: #efeae2; }
+
+QDialog#updateDialog { background: #fffdfa; }
+QLabel#updateTitle { color: #111827; font-size: 17px; font-weight: 700; }
+QLabel#updateMeta { color: #8590a2; font-size: 11.5px; }
+QDialog#updateDialog QTextBrowser {
+    background: #ffffff;
+    border: 1px solid #e3e8f0;
+    border-radius: 10px;
+    padding: 10px;
+}
+QProgressDialog { background: #fffdfa; }
+QProgressDialog QLabel { color: #374151; }

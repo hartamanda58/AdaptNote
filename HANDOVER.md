@@ -261,6 +261,9 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
   白色摘录卡片、圆角页面与柔和投影
 - Windows 包改为 GUI 子系统：双击 `bin\adaptnote.exe` 不再弹黑色终端；
   OCR 调用 tesseract 时用 CREATE_NO_WINDOW，不再闪控制台；`AdaptNote.bat` 已移除
+- 自动更新：GitHub Release 检查 + commit/发布时间判断 + sha256 校验 +
+  隐藏 PowerShell 等进程退出后 robocopy 替换并重启；`data\` 保留
+- Bing 授权接口失败时自动回退到 `www.bing.com/ttranslatev3`（IG/token 从翻译页提取）
 - PDF 页至少按 144dpi 渲染（高分屏再乘 DPR），解决 100% 下的矢量字发虚
 - 划词翻译支持 **DeepL 免费（内置，无需终端）** / Google / Bing / DeepL / DeepLX / AI；
   “自动”Bing→Google，中文原文自动改译英文
@@ -302,9 +305,11 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 6. 旧库迁移只覆盖「有笔记的文档」；多主题旧库未覆盖
 7. 分组只能拖到**同级**位置，不能拖成另一分组的子分组；暂未做“全部折叠到某一层”
 8. 参考窗格可标注但右栏摘录列表仍只列主文档；Google 在部分网络需代理，
-   Bing 的 Edge 接口与 DeepL 也可能被网络拦截，Auto 会 Bing→Google 回退
+   Bing 会先走 Edge 授权、失败再走网页版；DeepL 也可能被网络拦截，Auto 会 Bing→Google 回退
 9. 内置 DeepL 免费走第三方逆向的匿名 oneshot，可能被限流/失效（429 会提示）；
    要长期稳定用官方 API 或自建 DeepLX；真实数位板/Anki/XMind/WebDAV 仍未人工验收
+10. 自动更新只覆盖便携包；旧包（没有本版更新器）需要手动下载这一次。
+    PowerShell 脚本失败会写 `%TEMP%\adaptnote-update.log` 并尝试重启旧版
 9. 双页对照、章节自动归类未做；缩略图最多渲染 500 页
 
 ---

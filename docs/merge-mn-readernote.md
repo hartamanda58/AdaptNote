@@ -135,6 +135,16 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
 - 右侧 dock 的「脑图」标签此前从未接到数据（永远是空白）；现在与工作区脑图同步，
   并支持点击定位、双击改名。
 
+### 6.6 自动更新
+
+- 启动后每天一次（也可「更多 → 检查更新…」）请求 GitHub `releases/latest`
+- Release tag 约定 `<name>-<短 commit>`；当前 commit 相同则不再提示。
+  不同 commit 时再比较 Release `published_at` 与编译时间，避免“开发版比线上新”被误判
+- 只接受资源名含 `windows-x64` 的 zip；用 GitHub API 的 `digest: sha256:…` 校验
+- 下载到临时目录，校验通过后启动隐藏的 PowerShell：等待进程退出 → `Expand-Archive` →
+  `robocopy /E /XD data` → 重启 exe；失败时重启旧版并写 `%TEMP%\adaptnote-update.log`
+- 仅便携包（存在 `portable.flag`）可用；`data\` 不会被覆盖
+
 ### 6.5 视觉语言（2026 刷新）
 
 - 图标从彩色小色块改为统一的 2x 线性图标（20px 画布、1.5px 描边、圆头），

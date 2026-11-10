@@ -16,7 +16,7 @@
 
 param(
     [string]$QtDir   = $env:QTDIR,
-    [string]$Version = "0.22",
+    [string]$Version = "0.23",
     [string]$BuildDir = "build-win",
     [string]$MuPdfRoot = "",
     # Bundle a local tesseract (UB-Mannheim build + tessdata_fast eng/chi_sim) and a

@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.21)
-project(AdaptNote VERSION 0.1 LANGUAGES CXX)
+project(AdaptNote VERSION 0.23 LANGUAGES CXX)
+
+# Release tags are `<name>-<short-sha>`; the updater compares this sha.
+execute_process(COMMAND git rev-parse --short=7 HEAD
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE ADAPT_COMMIT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+if(NOT ADAPT_COMMIT)
+  set(ADAPT_COMMIT "unknown")
+endif()
+string(TIMESTAMP ADAPT_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -99,12 +110,17 @@ add_library(adapt_core STATIC
   src/render/mupdf_engine.cpp
   src/export/zip.cpp
   src/export/exporter.cpp
+  src/update/updater.cpp
 )
 target_include_directories(adapt_core PUBLIC src ${MUPDF_INCLUDE_DIR})
 if(MUPDF_ZLIB_INCLUDE)
   target_include_directories(adapt_core PRIVATE ${MUPDF_ZLIB_INCLUDE})
 endif()
 target_link_libraries(adapt_core PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Network)
+target_compile_definitions(adapt_core PUBLIC
+  ADAPT_VERSION="${PROJECT_VERSION}"
+  ADAPT_COMMIT="${ADAPT_COMMIT}"
+  ADAPT_BUILD_TIME="${ADAPT_BUILD_TIME}")
 target_link_libraries(adapt_core PUBLIC ${MUPDF_LIBS})
 
 if(MSVC)

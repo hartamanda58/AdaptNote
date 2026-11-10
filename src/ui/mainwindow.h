@@ -2,6 +2,7 @@
 
 #include "core/model.h"
 #include "core/store.h"
+#include "update/updater.h"
 #include "render/mupdf_engine.h"
 #include "ai/ai_client.h"
 #include "ai/prompts.h"
@@ -36,6 +37,7 @@ class QTabBar;
 class QUndoStack;
 class QTextBrowser;
 class QPushButton;
+class QProgressDialog;
 
 namespace an {
 
@@ -293,6 +295,11 @@ private:
     SyncManager sync_{store_};
     PageView* view_ = nullptr;
     QSplitter* splitter_ = nullptr;
+    an::update::Updater* updater_ = nullptr;
+    QProgressDialog* updateProgress_ = nullptr;
+    bool pendingUpdateCheck_ = false;
+    void checkForUpdates(bool userInitiated);
+    void showUpdateDialog(const an::update::ReleaseInfo& info);
     // Reference pane: a second, read-only document next to the main one.
     QSplitter* pageSplitter_ = nullptr;
     QWidget* referencePanel_ = nullptr;

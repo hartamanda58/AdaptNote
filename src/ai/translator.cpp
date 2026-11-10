@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -141,6 +142,23 @@ QString Translator::parseGoogle(const QByteArray& json)
 QString Translator::parseBing(const QByteArray& json)
 {
     return firstTranslationText(json);
+}
+
+bool Translator::parseBingPage(const QByteArray& html, QString* ig, QString* key,
+                               QString* token)
+{
+    const QString page = QString::fromUtf8(html);
+    const QRegularExpression igRe(QStringLiteral("IG\\s*:\\s*\"([^\"]+)\""));
+    const QRegularExpression abuseRe(QStringLiteral(
+        "params_AbusePreventionHelper\\s*=\\s*\\[\\s*(\\d+)\\s*,\\s*\"([^\"]+)\""
+        "\\s*,\\s*(\\d+)\\s*\\]"));
+    const QRegularExpressionMatch igMatch = igRe.match(page);
+    const QRegularExpressionMatch abuseMatch = abuseRe.match(page);
+    if (!igMatch.hasMatch() || !abuseMatch.hasMatch()) return false;
+    if (ig) *ig = igMatch.captured(1);
+    if (key) *key = abuseMatch.captured(1);
+    if (token) *token = abuseMatch.captured(2);
+    return !igMatch.captured(1).isEmpty() && !abuseMatch.captured(2).isEmpty();
 }
 
 QByteArray Translator::deeplBody(const QString& text, const QString& uiTarget)
@@ -321,6 +339,10 @@ void Translator::translate(const QString& text, const QString& uiTarget, Provide
     deeplxToken_ = deeplxToken.trimmed();
     provider_ = provider;
     autoFellBack_ = false;
+    bingWebTried_ = false;
+    bingIg_.clear();
+    bingKey_.clear();
+    bingToken_.clear();
     freeChunks_.clear();
     freeIndex_ = 0;
     freeResult_.clear();
@@ -420,12 +442,12 @@ void Translator::handleBingToken()
         if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
         if (!detail.isEmpty()) netError += QStringLiteral("：%1").arg(detail);
         else if (netError.isEmpty()) netError = QStringLiteral("网络被拦截或超时");
-        failOrFallback(QStringLiteral("Bing 获取授权失败：%1").arg(netError));
+        startBingWebFallback(QStringLiteral("Bing 获取授权失败：%1").arg(netError));
         return;
     }
     const QString token = QString::fromUtf8(body).trimmed();
     if (token.isEmpty() || token.count(QLatin1Char('.')) != 2) {
-        failOrFallback(QStringLiteral("Bing 授权返回异常"));
+        startBingWebFallback(QStringLiteral("Bing 授权返回异常"));
         return;
     }
     requestBing(token);
@@ -469,12 +491,115 @@ void Translator::handleBing()
         if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
         if (!detail.isEmpty()) netError += QStringLiteral("：%1").arg(detail);
         else if (netError.isEmpty()) netError = QStringLiteral("网络被拦截或超时");
-        failOrFallback(QStringLiteral("Bing 请求失败：%1").arg(netError));
+        startBingWebFallback(QStringLiteral("Bing 请求失败：%1").arg(netError));
         return;
     }
     const QString text = parseBing(body);
     if (text.isEmpty()) {
-        failOrFallback(QStringLiteral("Bing 没有返回译文"));
+        startBingWebFallback(QStringLiteral("Bing 没有返回译文"));
+        return;
+    }
+    finishWith(text, QStringLiteral("Bing"));
+}
+
+void Translator::startBingWebFallback(const QString& reason)
+{
+    // edge.microsoft.com/translate/auth is blocked or returns an empty token on
+    // some networks. The public translator page carries an IG + abuse token that
+    // the ttranslatev3 endpoint accepts; use it as a transparent fallback.
+    if (bingWebTried_) {
+        failOrFallback(reason);
+        return;
+    }
+    bingWebTried_ = true;
+    requestBingWebPage();
+}
+
+void Translator::requestBingWebPage()
+{
+    QNetworkRequest request{QUrl(QStringLiteral("https://www.bing.com/translator"))};
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                     "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                     "Chrome/124.0.0.0 Safari/537.36"));
+    request.setRawHeader("Accept", "text/html,application/xhtml+xml");
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::NoLessSafeRedirectPolicy);
+    request.setTransferTimeout(20000);
+    reply_ = net_->get(request);
+    connect(reply_, &QNetworkReply::finished, this, &Translator::handleBingWebPage);
+}
+
+void Translator::handleBingWebPage()
+{
+    QNetworkReply* reply = reply_.data();
+    if (!reply) return;
+    reply_ = nullptr;
+    const QByteArray body = reply->readAll();
+    const QNetworkReply::NetworkError error = reply->error();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    QString netError = reply->errorString();
+    dropReply(reply);
+    if (error != QNetworkReply::NoError || status >= 400) {
+        if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
+        failOrFallback(QStringLiteral("Bing 网页接口打不开：%1").arg(netError));
+        return;
+    }
+    if (!parseBingPage(body, &bingIg_, &bingKey_, &bingToken_)) {
+        failOrFallback(QStringLiteral("Bing 网页接口页面格式变了（找不到 IG/token）"));
+        return;
+    }
+    requestBingWebTranslate();
+}
+
+void Translator::requestBingWebTranslate()
+{
+    QUrl url{QStringLiteral("https://www.bing.com/ttranslatev3")};
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("isVertical"), QStringLiteral("1"));
+    query.addQueryItem(QStringLiteral("IG"), bingIg_);
+    query.addQueryItem(QStringLiteral("IID"), QStringLiteral("translator.5028.1"));
+    url.setQuery(query);
+
+    QUrlQuery form;
+    form.addQueryItem(QStringLiteral("fromLang"), QStringLiteral("auto-detect"));
+    form.addQueryItem(QStringLiteral("text"), text_);
+    form.addQueryItem(QStringLiteral("token"), bingToken_);
+    form.addQueryItem(QStringLiteral("key"), bingKey_);
+    form.addQueryItem(QStringLiteral("to"), targetCode(Provider::Bing, target_));
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/x-www-form-urlencoded"));
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                     "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                     "Chrome/124.0.0.0 Safari/537.36"));
+    request.setRawHeader("Origin", "https://www.bing.com");
+    request.setRawHeader("Referer", "https://www.bing.com/translator");
+    request.setTransferTimeout(20000);
+    reply_ = net_->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
+    connect(reply_, &QNetworkReply::finished, this, &Translator::handleBingWebTranslate);
+}
+
+void Translator::handleBingWebTranslate()
+{
+    QNetworkReply* reply = reply_.data();
+    if (!reply) return;
+    reply_ = nullptr;
+    const QByteArray body = reply->readAll();
+    const QNetworkReply::NetworkError error = reply->error();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    QString netError = reply->errorString();
+    dropReply(reply);
+    if (error != QNetworkReply::NoError || status >= 400) {
+        if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
+        failOrFallback(QStringLiteral("Bing 网页翻译失败：%1").arg(netError));
+        return;
+    }
+    const QString text = parseBing(body);
+    if (text.isEmpty()) {
+        failOrFallback(QStringLiteral("Bing 网页翻译没有返回译文"));
         return;
     }
     finishWith(text, QStringLiteral("Bing"));

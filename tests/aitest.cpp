@@ -3,6 +3,7 @@
 #include "ai/ai_client.h"
 #include "ai/prompts.h"
 #include "ai/translator.h"
+#include "update/updater.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -434,6 +435,70 @@ int main(int argc, char** argv)
         check(dlxBody.contains(QStringLiteral("\"source_lang\":\"auto\"")) &&
                   dlxBody.contains(QStringLiteral("\"target_lang\":\"ZH\"")),
               QStringLiteral("DeepLX request body is JSON with auto source"));
+
+        // ---- updater parsing / script generation ----
+        {
+            using an::update::Updater;
+            const QByteArray release = R"({
+              "tag_name": "gui-abcdef1",
+              "name": "AdaptNote abcdef1",
+              "body": "notes",
+              "published_at": "2026-06-01T10:00:00Z",
+              "assets": [
+                {"name":"AdaptNote-demo-pack-abcdef1.zip","size":10,
+                 "browser_download_url":"https://example.test/demo.zip",
+                 "digest":"sha256:1111"},
+                {"name":"AdaptNote-windows-x64-gui.zip","size":123456,
+                 "browser_download_url":"https://example.test/app.zip",
+                 "digest":"sha256:abcdef0123456789"}
+              ]
+            })";
+            const an::update::ReleaseInfo info = Updater::parseRelease(release);
+            check(info.tag == QStringLiteral("gui-abcdef1") &&
+                      info.commit == QStringLiteral("abcdef1") &&
+                      info.assetName == QStringLiteral("AdaptNote-windows-x64-gui.zip") &&
+                      info.sha256 == QStringLiteral("abcdef0123456789") && info.size == 123456,
+                  QStringLiteral("updater picks the Windows zip and its sha256"));
+            check(Updater::commitFromTag(QStringLiteral("ui-40403e3")) ==
+                          QStringLiteral("40403e3") &&
+                      Updater::commitFromTag(QStringLiteral("v1.2.3")).isEmpty(),
+                  QStringLiteral("updater extracts the commit from a release tag"));
+            check(!Updater::isNewer(info, QStringLiteral("abcdef1")) &&
+                      !Updater::isNewer(info, QStringLiteral("abcdef")) &&
+                      !Updater::isNewer(info, QStringLiteral("unknown")),
+                  QStringLiteral("updater does not reinstall the same commit"));
+            check(Updater::isNewer(info, QStringLiteral("1234567"),
+                                   QStringLiteral("2025-01-01T00:00:00Z")) &&
+                      !Updater::isNewer(info, QStringLiteral("1234567"),
+                                        QStringLiteral("2027-01-01T00:00:00Z")),
+                  QStringLiteral("updater respects release publish time (dev builds newer)"));
+            const QString script = Updater::buildWindowsUpdateScript(
+                4242, QStringLiteral("C:\\Apps\\AdaptNote"), QStringLiteral("C:\\Temp\\u.zip"));
+            check(script.contains(QStringLiteral("Wait-Process -Id 4242")) &&
+                      script.contains(QStringLiteral("/XD data")) &&
+                      script.contains(QStringLiteral("C:\\Apps\\AdaptNote")) &&
+                      script.contains(QStringLiteral("C:\\Temp\\u.zip")) &&
+                      script.contains(QStringLiteral("bin\\adaptnote.exe")),
+                  QStringLiteral("update script waits, keeps data, restarts"));
+        }
+
+        // ---- Bing web fallback (ttranslatev3 scrape) ----
+        {
+            const QByteArray page =
+                "<html><script>IG:\"0DAC47E8CA0A443688D8FD1C01F46B18\","
+                "params_AbusePreventionHelper = [1794312772922,"
+                "\"xxqoCAv9khb7R7SHb1WOlP6qqPgayFaW\",3600000]</script></html>";
+            QString ig;
+            QString key;
+            QString token;
+            check(Translator::parseBingPage(page, &ig, &key, &token) &&
+                      ig == QStringLiteral("0DAC47E8CA0A443688D8FD1C01F46B18") &&
+                      key == QStringLiteral("1794312772922") &&
+                      token == QStringLiteral("xxqoCAv9khb7R7SHb1WOlP6qqPgayFaW"),
+                  QStringLiteral("Bing web page exposes IG/key/token"));
+            check(!Translator::parseBingPage("<html>nope</html>", &ig, &key, &token),
+                  QStringLiteral("Bing web parser rejects a changed page"));
+        }
 
         // ---- built-in free DeepL (oneshot) ----
         check(Translator::freeTargetCode(QStringLiteral("简体中文")) == QStringLiteral("zh-Hans") &&

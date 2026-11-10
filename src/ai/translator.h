@@ -32,6 +32,8 @@ public:
     static QUrl googleUrl(const QString& text, const QString& uiTarget);
     static QString parseGoogle(const QByteArray& json);
     static QString parseBing(const QByteArray& json);
+    static bool parseBingPage(const QByteArray& html, QString* ig, QString* key,
+                              QString* token);
     static QByteArray deeplBody(const QString& text, const QString& uiTarget);
     static QString parseDeepL(const QByteArray& json);
     static QString normalizeDeepLXUrl(const QString& url);
@@ -61,6 +63,11 @@ private:
     void handleGoogle();
     void handleBingToken();
     void handleBing();
+    void requestBingWebPage();
+    void handleBingWebPage();
+    void requestBingWebTranslate();
+    void handleBingWebTranslate();
+    void startBingWebFallback(const QString& reason);
     void handleDeepL();
     void failOrFallback(const QString& error);
     void finishWith(const QString& text, const QString& provider);
@@ -71,6 +78,10 @@ private:
     QString text_;
     QString target_;
     QString deeplKey_;
+    QString bingIg_;
+    QString bingKey_;
+    QString bingToken_;
+    bool bingWebTried_ = false;
     QString deeplxUrl_;
     QString deeplxToken_;
     QVector<QString> freeChunks_;

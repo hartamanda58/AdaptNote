@@ -22,6 +22,7 @@ int main(int argc, char** argv)
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("AdaptNote"));
     QCoreApplication::setApplicationName(QStringLiteral("AdaptNote"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(ADAPT_VERSION));
     app.setStyle(QStringLiteral("Fusion"));
 
     QFile qss(QStringLiteral(":/app.qss"));
@@ -86,6 +87,8 @@ int main(int argc, char** argv)
     parser.addOption(optProbe);
     parser.addOption(optWorkspace);
     parser.process(app);
+    if (parser.isSet(optDemo) || parser.isSet(optShot))
+        qApp->setProperty("adaptnote.demo", true);
 
     an::MainWindow w;
     w.resize(parser.value(optWidth).toInt(), parser.value(optHeight).toInt());

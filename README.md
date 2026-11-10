@@ -17,6 +17,8 @@
 **生词本（五盒复习 + 查词 + 发音 + TSV/Anki/.apkg 导出 + 同步）**、
 **OCR（tesseract / 视觉模型）**、页面缩略图、摘录卡片。
 划词翻译支持 **DeepL 免费（内置，无需终端/Key）/ Google / Bing / DeepL / DeepLX / AI 模型**；
+Bing 在 Edge 授权接口失败时会自动回退到网页版 `ttranslatev3`。
+软件每天自动检查 GitHub Release，发现新版可一键下载、校验 sha256、重启替换（保留 `data\`）。
 「DeepL 免费（内置）」直接走 DeepL 客户端的匿名接口，选一下就能翻译，不用开终端；
 超过 1500 字符会自动按句切分。DeepLX 仍保留给自建/公开实例（可选 Token）。中文原文选中文时自动改译英文。
 Windows 便携包自带本地 tesseract（eng+chi_sim）与精简版 ECDICT，离线即可 OCR 和查词。
