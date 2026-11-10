@@ -6,6 +6,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUuid>
 #include <QUrlQuery>
 
 namespace an {
@@ -57,6 +58,7 @@ QString Translator::targetCode(Provider provider, const QString& uiTarget)
     switch (provider) {
     case Provider::DeepL:
     case Provider::DeepLX:
+    case Provider::DeepLFree:
         if (traditional) return QStringLiteral("ZH-HANT");
         if (chinese) return QStringLiteral("ZH");
         if (english) return QStringLiteral("EN");
@@ -103,6 +105,7 @@ QString Translator::providerName(Provider provider)
     case Provider::Bing: return QStringLiteral("Bing");
     case Provider::DeepL: return QStringLiteral("DeepL");
     case Provider::DeepLX: return QStringLiteral("DeepLX");
+    case Provider::DeepLFree: return QStringLiteral("DeepL 免费");
     case Provider::Auto:
     default: return QStringLiteral("自动");
     }
@@ -146,6 +149,93 @@ QByteArray Translator::deeplBody(const QString& text, const QString& uiTarget)
     query.addQueryItem(QStringLiteral("text"), text);
     query.addQueryItem(QStringLiteral("target_lang"), targetCode(Provider::DeepL, uiTarget));
     return query.toString(QUrl::FullyEncoded).toUtf8();
+}
+
+namespace {
+QString freeInstanceId()
+{
+    static const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return id;
+}
+QString freeSessionId()
+{
+    static const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return id;
+}
+QString& freeEndpointRef()
+{
+    static QString endpoint = QStringLiteral("https://oneshot-free.www.deepl.com/v1/translate");
+    return endpoint;
+}
+QString freeEndpoint()
+{
+    return freeEndpointRef();
+}
+}  // namespace
+
+void Translator::setFreeEndpointForTest(const QString& url)
+{
+    // The fake server in tests uses this; production never calls it.
+    freeEndpointRef() = url;
+}
+
+QString Translator::freeTargetCode(const QString& uiTarget)
+{
+    const QString code = targetCode(Provider::DeepL, uiTarget);
+    if (code == QStringLiteral("ZH")) return QStringLiteral("zh-Hans");
+    if (code == QStringLiteral("ZH-HANT")) return QStringLiteral("zh-Hant");
+    if (code == QStringLiteral("EN")) return QStringLiteral("en-US");
+    if (code == QStringLiteral("PT")) return QStringLiteral("pt-BR");
+    return code.toLower();
+}
+
+QByteArray Translator::freeBody(const QString& text, const QString& uiTarget)
+{
+    QJsonObject app;
+    app.insert(QStringLiteral("os"), QStringLiteral("iOS"));
+    app.insert(QStringLiteral("os_version"), QStringLiteral("26.0"));
+    app.insert(QStringLiteral("app_version"), QStringLiteral("26.52"));
+    app.insert(QStringLiteral("app_build"), QStringLiteral("5443737"));
+    app.insert(QStringLiteral("instance_id"), freeInstanceId());
+
+    QJsonObject body;
+    body.insert(QStringLiteral("text"), QJsonArray{text});
+    body.insert(QStringLiteral("target_lang"), freeTargetCode(uiTarget));
+    body.insert(QStringLiteral("usage_type"), QStringLiteral("translate"));
+    body.insert(QStringLiteral("app_information"), app);
+    return QJsonDocument(body).toJson(QJsonDocument::Compact);
+}
+
+QString Translator::parseFreeDeepL(const QByteArray& json)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(json);
+    const QJsonArray items = doc.object().value(QStringLiteral("translations")).toArray();
+    if (items.isEmpty() || !items.at(0).isObject()) return {};
+    return items.at(0).toObject().value(QStringLiteral("text")).toString().trimmed();
+}
+
+QVector<QString> Translator::splitFreeText(const QString& text, int max)
+{
+    // The anonymous oneshot endpoint rejects >1500 UTF-16 code units. Split at
+    // sentence/clause boundaries so paragraphs still translate in one click.
+    QVector<QString> parts;
+    int pos = 0;
+    static const QString stops = QStringLiteral("。！？!?；;.\n");
+    while (pos < text.size()) {
+        int len = qMin(max, text.size() - pos);
+        if (pos + len < text.size()) {
+            for (int i = pos + len; i > pos + max / 2; --i) {
+                if (stops.contains(text.at(i - 1))) {
+                    len = i - pos;
+                    break;
+                }
+            }
+        }
+        parts.append(text.mid(pos, len));
+        pos += len;
+    }
+    if (parts.isEmpty()) parts.append(QString());
+    return parts;
 }
 
 QString Translator::normalizeDeepLXUrl(const QString& url)
@@ -231,11 +321,18 @@ void Translator::translate(const QString& text, const QString& uiTarget, Provide
     deeplxToken_ = deeplxToken.trimmed();
     provider_ = provider;
     autoFellBack_ = false;
+    freeChunks_.clear();
+    freeIndex_ = 0;
+    freeResult_.clear();
     switch (provider_) {
     case Provider::Google: requestGoogle(); break;
     case Provider::Bing: requestBingToken(); break;
     case Provider::DeepL: requestDeepL(); break;
     case Provider::DeepLX: requestDeepLX(); break;
+    case Provider::DeepLFree:
+        freeChunks_ = splitFreeText(text_);
+        requestFreeDeepL();
+        break;
     // Bing's Edge endpoint is reachable from mainland China more often than Google,
     // so "auto" tries Bing first and falls back to Google.
     case Provider::Auto: requestBingToken(); break;
@@ -443,6 +540,63 @@ void Translator::handleDeepLX()
         return;
     }
     finishWith(text, QStringLiteral("DeepLX"));
+}
+
+void Translator::requestFreeDeepL()
+{
+    if (freeIndex_ < 0 || freeIndex_ >= freeChunks_.size()) {
+        finishWith(freeResult_, QStringLiteral("DeepL 免费"));
+        return;
+    }
+    QNetworkRequest request{QUrl(freeEndpoint())};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Authorization", "None");
+    request.setRawHeader("User-Agent", "DeepL/26.52 CFNetwork/3826.600.41 Darwin/25.0.0");
+    request.setRawHeader("x-app-os-version", "26.0");
+    request.setRawHeader("x-app-instance-id", freeInstanceId().toUtf8());
+    request.setRawHeader("x-app-session-id", freeSessionId().toUtf8());
+    request.setTransferTimeout(30000);
+    reply_ = net_->post(request, freeBody(freeChunks_.at(freeIndex_), target_));
+    connect(reply_, &QNetworkReply::finished, this, &Translator::handleFreeDeepL);
+}
+
+void Translator::handleFreeDeepL()
+{
+    QNetworkReply* reply = reply_.data();
+    if (!reply) return;
+    reply_ = nullptr;
+    const QByteArray body = reply->readAll();
+    const QNetworkReply::NetworkError error = reply->error();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    QString netError = reply->errorString();
+    dropReply(reply);
+
+    if (status == 429) {
+        emit finished(QString(), QStringLiteral("DeepL 免费"),
+                      QStringLiteral("DeepL 免费接口暂时限流了；等一会儿再试，或改用 DeepLX / 官方 Key"));
+        return;
+    }
+    if (error != QNetworkReply::NoError) {
+        const QString detail = QString::fromUtf8(body).trimmed().left(140);
+        if (status > 0) netError += QStringLiteral("（HTTP %1）").arg(status);
+        if (!detail.isEmpty()) netError += QStringLiteral("：%1").arg(detail);
+        emit finished(QString(), QStringLiteral("DeepL 免费"),
+                      QStringLiteral("DeepL 免费接口失败：%1").arg(netError));
+        return;
+    }
+    const QString translated = parseFreeDeepL(body);
+    if (translated.isEmpty()) {
+        emit finished(QString(), QStringLiteral("DeepL 免费"),
+                      QStringLiteral("DeepL 免费接口返回为空或格式无法识别"));
+        return;
+    }
+    freeResult_ += translated;
+    ++freeIndex_;
+    if (freeIndex_ < freeChunks_.size()) {
+        requestFreeDeepL();
+        return;
+    }
+    finishWith(freeResult_, QStringLiteral("DeepL 免费"));
 }
 
 void Translator::handleDeepL()

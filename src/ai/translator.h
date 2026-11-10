@@ -17,7 +17,7 @@ namespace ai {
 class Translator : public QObject {
     Q_OBJECT
 public:
-    enum class Provider { Auto, Google, Bing, DeepL, DeepLX };
+    enum class Provider { Auto, Google, Bing, DeepL, DeepLX, DeepLFree };
 
     explicit Translator(QObject* parent = nullptr);
     ~Translator() override;
@@ -35,6 +35,11 @@ public:
     static QByteArray deeplBody(const QString& text, const QString& uiTarget);
     static QString parseDeepL(const QByteArray& json);
     static QString normalizeDeepLXUrl(const QString& url);
+    static QString freeTargetCode(const QString& uiTarget);
+    static QByteArray freeBody(const QString& text, const QString& uiTarget);
+    static QString parseFreeDeepL(const QByteArray& json);
+    static QVector<QString> splitFreeText(const QString& text, int max = 1400);
+    static void setFreeEndpointForTest(const QString& url);
     static QByteArray deeplxBody(const QString& text, const QString& uiTarget);
     static QString parseDeepLX(const QByteArray& body);
     static QString providerName(Provider provider);
@@ -51,6 +56,8 @@ private:
     void requestDeepL();
     void requestDeepLX();
     void handleDeepLX();
+    void requestFreeDeepL();
+    void handleFreeDeepL();
     void handleGoogle();
     void handleBingToken();
     void handleBing();
@@ -66,6 +73,9 @@ private:
     QString deeplKey_;
     QString deeplxUrl_;
     QString deeplxToken_;
+    QVector<QString> freeChunks_;
+    int freeIndex_ = 0;
+    QString freeResult_;
     Provider provider_ = Provider::Auto;
     bool autoFellBack_ = false;
 };

@@ -342,6 +342,21 @@ int main(int argc, char** argv)
             check(!error.isEmpty() && text.isEmpty(),
                   QStringLiteral("DeepLX reports a token failure: %1").arg(error));
 
+            Translator::setFreeEndpointForTest(
+                QStringLiteral("http://127.0.0.1:18089/v1/translate"));
+            done = false;
+            text.clear();
+            provider.clear();
+            error.clear();
+            translator.translate(QStringLiteral("hello"), QStringLiteral("简体中文"),
+                                 Translator::Provider::DeepLFree);
+            check(waitFor([&]() { return done; }, 5000),
+                  QStringLiteral("built-in free DeepL completes"));
+            check(error.isEmpty() && text == QStringLiteral("FREE[zh-Hans] hello") &&
+                      provider == QStringLiteral("DeepL 免费"),
+                  QStringLiteral("built-in free DeepL translated via oneshot (%1 / %2)")
+                      .arg(provider, error));
+
             dlx.kill();
             dlx.waitForFinished(2000);
         }
@@ -419,6 +434,35 @@ int main(int argc, char** argv)
         check(dlxBody.contains(QStringLiteral("\"source_lang\":\"auto\"")) &&
                   dlxBody.contains(QStringLiteral("\"target_lang\":\"ZH\"")),
               QStringLiteral("DeepLX request body is JSON with auto source"));
+
+        // ---- built-in free DeepL (oneshot) ----
+        check(Translator::freeTargetCode(QStringLiteral("简体中文")) == QStringLiteral("zh-Hans") &&
+                  Translator::freeTargetCode(QStringLiteral("English")) == QStringLiteral("en-US") &&
+                  Translator::freeTargetCode(QStringLiteral("日本語")) == QStringLiteral("ja"),
+              QStringLiteral("free DeepL target codes are BCP-47-ish"));
+        const QString freeBody = QString::fromUtf8(
+            Translator::freeBody(QStringLiteral("hello"), QStringLiteral("简体中文")));
+        check(freeBody.contains(QStringLiteral("\"text\":[\"hello\"]")) &&
+                  freeBody.contains(QStringLiteral("\"target_lang\":\"zh-Hans\"")) &&
+                  freeBody.contains(QStringLiteral("\"usage_type\":\"translate\"")) &&
+                  freeBody.contains(QStringLiteral("\"os\":\"iOS\"")),
+              QStringLiteral("free DeepL body mirrors the iOS oneshot profile"));
+        check(Translator::parseFreeDeepL(
+                  R"({"translations":[{"detected_source_language":"en","text":"你好"}]})") ==
+                  QStringLiteral("你好"),
+              QStringLiteral("free DeepL response parser"));
+        const QString longText(4000, QLatin1Char('a'));
+        const QVector<QString> chunks = Translator::splitFreeText(longText, 1400);
+        int total = 0;
+        bool bounded = true;
+        QString joined;
+        for (const QString& chunk : chunks) {
+            total += chunk.size();
+            joined += chunk;
+            if (chunk.size() > 1400) bounded = false;
+        }
+        check(chunks.size() >= 3 && bounded && total == longText.size() && joined == longText,
+              QStringLiteral("free DeepL chunks long text without losing characters"));
     }
 
     std::printf("\n%s (%d failure(s))\n", g_fail == 0 ? "AI CHECKS PASSED" : "AI CHECKS FAILED", g_fail);

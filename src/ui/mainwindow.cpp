@@ -4450,9 +4450,12 @@ void MainWindow::showSelectionTranslation()
         provider->setObjectName(QStringLiteral("translationProvider"));
         provider->addItems({QStringLiteral("自动（Bing → Google）"), QStringLiteral("Google"),
                             QStringLiteral("Bing"), QStringLiteral("DeepL"),
-                            QStringLiteral("AI 模型"), QStringLiteral("DeepL（DeepLX 免费）")});
+                            QStringLiteral("AI 模型"), QStringLiteral("DeepL（DeepLX 免费）"),
+                            QStringLiteral("DeepL 免费（内置）")});
+        provider->setItemData(5, QStringLiteral("需要本机运行 DeepLX 服务"), Qt::ToolTipRole);
+        provider->setItemData(6, QStringLiteral("内置免费接口，无需终端、无需 Key"), Qt::ToolTipRole);
         provider->setCurrentIndex(qBound(0,
-            store_.setting(QStringLiteral("translation.provider"), QStringLiteral("0")).toInt(), 5));
+            store_.setting(QStringLiteral("translation.provider"), QStringLiteral("0")).toInt(), 6));
         controls->addWidget(providerLabel);
         controls->addWidget(provider, 1);
         auto* targetLabel = new QLabel(QStringLiteral("译为"), translationDialog_);
@@ -4621,6 +4624,7 @@ void MainWindow::runTranslation()
     else if (providerIndex == 2) provider = ai::Translator::Provider::Bing;
     else if (providerIndex == 3) provider = ai::Translator::Provider::DeepL;
     else if (providerIndex == 5) provider = ai::Translator::Provider::DeepLX;
+    else if (providerIndex == 6) provider = ai::Translator::Provider::DeepLFree;
     translator_->translate(translationSourceText_, target, provider,
                            keyEdit ? keyEdit->text() : QString(),
                            deeplxUrl ? deeplxUrl->text() : QString(),
@@ -5740,12 +5744,12 @@ QString MainWindow::translationForTest() const
 void MainWindow::setTranslationProviderForTest(int index)
 {
     store_.setSetting(QStringLiteral("translation.provider"),
-                      QString::number(qBound(0, index, 5)));
+                      QString::number(qBound(0, index, 6)));
     if (translationDialog_) {
         if (auto* provider =
                 translationDialog_->findChild<QComboBox*>(QStringLiteral("translationProvider"))) {
             const QSignalBlocker blocker(provider);
-            provider->setCurrentIndex(qBound(0, index, 5));
+            provider->setCurrentIndex(qBound(0, index, 6));
         }
     }
 }

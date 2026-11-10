@@ -16,9 +16,9 @@
 **WebDAV / 本地目录 / S3（MinIO）双向同步（版本向量合并 + 冲突保留）**、手写笔迹、脑图、逐句朗读、AI 助手、
 **生词本（五盒复习 + 查词 + 发音 + TSV/Anki/.apkg 导出 + 同步）**、
 **OCR（tesseract / 视觉模型）**、页面缩略图、摘录卡片。
-划词翻译支持 **Google / Bing / DeepL / DeepLX（免费自托管）/ AI 模型**；
-DeepLX 可本机 `docker run -itd -p 1188:1188 ghcr.io/owo-network/deeplx:latest`，
-翻译引擎选「DeepL（DeepLX 免费）」即可，也支持自填实例 URL 和 Token。中文原文选中文时自动改译英文。
+划词翻译支持 **DeepL 免费（内置，无需终端/Key）/ Google / Bing / DeepL / DeepLX / AI 模型**；
+「DeepL 免费（内置）」直接走 DeepL 客户端的匿名接口，选一下就能翻译，不用开终端；
+超过 1500 字符会自动按句切分。DeepLX 仍保留给自建/公开实例（可选 Token）。中文原文选中文时自动改译英文。
 Windows 便携包自带本地 tesseract（eng+chi_sim）与精简版 ECDICT，离线即可 OCR 和查词。
 
 界面为浅色三栏（左书架/大纲，中原文，右 摘录/笔记/生词/脑图/AI），摘录与脑图卡片都可以就地编辑，

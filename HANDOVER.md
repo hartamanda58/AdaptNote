@@ -260,8 +260,9 @@ UI 以 ReaderNote 为主、参考 macOS 版 MarginNote：**浅色三栏**，QSS 
 - 视觉刷新：暖纸色外壳、统一线性图标、圆角脑图卡片（色条/阴影/渐变根节点）、
   白色摘录卡片、圆角页面与柔和投影
 - PDF 页至少按 144dpi 渲染（高分屏再乘 DPR），解决 100% 下的矢量字发虚
-- 划词翻译支持 Google / Bing / DeepL / **DeepLX（免费代理，默认 127.0.0.1:1188）** / AI；
+- 划词翻译支持 **DeepL 免费（内置，无需终端）** / Google / Bing / DeepL / DeepLX / AI；
   “自动”Bing→Google，中文原文自动改译英文
+- DeepL 免费走匿名 oneshot 接口（iOS 客户端），>1500 字符按句切分；可能限流
 - DeepLX 可填自建或公开实例 URL + 可选 Token；兼容 `{code,data}`/`{translations}`/纯文本响应
 - 回到有笔记的书默认「整理」布局（文档+脑图），新模式会记住
 - 右侧 dock 的「脑图」标签接通数据（之前一直是空白）

@@ -17,8 +17,35 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        if self.path.split("?")[0] != "/translate":
+        path = self.path.split("?")[0]
+        if path not in ("/translate", "/v1/translate"):
             self.send_error(404)
+            return
+        if path == "/v1/translate":
+            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                req = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self.send_error(400)
+                return
+            texts = req.get("text") or [""]
+            target = str(req.get("target_lang", "zh-Hans"))
+            body = json.dumps(
+                {
+                    "translations": [
+                        {
+                            "detected_source_language": "en",
+                            "text": f"FREE[{target}] {texts[0]}",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if TOKEN and self.headers.get("Authorization", "") != "Bearer " + TOKEN:
             body = json.dumps({"code": 401, "message": "invalid token"}).encode()

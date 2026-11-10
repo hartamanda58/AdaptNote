@@ -156,6 +156,10 @@ MN 的 P0 就是“打包成 exe”，所以把 MN 的功能搬进 AdaptNote，
   **DeepL**（官方 API，Key 存 settings；免费版以 `:fx` 结尾），以及原有 **AI 模型**。
   “自动”优先 Bing 再 Google（大陆网络下 Bing 更常可达）；中文原文且目标为中文时自动改译英文。
   DeepL 无 Key 时在输出区给出注册提示，不静默失败。
+- **DeepL 免费（内置）**：直接调 DeepL iOS 客户端的匿名 `oneshot` 接口
+  （`oneshot-free.www.deepl.com/v1/translate`），无需终端、Key 或代理；
+  1500 字符上限在客户端按句切分，超长文本自动多发几次。接口是逆向的匿名通道，
+  可能限流/失效，失败时提示改用 DeepLX 或官方 Key。
 - **DeepLX（免费 DeepL 代理）**：独立引擎，默认 `http://127.0.0.1:1188/translate`，也接受任意
   自建/公开实例 URL 和可选 Bearer Token；请求体 `{text, source_lang:auto, target_lang}`。
   解析兼容 `{code,data}`、`{translations:[...]}` 与纯文本返回。
