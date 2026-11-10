@@ -7,7 +7,7 @@
 
 ## 0. 当前状态（2026-11，MN/ReaderNote 合并后）
 
-- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867` → `40403e3` → `08b8e87`
+- 分支 `main`；合并前基线 `ea38004`，已提交 `b369160` → `19bc53e` → `79e6e23` → `91cdec8` → `58efc35` → `01c238b` → `818dcfb` → `7ccc5d1` → `edb6c40` → `1ca897c` → `1bfc57c` → `dfa3933` → `cd43fb9` → `d6a3867` → `40403e3` → `08b8e87` → `828fc77`
 - 本地 **12 套测试全绿**（新增 `vocabtest`）；Windows CI 测试列表已同步到 12 套
 - 应用：C++20 + Qt6 Widgets + MuPDF 1.21，约 1.8 万行，自用、不分发
 - 目标产品：BookxNote Pro / 阅析笔记（ReaderNote）风格的「阅读 → 标注 → 摘录 → 脑图 → 主题整理」
@@ -17,44 +17,45 @@
 
 > ReaderNote 只参考公开界面与静态分析；资料包里的破解版全程未运行、未复用。
 
-### 最近一次验收（2026-11-10，内置免费 DeepL 版）
+### 最近一次验收（2026-11-10，GUI 子系统版）
 
 ```text
-run 42760150369  Windows 构建（main @ 08b8e87）  success
+run 42804067519  Windows 构建（main @ 828fc77）  success
 12/12 套测试在 Windows runner 上全部 PASSED
-新增：oneshot 目标语言码/请求体/响应解析/长文本切分 + fake oneshot 往返
+打包检查：adaptnote.exe subsystem = 2 (Windows GUI)，不会弹终端
+包内已移除 AdaptNote.bat，保留 portable.flag
 自带 tesseract + ECDICT，zip 76.0 MB
-附带整理/阅读/翻译三张截图 + 38 秒演示 + 体验包
 ```
 
-之前全绿：42669136585（40403e3）、42652722172（d6a3867）、42644688948（cd43fb9）、
-42578862213（dfa3933）、42457738576（1bfc57c）、42447994594（1ca897c）、
-42444699623（edb6c40）、42433464805（7ccc5d1）、42393475215（818dcfb）、
-42387890013（01c238b）、42373627839（58efc35）、42353005512（900e60a）。
+之前全绿：42760150369（08b8e87）、42669136585（40403e3）、42652722172（d6a3867）、
+42644688948（cd43fb9）、42578862213（dfa3933）、42457738576（1bfc57c）、
+42447994594（1ca897c）、42444699623（edb6c40）、42433464805（7ccc5d1）、
+42393475215（818dcfb）、42387890013（01c238b）、42373627839（58efc35）、
+42353005512（900e60a）。
 inspect-win-artifact 运行验收本轮未触发；旧记录在 `ci-report` 的 `ci/windows-report.txt`。
 
 ### 最新可下载包
 
 ```text
-https://github.com/hartamanda58/AdaptNote/releases/download/deepl-free-08b8e87/AdaptNote-windows-x64-deeplfree.zip
-sha256: 8839d048e60a5c3aaccd4853bfdd011e62c23318d0113934fe9acd8700d67ff5
+https://github.com/hartamanda58/AdaptNote/releases/download/gui-828fc77/AdaptNote-windows-x64-gui.zip
+sha256: a621f427c6dfd8e4484bca5a134912259c3ab0ce06af98ccb4ebeae66e63ccf2
 ```
 
-**内置免费 DeepL 版**（压缩 76 MB / 解压 ~150 MB）：翻译引擎新增
-「DeepL 免费（内置）」，直接走 DeepL iOS 匿名 oneshot 接口，不用终端/Docker/Key；
->1500 字符自动按句切分。保留 Google/Bing/DeepL 官方/DeepLX/AI 和暖纸色界面。
+**GUI 子系统版**（压缩 76 MB / 解压 ~150 MB）：双击 `bin\adaptnote.exe` 直接进界面，
+不再弹黑色终端；OCR 也不再闪控制台；`AdaptNote.bat` 已移除。翻译仍含
+「DeepL 免费（内置）」以及 Google/Bing/DeepL 官方/DeepLX/AI。
 
 - 整理模式截图：`shots/merged-ui-main.png`
 - 阅读模式截图：`shots/merged-ui-read.png`
 - 划词翻译截图：`shots/merged-translate.png`
-- 38 秒整体演示：`releases/download/deepl-free-08b8e87/AdaptNote-demo.mp4`
+- 38 秒整体演示：`releases/download/gui-828fc77/AdaptNote-demo.mp4`
   （sha256 48f7ae6f…）
-- 10 秒卡片拖拽：`releases/download/deepl-free-08b8e87/AdaptNote-map-drag.mp4`
+- 10 秒卡片拖拽：`releases/download/gui-828fc77/AdaptNote-map-drag.mp4`
   （sha256 5405b3c2…）
-- 6 秒分组拖拽：`releases/download/deepl-free-08b8e87/AdaptNote-group-drag.mp4`
+- 6 秒分组拖拽：`releases/download/gui-828fc77/AdaptNote-group-drag.mp4`
   （sha256 89419ada…）
-- 体验包：`releases/download/deepl-free-08b8e87/AdaptNote-demo-pack-08b8e87.zip`
-  （sha256 f31ac3f6…）
+- 体验包：`releases/download/gui-828fc77/AdaptNote-demo-pack-828fc77.zip`
+  （sha256 c4620f55…）
 包内直接运行 `bin\adaptnote.exe`；`portable.flag` 让它把数据写到包根 `data\`。
 
 - `ocr\tesseract.exe`（UB-Mannheim 5.4）+ `ocr\tessdata\{eng,chi_sim}`（tessdata_fast）；
@@ -65,10 +66,9 @@ sha256: 8839d048e60a5c3aaccd4853bfdd011e62c23318d0113934fe9acd8700d67ff5
   打包时对自带引擎跑 `--list-langs` 冒烟；任一下载/校验失败则警告并退回视觉模型
 - 换全量词典：下载 ecdict-sqlite-28.zip，解压出的 stardict.db 改名为 ecdict.db 放入 `data\`
 
-上一个版本（40403e3，界面刷新）：
-`releases/download/ui-40403e3/AdaptNote-windows-x64-ui.zip`
-更早：d6a3867（DeepLX）、cd43fb9（清晰渲染 + Google/Bing/DeepL）、
-dfa3933（分组拖拽）、1bfc57c（卡片拖拽三处打通）。
+上一个版本（08b8e87，内置免费 DeepL）：
+`releases/download/deepl-free-08b8e87/AdaptNote-windows-x64-deeplfree.zip`
+更早：40403e3（界面刷新）、d6a3867（DeepLX）、cd43fb9（清晰渲染 + 翻译源）。
 更早：7ccc5d1（折叠/排序/参考记忆）、818dcfb（多选/拖拽/双文档）、
 01c238b（就地编辑）、58efc35（自带 OCR/词典）。
 更早的不带 OCR/词典版（43 MB）：
