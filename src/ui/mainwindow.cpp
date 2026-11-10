@@ -4193,12 +4193,11 @@ void MainWindow::buildAiDock()
         moreMenu_->addAction(QStringLiteral("检查更新…"), this,
                              [this]() { checkForUpdates(true); });
         moreMenu_->addAction(QStringLiteral("关于 AdaptNote"), this, [this]() {
-            QMessageBox::about(
-                this, QStringLiteral("关于 AdaptNote"),
-                QStringLiteral("<b>AdaptNote</b> %1<br>commit %2<br><br>"
-                               "阅读 · 标注 · 脑图 · 生词 · 翻译")
-                    .arg(an::update::Updater::currentVersion(),
-                         an::update::Updater::currentCommit()));
+            inform(this, QStringLiteral("关于 AdaptNote"),
+                   QStringLiteral("<b>AdaptNote</b> %1<br>commit %2<br><br>"
+                                  "阅读 · 标注 · 脑图 · 生词 · 翻译")
+                       .arg(an::update::Updater::currentVersion(),
+                            an::update::Updater::currentCommit()));
         });
     }
 
@@ -6890,10 +6889,9 @@ void MainWindow::checkForUpdates(bool userInitiated)
                 updateProgress_->deleteLater();
                 updateProgress_ = nullptr;
             }
-            QMessageBox::information(
-                this, QStringLiteral("更新已就绪"),
-                QStringLiteral("更新包已校验并下载，软件现在会重启完成替换。\n"
-                               "你的书、笔记和设置都在 data\\ 里，不会被覆盖。"));
+            inform(this, QStringLiteral("更新已就绪"),
+                   QStringLiteral("更新包已校验并下载，软件现在会重启完成替换。\n"
+                                  "你的书、笔记和设置都在 data\\ 里，不会被覆盖。"));
             QTimer::singleShot(300, qApp, &QCoreApplication::quit);
         });
     }

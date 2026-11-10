@@ -260,7 +260,7 @@ void Updater::downloadAndInstall(const ReleaseInfo& info)
     request.setRawHeader("User-Agent", "AdaptNote/" + currentVersion().toUtf8());
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setTransferTimeout(60000);
+    request.setTransferTimeout(300000);
     reply_ = net_->get(request);
     connect(reply_, &QNetworkReply::readyRead, this, &Updater::onDownloadReadyRead);
     connect(reply_, &QNetworkReply::downloadProgress, this,
